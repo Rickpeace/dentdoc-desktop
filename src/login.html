@@ -15,10 +15,107 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
       display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      overflow: hidden;
+      margin: 0;
+      padding: 0;
+    }
+
+    .titlebar {
+      height: 32px;
+      background: rgba(0, 0, 0, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      -webkit-app-region: drag;
+      margin: 0;
+    }
+
+    .titlebar-title {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+      font-weight: 500;
+    }
+
+    .titlebar-controls {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .titlebar-button {
+      width: 32px;
+      height: 24px;
+      border: none !important;
+      background: none !important;
+      color: rgba(255, 255, 255, 0.5);
+      cursor: pointer;
+      border-radius: 0 !important;
+      font-size: 14px;
+      font-weight: 400;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s ease;
+      outline: none !important;
+      box-shadow: none !important;
+      padding: 0;
+      margin: 0;
+    }
+
+    .titlebar-button:hover {
+      background: none !important;
+      color: rgba(255, 255, 255, 0.9);
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
+    .titlebar-button:active {
+      background: none !important;
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
+    .titlebar-button:focus {
+      outline: none !important;
+      box-shadow: none !important;
+      border: none !important;
+      background: none !important;
+    }
+
+    .titlebar-button:focus-visible {
+      outline: none !important;
+      box-shadow: none !important;
+      border: none !important;
+      background: none !important;
+    }
+
+    .titlebar-button.close:hover {
+      background: none !important;
+      color: #ef4444;
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
+    .titlebar-button.close:active {
+      background: none !important;
+      color: #dc2626;
+      border: none !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
+    .content {
+      flex: 1;
+      display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 100vh;
-      padding: 20px;
+      padding: 20px 20px 20px 20px;
     }
 
     .login-container {
@@ -26,7 +123,7 @@
       backdrop-filter: blur(10px);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 16px;
-      padding: 40px;
+      padding: 20px;
       width: 100%;
       max-width: 380px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -151,7 +248,16 @@
   </style>
 </head>
 <body>
-  <div class="login-container">
+  <div class="titlebar">
+    <div class="titlebar-title">DentDoc Login</div>
+    <div class="titlebar-controls">
+      <button class="titlebar-button" id="minimizeBtn">─</button>
+      <button class="titlebar-button close" id="closeBtn">✕</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="login-container">
     <div class="logo">
       <h1>DentDoc</h1>
       <p>Desktop App</p>
@@ -188,12 +294,22 @@
     </form>
 
     <div class="info">
-      <p>Nach der Anmeldung können Sie die App mit <strong>F9</strong> bedienen</p>
+      <p></p>
+    </div>
     </div>
   </div>
 
   <script>
     const { ipcRenderer } = require('electron');
+
+    // Window controls
+    document.getElementById('minimizeBtn').addEventListener('click', () => {
+      ipcRenderer.send('minimize-window');
+    });
+
+    document.getElementById('closeBtn').addEventListener('click', () => {
+      ipcRenderer.send('close-window');
+    });
 
     const form = document.getElementById('loginForm');
     const errorDiv = document.getElementById('error');

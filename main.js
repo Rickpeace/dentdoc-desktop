@@ -1,12 +1,40 @@
 require('dotenv').config();
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, dialog, shell } = require('electron');
-const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const Store = require('electron-store');
 const audioRecorder = require('./src/audioRecorder');
 const apiClient = require('./src/apiClient');
-const speakerRecognition = require('./src/speaker-recognition');
+
+// Early debug logging
+const DEBUG_LOG = path.join(os.tmpdir(), 'dentdoc-main-debug.log');
+function debugLog(message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}\n`;
+  try {
+    fs.appendFileSync(DEBUG_LOG, logMessage);
+  } catch (e) {
+    console.error('Failed to write debug log:', e);
+  }
+}
+
+debugLog('=== DentDoc Starting ===');
+debugLog(`App path: ${app.getAppPath()}`);
+debugLog(`Is packaged: ${app.isPackaged}`);
+debugLog(`Temp dir: ${os.tmpdir()}`);
+debugLog(`Debug log path: ${DEBUG_LOG}`);
+
+let speakerRecognition;
+try {
+  debugLog('Loading speaker-recognition module...');
+  speakerRecognition = require('./src/speaker-recognition');
+  debugLog('Speaker-recognition module loaded successfully');
+} catch (error) {
+  debugLog(`ERROR loading speaker-recognition module: ${error.message}`);
+  debugLog(`Stack: ${error.stack}`);
+  throw error;
+}
 
 const store = new Store();
 let tray = null;
@@ -195,10 +223,13 @@ function createLoginWindow() {
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     resizable: false,
-    title: 'DentDoc Login'
+    title: 'DentDoc Login',
+    frame: false,
+    backgroundColor: '#1e1e1e'
   });
 
   loginWindow.loadFile('src/login.html');
+  loginWindow.setMenu(null);
 
   loginWindow.on('closed', () => {
     loginWindow = null;
@@ -317,7 +348,9 @@ function updateTrayMenu() {
       }
     },
     { type: 'separator' },
-    { label: 'Beenden', click: () => app.quit() }
+    { label: 'Beenden', click: () => app.quit() },
+    { type: 'separator' },
+    { label: `v${app.getVersion()}`, enabled: false }
   ]);
 
   tray.setContextMenu(contextMenu);
@@ -430,6 +463,10 @@ async function stopRecording() {
 
     // Identify speakers if we have utterances
     if (transcription.utterances) {
+      debugLog('=== Starting speaker identification ===');
+      debugLog(`Has utterances: true`);
+      debugLog(`Current recording path: ${currentRecordingPath}`);
+
       updateStatusOverlay('Sprecher werden erkannt...', 'Stimmen werden analysiert...', 'processing', { step: 3 });
 
       try {
@@ -438,6 +475,9 @@ async function stopRecording() {
           ? JSON.parse(transcription.utterances)
           : transcription.utterances;
 
+        debugLog(`Utterances count: ${utterances.length}`);
+        debugLog(`Calling speakerRecognition.identifySpeakersFromUtterances...`);
+
         // Use local audio file for speaker identification
         const speakerMapping = await speakerRecognition.identifySpeakersFromUtterances(
           currentRecordingPath,
@@ -445,14 +485,20 @@ async function stopRecording() {
         );
 
         console.log('Speaker mapping:', speakerMapping);
+        debugLog(`Speaker mapping result: ${JSON.stringify(speakerMapping)}`);
 
         // Update backend with speaker mapping
         await apiClient.updateSpeakerMapping(transcriptionId, speakerMapping, token);
         console.log('Speaker mapping updated in backend');
+        debugLog('Speaker mapping updated in backend successfully');
       } catch (error) {
         console.error('Speaker identification failed:', error);
+        debugLog(`ERROR in speaker identification: ${error.message}`);
+        debugLog(`Stack: ${error.stack}`);
         // Continue anyway - speaker identification is optional
       }
+    } else {
+      debugLog('No utterances available for speaker identification');
     }
 
     updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
@@ -469,9 +515,10 @@ async function stopRecording() {
     // Copy to clipboard
     clipboard.writeText(documentation);
 
-    // Auto-save transcript if path is configured
+    // Auto-save transcript if enabled and path is configured
+    const autoExport = store.get('autoExport', false);
     const transcriptPath = store.get('transcriptPath');
-    if (transcriptPath && transcript) {
+    if (autoExport && transcriptPath && transcript) {
       try {
         saveTranscriptToFile(transcriptPath, documentation, transcript);
       } catch (error) {
@@ -621,6 +668,30 @@ ipcMain.on('close-status-overlay', () => {
   hideStatusOverlay();
 });
 
+// IPC handler for cancelling recording (X button during recording)
+ipcMain.on('cancel-recording', async () => {
+  if (isRecording) {
+    try {
+      // Stop the audio recorder without processing
+      await audioRecorder.stopRecording();
+    } catch (error) {
+      console.log('Error stopping recorder:', error);
+    }
+
+    isRecording = false;
+    isProcessing = false;
+    currentRecordingPath = null;
+
+    // Reset tray icon
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit');
+    updateTrayMenu();
+
+    console.log('Recording cancelled by user');
+  }
+});
+
 // IPC handlers for status overlay
 ipcMain.handle('get-auto-close-setting', () => {
   return store.get('autoCloseOverlay', false);
@@ -634,6 +705,17 @@ ipcMain.handle('set-auto-close-setting', (event, value) => {
 ipcMain.handle('copy-to-clipboard', (event, text) => {
   clipboard.writeText(text);
   return true;
+});
+
+// Window control handlers
+ipcMain.on('minimize-window', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) window.minimize();
+});
+
+ipcMain.on('close-window', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) window.close();
 });
 
 // IPC Handlers for login window
@@ -662,7 +744,8 @@ ipcMain.handle('get-settings', async () => {
     microphoneId: store.get('microphoneId') || null,
     transcriptPath: store.get('transcriptPath') || '',
     profilesPath: store.get('profilesPath') || '',
-    autoClose: store.get('autoCloseOverlay', false)
+    autoClose: store.get('autoCloseOverlay', false),
+    autoExport: store.get('autoExport', false)
   };
 });
 
@@ -690,6 +773,11 @@ ipcMain.handle('save-settings', async (event, settings) => {
     store.set('autoCloseOverlay', settings.autoClose);
   }
 
+  // Save auto-export setting
+  if (settings.autoExport !== undefined) {
+    store.set('autoExport', settings.autoExport);
+  }
+
   // Register new shortcut
   if (settings.shortcut) {
     const success = registerShortcut(settings.shortcut);
@@ -699,6 +787,36 @@ ipcMain.handle('save-settings', async (event, settings) => {
   }
 
   showNotification('Einstellungen gespeichert', `Tastenkombination: ${settings.shortcut}`);
+  return { success: true };
+});
+
+// Debug log handlers
+ipcMain.handle('open-debug-log', async () => {
+  const logPath = DEBUG_LOG;
+
+  // Ensure log file exists
+  if (!fs.existsSync(logPath)) {
+    fs.writeFileSync(logPath, '');
+  }
+
+  // Open log file in default text editor
+  await shell.openPath(logPath);
+  return { success: true };
+});
+
+ipcMain.handle('get-debug-log-path', async () => {
+  return DEBUG_LOG;
+});
+
+ipcMain.handle('open-temp-folder', async () => {
+  const tempDir = path.join(app.getPath('temp'), 'dentdoc');
+
+  // Create folder if it doesn't exist
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  await shell.openPath(tempDir);
   return { success: true };
 });
 
@@ -776,9 +894,19 @@ ipcMain.handle('stop-voice-enrollment', async () => {
   }
 });
 
+// Forward audio level updates from recorder to status overlay
+ipcMain.on('audio-level-update', (event, level) => {
+  if (statusOverlay && !statusOverlay.isDestroyed()) {
+    statusOverlay.webContents.send('audio-level', level);
+  }
+});
+
 // ============================================
 // Auto-Update Event Handlers
 // ============================================
+
+// Load autoUpdater after app is ready
+const { autoUpdater } = require('electron-updater');
 
 autoUpdater.on('update-available', (info) => {
   console.log('Update available:', info.version);

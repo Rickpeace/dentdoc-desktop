@@ -44,11 +44,17 @@
 
     .icon.recording {
       background: #ef4444;
-      animation: pulse 1s ease-in-out infinite;
+      transition: transform 0.1s ease-out;
     }
 
     .icon.processing {
       background: #f97316;
+      animation: processingPulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes processingPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.08); opacity: 0.85; }
     }
 
     .icon.success {
@@ -57,11 +63,6 @@
 
     .icon.error {
       background: #ef4444;
-    }
-
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.1); opacity: 0.8; }
     }
 
     .content {
@@ -78,6 +79,12 @@
     .message {
       color: rgba(255, 255, 255, 0.7);
       font-size: 13px;
+    }
+
+    .timer {
+      color: rgba(255, 255, 255, 0.4);
+      font-variant-numeric: tabular-nums;
+      margin-left: 6px;
     }
 
     .close-btn {
@@ -297,7 +304,7 @@
       </div>
       <div class="content">
         <div id="title" class="title">Aufnahme läuft...</div>
-        <div id="message" class="message">Drücken Sie F9 zum Stoppen</div>
+        <div id="message" class="message">Drücken Sie F9 zum Stoppen <span id="timer" class="timer"></span></div>
       </div>
       <button id="closeBtn" class="close-btn">✕</button>
     </div>
@@ -366,6 +373,36 @@
 
     let currentDocumentation = null;
     let currentTranscript = null;
+    let currentState = null;
+    let timerInterval = null;
+    let recordingStartTime = null;
+
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function startTimer() {
+      stopTimer(); // Clear any existing timer
+      recordingStartTime = Date.now();
+      const timerEl = document.getElementById('timer');
+      if (timerEl) timerEl.textContent = '0:00';
+      timerInterval = setInterval(() => {
+        const timerEl = document.getElementById('timer');
+        if (timerEl) {
+          const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+          timerEl.textContent = formatTime(elapsed);
+        }
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+    }
 
     function resetSteps() {
       step1.className = 'progress-step';
@@ -394,23 +431,39 @@
       }
     }
 
+    function updateAudioLevel(level) {
+      // level should be between 0 and 1
+      const normalizedLevel = Math.max(0, Math.min(1, level));
+
+      // Scale the icon based on audio level (1.0 to 1.5 scale)
+      // Boost the input significantly to make effect more visible
+      const boostedLevel = Math.min(1, normalizedLevel * 4);
+      const scale = 1 + (boostedLevel * 0.5);
+      icon.style.transform = `scale(${scale})`;
+    }
+
     ipcRenderer.on('update-status', (event, data) => {
       title.textContent = data.title;
-      message.textContent = data.message;
+      currentState = data.type;
 
-      // Reset icon classes
+      // Reset icon classes and scale
       icon.className = 'icon ' + data.type;
+      icon.style.transform = 'scale(1)';
 
       // Set emoji and progress based on type
       switch (data.type) {
         case 'recording':
           iconEmoji.textContent = '🔴';
+          message.innerHTML = data.message + ' <span id="timer" class="timer"></span>';
+          startTimer();
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
           resetSteps();
           break;
         case 'processing':
-          iconEmoji.textContent = '⏳';
+          stopTimer();
+          iconEmoji.textContent = '';
+          message.textContent = data.message;
           progressContainer.classList.add('visible');
           actions.classList.remove('visible');
           // Set progress based on step (4 steps total)
@@ -425,8 +478,10 @@
           }
           break;
         case 'success':
+          stopTimer();
           iconEmoji.textContent = '✅';
-          progressContainer.classList.remove('visible'); // Verstecke Fortschrittsleiste bei Erfolg
+          message.textContent = data.message;
+          progressContainer.classList.remove('visible');
           if (data.documentation) {
             currentDocumentation = data.documentation;
             currentTranscript = data.transcript;
@@ -436,7 +491,9 @@
           }
           break;
         case 'error':
+          stopTimer();
           iconEmoji.textContent = '❌';
+          message.textContent = data.message;
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
           break;
@@ -444,6 +501,10 @@
     });
 
     closeBtn.addEventListener('click', () => {
+      if (currentState === 'recording') {
+        // Cancel recording - don't process
+        ipcRenderer.send('cancel-recording');
+      }
       ipcRenderer.send('close-status-overlay');
     });
 
@@ -471,6 +532,11 @@
         btn.classList.remove('copied');
       }, 2000);
     }
+
+    // Listen for audio level updates
+    ipcRenderer.on('audio-level', (event, level) => {
+      updateAudioLevel(level);
+    });
   </script>
 </body>
 </html>

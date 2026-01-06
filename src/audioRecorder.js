@@ -28,6 +28,22 @@ function createRecorderWindow() {
   return recorderWindow;
 }
 
+function cleanupOldRecordings(tempDir) {
+  try {
+    const files = fs.readdirSync(tempDir);
+    for (const file of files) {
+      // Clean up both .webm recordings and converted _16k.wav files
+      if (file.startsWith('recording-') && (file.endsWith('.webm') || file.endsWith('.wav'))) {
+        const filePath = path.join(tempDir, file);
+        fs.unlinkSync(filePath);
+        console.log('Cleaned up old recording:', filePath);
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning up old recordings:', error);
+  }
+}
+
 function startRecording() {
   return new Promise((resolve, reject) => {
     try {
@@ -36,6 +52,9 @@ function startRecording() {
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
+
+      // Clean up any previous recordings - keep only the new one
+      cleanupOldRecordings(tempDir);
 
       // Generate unique filename
       const timestamp = Date.now();

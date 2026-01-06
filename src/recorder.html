@@ -9,6 +9,9 @@
 
     let mediaRecorder = null;
     let audioChunks = [];
+    let audioContext = null;
+    let analyser = null;
+    let animationId = null;
 
     ipcRenderer.on('start-recording', async () => {
       try {
@@ -22,6 +25,16 @@
             noiseSuppression: true
           }
         });
+
+        // Set up audio analysis
+        audioContext = new AudioContext();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        // Start monitoring audio levels
+        monitorAudioLevel();
 
         mediaRecorder = new MediaRecorder(stream, {
           mimeType: 'audio/webm;codecs=opus'
@@ -40,6 +53,16 @@
 
           // Stop all tracks
           stream.getTracks().forEach(track => track.stop());
+
+          // Stop audio analysis
+          if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+          }
+          if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+          }
         };
 
         mediaRecorder.start(1000); // Collect data every second
@@ -49,6 +72,32 @@
         ipcRenderer.send('recording-error', error.message);
       }
     });
+
+    function monitorAudioLevel() {
+      if (!analyser) return;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const checkLevel = () => {
+        analyser.getByteFrequencyData(dataArray);
+
+        // Calculate average volume
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+        const normalized = average / 255; // Normalize to 0-1
+
+        // Send to main process
+        ipcRenderer.send('audio-level-update', normalized);
+
+        animationId = requestAnimationFrame(checkLevel);
+      };
+
+      checkLevel();
+    }
 
     ipcRenderer.on('stop-recording', () => {
       if (mediaRecorder && mediaRecorder.state !== 'inactive') {

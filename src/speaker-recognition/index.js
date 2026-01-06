@@ -1,8 +1,36 @@
-const sherpa = require('sherpa-onnx-node');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+
+const LOG_PATH = path.join(os.tmpdir(), 'dentdoc-debug.log');
+
+// Log module loading
+fs.appendFileSync(LOG_PATH, `\n\n[${new Date().toISOString()}] ============= SPEAKER RECOGNITION MODULE LOADING =============\n`);
+
+let sherpa;
+try {
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Loading sherpa-onnx-node...\n`);
+  sherpa = require('sherpa-onnx-node');
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] sherpa-onnx-node loaded successfully\n`);
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Available sherpa exports: ${Object.keys(sherpa).join(', ')}\n`);
+} catch (error) {
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ERROR loading sherpa-onnx-node: ${error.message}\n`);
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Stack: ${error.stack}\n`);
+  throw error;
+}
+
 const { app } = require('electron');
-const voiceProfiles = require('./voice-profiles');
+
+let voiceProfiles;
+try {
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Loading voice-profiles...\n`);
+  voiceProfiles = require('./voice-profiles');
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] voice-profiles loaded successfully\n`);
+} catch (error) {
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ERROR loading voice-profiles: ${error.message}\n`);
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Stack: ${error.stack}\n`);
+  throw error;
+}
 
 let recognizer = null;
 let modelPath = null;
@@ -17,14 +45,24 @@ async function initialize() {
   }
 
   // Use bundled model from app directory
+  // In production (asar packed), models are in app.asar.unpacked
   const appPath = app.getAppPath();
-  modelPath = path.join(appPath, 'models', '3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx');
+  const unpackedPath = appPath.replace('app.asar', 'app.asar.unpacked');
 
-  if (!fs.existsSync(modelPath)) {
-    throw new Error(`Model not found at: ${modelPath}`);
+  // Try unpacked path first (production), then regular path (development)
+  const possiblePaths = [
+    path.join(unpackedPath, 'models', '3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx'),
+    path.join(appPath, 'models', '3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx')
+  ];
+
+  modelPath = possiblePaths.find(p => fs.existsSync(p));
+
+  if (!modelPath) {
+    throw new Error(`Model not found. Tried:\n${possiblePaths.join('\n')}`);
   }
 
   console.log('Initializing Sherpa-ONNX with model:', modelPath);
+  fs.appendFileSync(LOG_PATH, `\n[${new Date().toISOString()}] Initializing Sherpa-ONNX with model: ${modelPath}\n`);
 
   // Create recognizer config
   const config = {
@@ -48,9 +86,11 @@ async function initialize() {
     }
 
     console.log('Sherpa-ONNX speaker recognition initialized');
+    fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Sherpa-ONNX initialized successfully\n`);
     return recognizer;
   } catch (error) {
     console.error('Failed to initialize Sherpa-ONNX:', error);
+    fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ERROR initializing Sherpa: ${error.message}\n${error.stack}\n`);
     throw new Error('Spracherkennung konnte nicht initialisiert werden: ' + error.message);
   }
 }
@@ -196,6 +236,9 @@ async function identifySpeaker(audioFilePath, startMs, durationMs = 30000, thres
 
   for (const profile of profiles) {
     const similarity = cosineSimilarity(embedding, profile.embedding);
+    const logMsg = `[Speaker Recognition] Comparing with "${profile.name}" (${profile.role}): similarity = ${(similarity * 100).toFixed(2)}%`;
+    console.log(logMsg);
+    fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${logMsg}\n`);
 
     if (similarity > bestScore) {
       bestScore = similarity;
@@ -203,14 +246,24 @@ async function identifySpeaker(audioFilePath, startMs, durationMs = 30000, thres
     }
   }
 
+  const bestLog = `[Speaker Recognition] Best match: "${bestMatch?.name}" with ${(bestScore * 100).toFixed(2)}% similarity (threshold: ${(threshold * 100)}%)`;
+  console.log(bestLog);
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${bestLog}\n`);
+
   // Return match if above threshold
   if (bestScore >= threshold) {
+    const matchLog = `[Speaker Recognition] ✓ Match found: ${bestMatch.name}`;
+    console.log(matchLog);
+    fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${matchLog}\n`);
     return {
       profile: bestMatch,
       similarity: bestScore
     };
   }
 
+  const noMatchLog = '[Speaker Recognition] ✗ No match above threshold';
+  console.log(noMatchLog);
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${noMatchLog}\n`);
   return null; // No confident match
 }
 

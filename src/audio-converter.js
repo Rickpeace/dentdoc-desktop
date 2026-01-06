@@ -1,7 +1,27 @@
 const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
 const path = require('path');
 const fs = require('fs');
+const { app } = require('electron');
+
+// Get ffmpeg path - handle both dev and production (unpacked from asar)
+let ffmpegPath;
+try {
+  // In production, ffmpeg-static needs to be in unpacked location
+  const ffmpegStaticPath = require('ffmpeg-static');
+
+  // If we're in an ASAR archive, replace path with unpacked version
+  if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
+    ffmpegPath = ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
+  } else {
+    ffmpegPath = ffmpegStaticPath;
+  }
+
+  console.log('FFmpeg path:', ffmpegPath);
+  console.log('FFmpeg exists:', fs.existsSync(ffmpegPath));
+} catch (error) {
+  console.error('Error loading ffmpeg-static:', error);
+  throw error;
+}
 
 // Set ffmpeg path
 ffmpeg.setFfmpegPath(ffmpegPath);
