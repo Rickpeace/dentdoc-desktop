@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stimmprofile - DentDoc</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      color: #f97316;
+      margin-bottom: 8px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+
+    .header p {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .content {
+      padding: 0;
+    }
+
+    .section {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 16px;
+      transition: all 0.2s;
+    }
+
+    .section:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(249, 115, 22, 0.3);
+    }
+
+    .section h2 {
+      font-size: 16px;
+      margin-bottom: 16px;
+      color: rgba(255, 255, 255, 0.95);
+      font-weight: 600;
+    }
+
+    .profile-list {
+      list-style: none;
+    }
+
+    .profile-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      transition: all 0.2s;
+    }
+
+    .profile-item:hover {
+      background: rgba(0, 0, 0, 0.3);
+      border-color: rgba(249, 115, 22, 0.3);
+    }
+
+    .profile-name {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.95);
+      font-weight: 500;
+    }
+
+    .profile-date {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 4px;
+    }
+
+    .btn-delete {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .btn-delete:hover {
+      background: #dc2626;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+    }
+
+    .enroll-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-group label {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.7);
+      font-weight: 500;
+    }
+
+    .form-group input,
+    .form-group select {
+      padding: 12px 14px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.9);
+      transition: all 0.2s;
+      width: 100%;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #f97316;
+      background: rgba(0, 0, 0, 0.4);
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+    }
+
+    .form-group select option {
+      background: #2d2d2d;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .btn-enroll {
+      background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+      color: white;
+      border: none;
+      padding: 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+      transition: all 0.2s;
+    }
+
+    .btn-enroll:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(249, 115, 22, 0.4);
+    }
+
+    .btn-enroll:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .status {
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      text-align: center;
+      border: 1px solid;
+    }
+
+    .status.recording {
+      background: rgba(249, 115, 22, 0.15);
+      color: #f97316;
+      border-color: rgba(249, 115, 22, 0.3);
+    }
+
+    .status.processing {
+      background: rgba(59, 130, 246, 0.15);
+      color: #3b82f6;
+      border-color: rgba(59, 130, 246, 0.3);
+    }
+
+    .status.success {
+      background: rgba(34, 197, 94, 0.15);
+      color: #22c55e;
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+
+    .status.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 14px;
+    }
+
+    .info-box {
+      background: rgba(249, 115, 22, 0.1);
+      border-left: 4px solid #f97316;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎤 Stimmprofile</h1>
+      <p>Erstellen und verwalten Sie Stimmprofile für die automatische Sprechererkennung</p>
+    </div>
+
+    <div class="content">
+      <div class="section">
+        <h2>Gespeicherte Profile</h2>
+        <ul class="profile-list" id="profileList">
+          <li class="empty-state">Keine Stimmprofile vorhanden</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h2>Neues Profil erstellen</h2>
+        <div class="info-box">
+          💡 Sprechen Sie für 30 Sekunden, damit das System Ihre Stimme lernen kann. Sprechen Sie natürlich, wie in einem normalen Gespräch.
+        </div>
+        <form class="enroll-form" id="enrollForm">
+          <div class="form-group">
+            <label for="speakerRole">Rolle</label>
+            <select id="speakerRole" required>
+              <option value="Arzt">Arzt</option>
+              <option value="ZFA">ZFA</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="speakerName">Name des Sprechers</label>
+            <input type="text" id="speakerName" placeholder="z.B. Dr. Notle" required>
+          </div>
+          <div id="statusMessage"></div>
+          <button type="submit" class="btn-enroll" id="enrollBtn">
+            <span id="btnText">Aufnahme starten (30 Sekunden)</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let isRecording = false;
+    let recordingTimer = null;
+
+    // Load profiles on startup
+    loadProfiles();
+
+    async function loadProfiles() {
+      const profiles = await ipcRenderer.invoke('get-voice-profiles');
+      const profileList = document.getElementById('profileList');
+
+      if (profiles.length === 0) {
+        profileList.innerHTML = '<li class="empty-state">Keine Stimmprofile vorhanden</li>';
+        return;
+      }
+
+      profileList.innerHTML = profiles.map(profile => `
+        <li class="profile-item">
+          <div>
+            <div class="profile-name">${profile.role || 'Arzt'} - ${profile.name}</div>
+            <div class="profile-date">Erstellt: ${new Date(profile.createdAt).toLocaleDateString('de-DE')}</div>
+          </div>
+          <button class="btn-delete" onclick="deleteProfile('${profile.id}')">Löschen</button>
+        </li>
+      `).join('');
+    }
+
+    async function deleteProfile(id) {
+      if (!confirm('Möchten Sie dieses Stimmprofil wirklich löschen?')) {
+        return;
+      }
+
+      try {
+        await ipcRenderer.invoke('delete-voice-profile', id);
+        showStatus('Profil erfolgreich gelöscht', 'success');
+        loadProfiles();
+
+        // Re-enable form after deletion
+        document.getElementById('speakerName').disabled = false;
+        document.getElementById('enrollBtn').disabled = false;
+
+        setTimeout(() => {
+          document.getElementById('statusMessage').innerHTML = '';
+        }, 3000);
+      } catch (error) {
+        showStatus('Fehler beim Löschen: ' + error.message, 'error');
+      }
+    }
+
+    document.getElementById('enrollForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      if (isRecording) {
+        await stopEnrollment();
+      } else {
+        await startEnrollment();
+      }
+    });
+
+    async function startEnrollment() {
+      const name = document.getElementById('speakerName').value.trim();
+      const role = document.getElementById('speakerRole').value;
+
+      if (!name) {
+        showStatus('Bitte geben Sie einen Namen ein', 'error');
+        return;
+      }
+
+      try {
+        isRecording = true;
+        updateButton('Aufnahme läuft... (0s / 30s)', true);
+        showStatus('🔴 Sprechen Sie jetzt für 30 Sekunden...', 'recording');
+
+        // Start recording with role
+        await ipcRenderer.invoke('start-voice-enrollment', { name, role });
+
+        // Update countdown
+        let seconds = 0;
+        recordingTimer = setInterval(() => {
+          seconds++;
+          updateButton(`Aufnahme läuft... (${seconds}s / 30s)`, true);
+
+          if (seconds >= 30) {
+            clearInterval(recordingTimer);
+            stopEnrollment();
+          }
+        }, 1000);
+
+      } catch (error) {
+        showStatus('Fehler beim Starten: ' + error.message, 'error');
+        isRecording = false;
+        updateButton('Aufnahme starten (30 Sekunden)', false);
+      }
+    }
+
+    async function stopEnrollment() {
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+      }
+
+      try {
+        updateButton('Verarbeite Aufnahme...', true);
+        showStatus('⏳ Stimmprofil wird erstellt...', 'processing');
+
+        await ipcRenderer.invoke('stop-voice-enrollment');
+
+        showStatus('✅ Stimmprofil erfolgreich erstellt!', 'success');
+        document.getElementById('speakerName').value = '';
+        document.getElementById('speakerRole').value = 'Arzt';
+        loadProfiles();
+
+        setTimeout(() => {
+          document.getElementById('statusMessage').innerHTML = '';
+        }, 3000);
+
+      } catch (error) {
+        showStatus('Fehler: ' + error.message, 'error');
+      } finally {
+        isRecording = false;
+        updateButton('Aufnahme starten (30 Sekunden)', false);
+      }
+    }
+
+    function updateButton(text, disabled) {
+      document.getElementById('btnText').textContent = text;
+      document.getElementById('enrollBtn').disabled = disabled;
+    }
+
+    function showStatus(message, type) {
+      const statusDiv = document.getElementById('statusMessage');
+      statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+    }
+
+    // Listen for enrollment completion from main process
+    ipcRenderer.on('enrollment-complete', (event, success, message) => {
+      if (success) {
+        showStatus('✅ ' + message, 'success');
+        loadProfiles();
+      } else {
+        showStatus('❌ ' + message, 'error');
+      }
+      isRecording = false;
+      updateButton('Aufnahme starten (30 Sekunden)', false);
+    });
+  </script>
+</body>
+</html>

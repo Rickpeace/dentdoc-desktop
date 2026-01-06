@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DentDoc Einstellungen</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: #f97316;
+      font-size: 32px;
+      margin-bottom: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .section {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 20px;
+      transition: all 0.2s;
+    }
+
+    .section:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(249, 115, 22, 0.3);
+    }
+
+    .section h2 {
+      color: rgba(255, 255, 255, 0.95);
+      font-size: 18px;
+      margin-bottom: 20px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 10px;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      padding: 13px 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      color: rgba(255, 255, 255, 0.9);
+      transition: all 0.2s;
+    }
+
+    select:focus, input[type="text"]:focus {
+      outline: none;
+      border-color: #f97316;
+      background: rgba(0, 0, 0, 0.4);
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+    }
+
+    button {
+      padding: 13px 26px;
+      border: none;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+      color: white;
+      box-shadow: 0 4px 14px rgba(249, 115, 22, 0.35);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(249, 115, 22, 0.45);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.13);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .btn-success {
+      background: #22c55e;
+      color: white;
+    }
+
+    .btn-danger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .mic-test {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 4px;
+    }
+
+    .mic-level {
+      flex: 1;
+      height: 28px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .mic-level-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #22c55e, #f97316, #ef4444);
+      width: 0%;
+      transition: width 0.1s;
+      box-shadow: 0 0 12px rgba(249, 115, 22, 0.5);
+    }
+
+    .status {
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      border: 1px solid;
+    }
+
+    .status.success {
+      background: rgba(34, 197, 94, 0.15);
+      color: #22c55e;
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+
+    .status.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .status.info {
+      background: rgba(249, 115, 22, 0.15);
+      color: #f97316;
+      border-color: rgba(249, 115, 22, 0.3);
+    }
+
+    .shortcut-input {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .shortcut-display {
+      flex: 1;
+      padding: 15px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      font-family: 'SF Mono', 'Consolas', monospace;
+      font-size: 15px;
+      text-align: center;
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 600;
+      letter-spacing: 1.5px;
+    }
+
+    .shortcut-display.recording {
+      border-color: #f97316;
+      background: rgba(249, 115, 22, 0.15);
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      margin-top: 32px;
+      padding-top: 8px;
+    }
+
+    .current-shortcut {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: -8px;
+      margin-bottom: 16px;
+    }
+
+    .helper-text {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: -8px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Einstellungen</h1>
+
+    <!-- Microphone Section -->
+    <div class="section">
+      <h2>Mikrofon</h2>
+
+      <label for="micSelect">Mikrofon auswählen:</label>
+      <select id="micSelect">
+        <option value="">Lade Mikrofone...</option>
+      </select>
+
+      <div class="mic-test">
+        <button id="testMicBtn" class="btn-secondary">Test starten</button>
+        <div class="mic-level">
+          <div id="micLevelBar" class="mic-level-bar"></div>
+        </div>
+      </div>
+
+      <div id="micStatus" class="status info" style="display: none;"></div>
+    </div>
+
+    <!-- Shortcut Section -->
+    <div class="section">
+      <h2>Tastenkombination</h2>
+
+      <label>Aufnahme starten/stoppen:</label>
+      <p class="current-shortcut">Aktuelle Tastenkombination: <strong id="currentShortcut">F9</strong></p>
+
+      <div class="shortcut-input">
+        <div id="shortcutDisplay" class="shortcut-display">F9</div>
+        <button id="recordShortcutBtn" class="btn-secondary">Ändern</button>
+      </div>
+
+      <div id="shortcutStatus" class="status info" style="display: none;"></div>
+    </div>
+
+    <!-- Transcript Export Section -->
+    <div class="section">
+      <h2>Transkript-Export</h2>
+
+      <label for="transcriptPath">Speicherort für Transkripte:</label>
+      <div class="shortcut-input">
+        <input type="text" id="transcriptPath" readonly placeholder="Noch nicht festgelegt">
+        <button id="browseTranscriptBtn" class="btn-secondary">Durchsuchen</button>
+      </div>
+      <p class="helper-text">Transkripte werden automatisch als TXT-Dateien gespeichert (Datum_Uhrzeit.txt)</p>
+    </div>
+
+    <!-- Voice Profiles Section -->
+    <div class="section">
+      <h2>Stimmprofile</h2>
+
+      <label for="profilesPath">Speicherort für Stimmprofile:</label>
+      <div class="shortcut-input">
+        <input type="text" id="profilesPath" readonly placeholder="Standard (lokal)">
+        <button id="browseProfilesBtn" class="btn-secondary">Durchsuchen</button>
+      </div>
+      <p class="helper-text">⚠️ Für mehrere PCs: Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\profiles)</p>
+    </div>
+
+    <!-- Behavior Section -->
+    <div class="section">
+      <h2>Verhalten</h2>
+
+      <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+        <input type="checkbox" id="autoCloseCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
+        <span>Status-Fenster automatisch schließen nach erfolgreicher Transkription</span>
+      </label>
+    </div>
+
+    <!-- Buttons -->
+    <div class="buttons">
+      <button id="cancelBtn" class="btn-secondary">Abbrechen</button>
+      <button id="saveBtn" class="btn-primary">Speichern</button>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let selectedMicId = null;
+    let newShortcut = null;
+    let isRecordingShortcut = false;
+    let isTesting = false;
+    let audioContext = null;
+    let mediaStream = null;
+    let analyser = null;
+
+    // Elements
+    const micSelect = document.getElementById('micSelect');
+    const testMicBtn = document.getElementById('testMicBtn');
+    const micLevelBar = document.getElementById('micLevelBar');
+    const micStatus = document.getElementById('micStatus');
+    const shortcutDisplay = document.getElementById('shortcutDisplay');
+    const currentShortcut = document.getElementById('currentShortcut');
+    const recordShortcutBtn = document.getElementById('recordShortcutBtn');
+    const shortcutStatus = document.getElementById('shortcutStatus');
+    const transcriptPath = document.getElementById('transcriptPath');
+    const browseTranscriptBtn = document.getElementById('browseTranscriptBtn');
+    const profilesPath = document.getElementById('profilesPath');
+    const browseProfilesBtn = document.getElementById('browseProfilesBtn');
+    const autoCloseCheckbox = document.getElementById('autoCloseCheckbox');
+    const saveBtn = document.getElementById('saveBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+
+    // Load current settings
+    async function loadSettings() {
+      const settings = await ipcRenderer.invoke('get-settings');
+
+      currentShortcut.textContent = settings.shortcut || 'F9';
+      shortcutDisplay.textContent = settings.shortcut || 'F9';
+      selectedMicId = settings.microphoneId || null;
+      transcriptPath.value = settings.transcriptPath || '';
+      profilesPath.value = settings.profilesPath || '';
+      autoCloseCheckbox.checked = settings.autoClose || false;
+
+      // Load microphones
+      await loadMicrophones();
+    }
+
+    // Load available microphones
+    async function loadMicrophones() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+
+        micSelect.innerHTML = '';
+
+        if (mics.length === 0) {
+          micSelect.innerHTML = '<option value="">Kein Mikrofon gefunden</option>';
+          return;
+        }
+
+        mics.forEach((mic, index) => {
+          const option = document.createElement('option');
+          option.value = mic.deviceId;
+          option.textContent = mic.label || `Mikrofon ${index + 1}`;
+          if (mic.deviceId === selectedMicId) {
+            option.selected = true;
+          }
+          micSelect.appendChild(option);
+        });
+
+        // Select first if none selected
+        if (!selectedMicId && mics.length > 0) {
+          selectedMicId = mics[0].deviceId;
+        }
+      } catch (error) {
+        console.error('Error loading microphones:', error);
+        micSelect.innerHTML = '<option value="">Fehler beim Laden</option>';
+      }
+    }
+
+    // Test microphone
+    testMicBtn.addEventListener('click', async () => {
+      if (isTesting) {
+        stopMicTest();
+        return;
+      }
+
+      try {
+        isTesting = true;
+        testMicBtn.textContent = 'Test stoppen';
+        testMicBtn.classList.remove('btn-secondary');
+        testMicBtn.classList.add('btn-danger');
+
+        const constraints = {
+          audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : true
+        };
+
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        showStatus(micStatus, 'Sprechen Sie ins Mikrofon...', 'info');
+
+        // Visualize audio level
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        function updateLevel() {
+          if (!isTesting) return;
+
+          analyser.getByteFrequencyData(dataArray);
+          const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          const level = Math.min(100, (average / 128) * 100);
+          micLevelBar.style.width = level + '%';
+
+          requestAnimationFrame(updateLevel);
+        }
+
+        updateLevel();
+      } catch (error) {
+        console.error('Mic test error:', error);
+        showStatus(micStatus, 'Fehler: ' + error.message, 'error');
+        stopMicTest();
+      }
+    });
+
+    function stopMicTest() {
+      isTesting = false;
+      testMicBtn.textContent = 'Test starten';
+      testMicBtn.classList.remove('btn-danger');
+      testMicBtn.classList.add('btn-secondary');
+      micLevelBar.style.width = '0%';
+
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+      }
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+      }
+
+      hideStatus(micStatus);
+    }
+
+    // Microphone selection change
+    micSelect.addEventListener('change', () => {
+      selectedMicId = micSelect.value;
+      if (isTesting) {
+        stopMicTest();
+      }
+    });
+
+    // Record shortcut
+    recordShortcutBtn.addEventListener('click', () => {
+      if (isRecordingShortcut) {
+        isRecordingShortcut = false;
+        recordShortcutBtn.textContent = 'Ändern';
+        shortcutDisplay.classList.remove('recording');
+        hideStatus(shortcutStatus);
+        return;
+      }
+
+      isRecordingShortcut = true;
+      recordShortcutBtn.textContent = 'Abbrechen';
+      shortcutDisplay.classList.add('recording');
+      shortcutDisplay.textContent = 'Drücken Sie eine Taste...';
+      showStatus(shortcutStatus, 'Drücken Sie die gewünschte Tastenkombination (z.B. F9, Strg+Shift+R)', 'info');
+    });
+
+    // Capture keyboard shortcut
+    document.addEventListener('keydown', (e) => {
+      if (!isRecordingShortcut) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const parts = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.altKey) parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+
+      // Get the key name
+      let key = e.key;
+      if (key === ' ') key = 'Space';
+      else if (key.length === 1) key = key.toUpperCase();
+      else if (key.startsWith('Arrow')) key = key.replace('Arrow', '');
+
+      // Don't allow modifier-only shortcuts
+      if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) {
+        return;
+      }
+
+      parts.push(key);
+      newShortcut = parts.join('+');
+
+      shortcutDisplay.textContent = newShortcut;
+      shortcutDisplay.classList.remove('recording');
+      isRecordingShortcut = false;
+      recordShortcutBtn.textContent = 'Ändern';
+
+      showStatus(shortcutStatus, `Neue Tastenkombination: ${newShortcut}`, 'success');
+    });
+
+    // Browse for transcript folder
+    browseTranscriptBtn.addEventListener('click', async () => {
+      const result = await ipcRenderer.invoke('select-folder');
+      if (result) {
+        transcriptPath.value = result;
+      }
+    });
+
+    // Browse for profiles folder
+    browseProfilesBtn.addEventListener('click', async () => {
+      const result = await ipcRenderer.invoke('select-folder');
+      if (result) {
+        profilesPath.value = result;
+      }
+    });
+
+    // Save settings
+    saveBtn.addEventListener('click', async () => {
+      const settings = {
+        shortcut: newShortcut || shortcutDisplay.textContent,
+        microphoneId: micSelect.value,
+        transcriptPath: transcriptPath.value,
+        profilesPath: profilesPath.value,
+        autoClose: autoCloseCheckbox.checked
+      };
+
+      try {
+        await ipcRenderer.invoke('save-settings', settings);
+        window.close();
+      } catch (error) {
+        showStatus(shortcutStatus, 'Fehler beim Speichern: ' + error.message, 'error');
+      }
+    });
+
+    // Cancel
+    cancelBtn.addEventListener('click', () => {
+      window.close();
+    });
+
+    // Helper functions
+    function showStatus(element, message, type) {
+      element.textContent = message;
+      element.className = 'status ' + type;
+      element.style.display = 'block';
+    }
+
+    function hideStatus(element) {
+      element.style.display = 'none';
+    }
+
+    // Initialize
+    loadSettings();
+  </script>
+</body>
+</html>

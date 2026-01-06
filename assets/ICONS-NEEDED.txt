@@ -1,0 +1,42 @@
+ICON FILES NEEDED FOR DENTDOC DESKTOP APP
+==========================================
+
+You need to create the following icon files and place them in this assets/ directory:
+
+1. icon.png (256x256px or larger)
+   - Main application icon
+   - Should feature the DentDoc logo/branding
+   - Used for notifications and window icon
+
+2. icon.ico (Windows icon file)
+   - Convert icon.png to .ico format
+   - Should contain multiple sizes (16x16, 32x32, 48x48, 256x256)
+   - Used for the installed application icon
+   - You can use online tools like: https://icoconvert.com/
+
+3. tray-icon.png (16x16px or 32x32px)
+   - Small icon for system tray (normal state)
+   - Should be simple and recognizable at small size
+   - Orange color scheme to match branding (#f97316)
+   - Suggestion: Simple "D" letter or tooth icon
+
+4. tray-icon-recording.png (16x16px or 32x32px)
+   - Small icon for system tray (recording state)
+   - Same as tray-icon.png but with red dot or indicator
+   - Clearly shows recording is active
+
+TEMPORARY SOLUTION:
+------------------
+For now, you can use placeholder colored squares:
+- The app will run but icons won't look professional
+- Replace with proper icons before distribution
+
+CREATING ICONS:
+--------------
+1. Design in Figma, Adobe Illustrator, or Canva
+2. Export as PNG with transparent background
+3. For .ico file, use online converter or:
+   npm install -g png2icons
+   png2icons icon.png icon.ico
+
+

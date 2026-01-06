@@ -1,0 +1,59 @@
+{
+  "name": "dentdoc-desktop",
+  "version": "1.0.0",
+  "description": "DentDoc Desktop App - Automatische Dokumentation für Zahnärzte",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win --x64"
+  },
+  "keywords": [
+    "dentdoc",
+    "dental",
+    "documentation",
+    "transcription"
+  ],
+  "author": "DentDoc",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.7.3",
+    "ffmpeg-static": "^5.3.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "form-data": "^4.0.0",
+    "sherpa-onnx-node": "^1.12.20"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.dentdoc.desktop",
+    "productName": "DentDoc",
+    "files": [
+      "**/*",
+      "models/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Rickpeace",
+      "repo": "dentdoc-desktop",
+      "private": true
+    }
+  }
+}

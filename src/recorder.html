@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Audio Recorder</title>
+</head>
+<body>
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let mediaRecorder = null;
+    let audioChunks = [];
+
+    ipcRenderer.on('start-recording', async () => {
+      try {
+        audioChunks = [];
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true
+          }
+        });
+
+        mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus'
+        });
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+          const arrayBuffer = await audioBlob.arrayBuffer();
+          ipcRenderer.send('recording-data', Array.from(new Uint8Array(arrayBuffer)));
+
+          // Stop all tracks
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start(1000); // Collect data every second
+        console.log('Recording started');
+      } catch (error) {
+        console.error('Recording error:', error);
+        ipcRenderer.send('recording-error', error.message);
+      }
+    });
+
+    ipcRenderer.on('stop-recording', () => {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        console.log('Recording stopped');
+      } else {
+        ipcRenderer.send('recording-error', 'No active recording');
+      }
+    });
+  </script>
+</body>
+</html>

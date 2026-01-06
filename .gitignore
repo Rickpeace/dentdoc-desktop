@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+dist-electron/
+out/
+
+# Environment variables
+.env
+.env.local
+
+# Electron
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# electron-store data (development)
+# Comment this out if you want to keep login state between dev sessions
+# But never commit tokens to git!
+# electron-store/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Audio recordings (temp)
+recordings/
+*.wav
+*.mp3
+*.m4a
