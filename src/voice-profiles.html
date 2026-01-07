@@ -11,6 +11,30 @@
       box-sizing: border-box;
     }
 
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(249, 115, 22, 0.4);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(249, 115, 22, 0.6);
+    }
+
+    ::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
@@ -67,6 +91,32 @@
       font-weight: 600;
     }
 
+    .profile-columns {
+      display: flex;
+      gap: 16px;
+    }
+
+    .profile-column {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .profile-column-header {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .profile-column-header .role-icon {
+      font-size: 16px;
+    }
+
     .profile-list {
       list-style: none;
     }
@@ -75,11 +125,11 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 14px;
+      padding: 12px;
       background: rgba(0, 0, 0, 0.2);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 10px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       transition: all 0.2s;
     }
 
@@ -89,15 +139,15 @@
     }
 
     .profile-name {
-      font-size: 16px;
+      font-size: 14px;
       color: rgba(255, 255, 255, 0.95);
       font-weight: 500;
     }
 
     .profile-date {
-      font-size: 12px;
+      font-size: 11px;
       color: rgba(255, 255, 255, 0.5);
-      margin-top: 4px;
+      margin-top: 2px;
     }
 
     .btn-delete {
@@ -234,6 +284,207 @@
       margin-bottom: 16px;
       line-height: 1.5;
     }
+
+    .read-text-section {
+      margin-top: 16px;
+    }
+
+    .read-text-box {
+      background: rgba(0, 0, 0, 0.3);
+      border: 2px solid rgba(249, 115, 22, 0.4);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .read-text-label {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .read-text-content {
+      font-size: 16px;
+      line-height: 1.8;
+      color: rgba(255, 255, 255, 0.95);
+    }
+
+    .read-text-hint {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 12px;
+      font-style: italic;
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 16px;
+      display: none;
+    }
+
+    .progress-bar-container.visible {
+      display: block;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #f97316, #ea580c);
+      border-radius: 4px;
+      transition: width 0.5s ease;
+      width: 0%;
+    }
+
+    .audio-indicator {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+    }
+
+    .audio-indicator.visible {
+      display: flex;
+    }
+
+    .audio-indicator-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.9); }
+    }
+
+    .audio-indicator-label {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+      flex-shrink: 0;
+    }
+
+    .audio-level-bar-container {
+      flex: 1;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .audio-level-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #22c55e, #f97316, #ef4444);
+      border-radius: 3px;
+      transition: width 0.05s ease;
+      width: 0%;
+    }
+
+    .btn-cancel {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      padding: 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      transition: all 0.2s;
+      display: none;
+    }
+
+    .btn-cancel.visible {
+      display: block;
+    }
+
+    .btn-cancel:hover {
+      background: rgba(239, 68, 68, 0.3);
+      border-color: rgba(239, 68, 68, 0.6);
+    }
+
+    .button-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .button-row .btn-enroll {
+      flex: 1;
+    }
+
+    .button-row .btn-cancel {
+      flex: 0 0 auto;
+      padding: 14px 24px;
+    }
+
+    /* Storage path section */
+    .path-input-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .path-input {
+      flex: 1;
+      padding: 10px 14px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .btn-browse {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: rgba(255, 255, 255, 0.8);
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .btn-browse:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(249, 115, 22, 0.4);
+    }
+
+    .btn-open-folder {
+      background: rgba(249, 115, 22, 0.15);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      color: #f97316;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .btn-open-folder:hover {
+      background: rgba(249, 115, 22, 0.25);
+      border-color: rgba(249, 115, 22, 0.5);
+    }
+
+    .helper-text {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      line-height: 1.5;
+    }
+
+    .helper-text.warning {
+      color: #f97316;
+    }
   </style>
 </head>
 <body>
@@ -245,21 +496,32 @@
 
     <div class="content">
       <div class="section">
+        <h2>Speicherort</h2>
+        <div class="path-input-row">
+          <input type="text" id="profilesPath" class="path-input" readonly placeholder="Standard-Speicherort">
+          <button type="button" id="openFolderBtn" class="btn-open-folder">Öffnen</button>
+          <button type="button" id="browseBtn" class="btn-browse">Ändern</button>
+        </div>
+        <p class="helper-text warning">⚠️ Für mehrere PCs: Wählen Sie einen Netzwerkordner (z.B. \\\\server\\dentdoc\\profiles), damit die Stimmprofile auf allen Rechnern verfügbar sind.</p>
+      </div>
+
+      <div class="section">
         <h2>Gespeicherte Profile</h2>
-        <ul class="profile-list" id="profileList">
-          <li class="empty-state">Keine Stimmprofile vorhanden</li>
-        </ul>
+        <div id="profileContainer">
+          <div class="empty-state">Keine Stimmprofile vorhanden</div>
+        </div>
       </div>
 
       <div class="section">
         <h2>Neues Profil erstellen</h2>
         <div class="info-box">
-          💡 Sprechen Sie für 30 Sekunden, damit das System Ihre Stimme lernen kann. Sprechen Sie natürlich, wie in einem normalen Gespräch.
+          💡 Sprechen Sie für 30 Sekunden, damit das System Ihre Stimme lernen kann. Sie können den Beispieltext vorlesen oder frei sprechen.
         </div>
         <form class="enroll-form" id="enrollForm">
           <div class="form-group">
             <label for="speakerRole">Rolle</label>
             <select id="speakerRole" required>
+              <option value="">Bitte auswählen...</option>
               <option value="Arzt">Arzt</option>
               <option value="ZFA">ZFA</option>
             </select>
@@ -268,10 +530,35 @@
             <label for="speakerName">Name des Sprechers</label>
             <input type="text" id="speakerName" placeholder="z.B. Dr. Notle" required>
           </div>
+
+          <div class="read-text-section" id="readTextSection">
+            <div class="read-text-box">
+              <div class="read-text-label">📖 Beispieltext zum Vorlesen (optional)</div>
+              <div class="read-text-content" id="readTextContent">
+                Der Patient kommt heute zur Kontrolle in die Praxis. Bei der Untersuchung zeigt sich ein unauffälliger Befund im Bereich der Frontzähne. Die Mundhygiene ist gut, das Zahnfleisch zeigt keine Entzündungszeichen. Wir empfehlen eine professionelle Zahnreinigung in drei Monaten. Der nächste Kontrolltermin wird für das kommende Halbjahr vereinbart.
+              </div>
+              <div class="read-text-hint">Tipp: Sie können diesen Text vorlesen oder frei sprechen - wichtig ist nur, dass Sie 30 Sekunden lang sprechen.</div>
+            </div>
+            <div class="progress-bar-container" id="progressBarContainer">
+              <div class="progress-bar" id="progressBar"></div>
+            </div>
+
+            <div class="audio-indicator" id="audioIndicator">
+              <div class="audio-indicator-dot"></div>
+              <span class="audio-indicator-label">Mikrofon:</span>
+              <div class="audio-level-bar-container">
+                <div class="audio-level-bar" id="audioLevelBar"></div>
+              </div>
+            </div>
+          </div>
+
           <div id="statusMessage"></div>
-          <button type="submit" class="btn-enroll" id="enrollBtn">
-            <span id="btnText">Aufnahme starten (30 Sekunden)</span>
-          </button>
+          <div class="button-row">
+            <button type="submit" class="btn-enroll" id="enrollBtn">
+              <span id="btnText">Aufnahme starten (30 Sekunden)</span>
+            </button>
+            <button type="button" class="btn-cancel" id="cancelBtn">Abbrechen</button>
+          </div>
         </form>
       </div>
     </div>
@@ -282,28 +569,191 @@
 
     let isRecording = false;
     let recordingTimer = null;
+    const RECORDING_DURATION = 30;
 
-    // Load profiles on startup
+    // Elements
+    const readTextSection = document.getElementById('readTextSection');
+    const progressBar = document.getElementById('progressBar');
+    const progressBarContainer = document.getElementById('progressBarContainer');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const audioIndicator = document.getElementById('audioIndicator');
+    const audioLevelBar = document.getElementById('audioLevelBar');
+
+    // Audio monitoring
+    let audioContext = null;
+    let analyser = null;
+    let mediaStream = null;
+    let animationFrameId = null;
+
+    // Elements for path
+    const profilesPathInput = document.getElementById('profilesPath');
+    const browseBtn = document.getElementById('browseBtn');
+    const openFolderBtn = document.getElementById('openFolderBtn');
+
+    // Load settings and profiles on startup
+    loadSettings();
     loadProfiles();
+
+    // Open folder button handler
+    openFolderBtn.addEventListener('click', async () => {
+      await ipcRenderer.invoke('open-profiles-folder');
+    });
+
+    // Browse button handler
+    browseBtn.addEventListener('click', async () => {
+      const result = await ipcRenderer.invoke('select-folder');
+      if (result) {
+        profilesPathInput.value = result;
+        // Save the new path
+        await ipcRenderer.invoke('save-profiles-path', result);
+        // Reload profiles from new location
+        loadProfiles();
+      }
+    });
+
+    async function loadSettings() {
+      const settings = await ipcRenderer.invoke('get-settings');
+      profilesPathInput.value = settings.profilesPath || 'Standard (AppData)';
+    }
+
+    // Cancel button handler
+    cancelBtn.addEventListener('click', async () => {
+      await cancelEnrollment();
+    });
+
+    async function cancelEnrollment() {
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+      }
+
+      try {
+        // Stop the recording without saving
+        await ipcRenderer.invoke('cancel-voice-enrollment');
+      } catch (error) {
+        console.error('Cancel error:', error);
+      }
+
+      stopAudioMonitoring();
+      isRecording = false;
+      progressBarContainer.classList.remove('visible');
+      progressBar.style.width = '0%';
+      cancelBtn.classList.remove('visible');
+      audioIndicator.classList.remove('visible');
+      updateButton('Aufnahme starten (30 Sekunden)', false);
+      document.getElementById('statusMessage').innerHTML = '';
+    }
+
+    async function startAudioMonitoring() {
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new AudioContext();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        source.connect(analyser);
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function updateLevel() {
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i];
+          }
+          const average = sum / bufferLength;
+          const normalized = Math.min(average / 128 * 100, 100);
+          audioLevelBar.style.width = normalized + '%';
+          animationFrameId = requestAnimationFrame(updateLevel);
+        }
+
+        updateLevel();
+        audioIndicator.classList.add('visible');
+      } catch (error) {
+        console.error('Audio monitoring error:', error);
+      }
+    }
+
+    function stopAudioMonitoring() {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+      }
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+      }
+      audioLevelBar.style.width = '0%';
+      audioIndicator.classList.remove('visible');
+    }
 
     async function loadProfiles() {
       const profiles = await ipcRenderer.invoke('get-voice-profiles');
-      const profileList = document.getElementById('profileList');
+      const profileContainer = document.getElementById('profileContainer');
 
       if (profiles.length === 0) {
-        profileList.innerHTML = '<li class="empty-state">Keine Stimmprofile vorhanden</li>';
+        profileContainer.innerHTML = '<div class="empty-state">Keine Stimmprofile vorhanden</div>';
         return;
       }
 
-      profileList.innerHTML = profiles.map(profile => `
-        <li class="profile-item">
-          <div>
-            <div class="profile-name">${profile.role || 'Arzt'} - ${profile.name}</div>
-            <div class="profile-date">Erstellt: ${new Date(profile.createdAt).toLocaleDateString('de-DE')}</div>
+      // Group profiles by role
+      const profilesByRole = {};
+      for (const profile of profiles) {
+        const role = profile.role || 'Sonstige';
+        if (!profilesByRole[role]) {
+          profilesByRole[role] = [];
+        }
+        profilesByRole[role].push(profile);
+      }
+
+      // Define role icons and order
+      const roleConfig = {
+        'Arzt': { icon: '👨‍⚕️', order: 1 },
+        'ZFA': { icon: '👩‍💼', order: 2 },
+        'Sonstige': { icon: '👤', order: 3 }
+      };
+
+      // Sort roles by order
+      const sortedRoles = Object.keys(profilesByRole).sort((a, b) => {
+        return (roleConfig[a]?.order || 99) - (roleConfig[b]?.order || 99);
+      });
+
+      // Build columns HTML
+      let html = '<div class="profile-columns">';
+
+      for (const role of sortedRoles) {
+        const roleProfiles = profilesByRole[role];
+        const icon = roleConfig[role]?.icon || '👤';
+
+        html += `
+          <div class="profile-column">
+            <div class="profile-column-header">
+              <span class="role-icon">${icon}</span>
+              <span>${role} (${roleProfiles.length})</span>
+            </div>
+            <ul class="profile-list">
+              ${roleProfiles.map(profile => `
+                <li class="profile-item">
+                  <div>
+                    <div class="profile-name">${profile.name}</div>
+                    <div class="profile-date">${new Date(profile.createdAt).toLocaleDateString('de-DE')}</div>
+                  </div>
+                  <button class="btn-delete" onclick="deleteProfile('${profile.id}')">×</button>
+                </li>
+              `).join('')}
+            </ul>
           </div>
-          <button class="btn-delete" onclick="deleteProfile('${profile.id}')">Löschen</button>
-        </li>
-      `).join('');
+        `;
+      }
+
+      html += '</div>';
+      profileContainer.innerHTML = html;
     }
 
     async function deleteProfile(id) {
@@ -342,6 +792,11 @@
       const name = document.getElementById('speakerName').value.trim();
       const role = document.getElementById('speakerRole').value;
 
+      if (!role) {
+        showStatus('Bitte wählen Sie eine Rolle aus', 'error');
+        return;
+      }
+
       if (!name) {
         showStatus('Bitte geben Sie einen Namen ein', 'error');
         return;
@@ -352,16 +807,25 @@
         updateButton('Aufnahme läuft... (0s / 30s)', true);
         showStatus('🔴 Sprechen Sie jetzt für 30 Sekunden...', 'recording');
 
+        // Show progress bar and cancel button
+        progressBarContainer.classList.add('visible');
+        progressBar.style.width = '0%';
+        cancelBtn.classList.add('visible');
+
+        // Start audio level monitoring
+        await startAudioMonitoring();
+
         // Start recording with role
         await ipcRenderer.invoke('start-voice-enrollment', { name, role });
 
-        // Update countdown
+        // Update countdown and progress bar
         let seconds = 0;
         recordingTimer = setInterval(() => {
           seconds++;
-          updateButton(`Aufnahme läuft... (${seconds}s / 30s)`, true);
+          updateButton(`Aufnahme läuft... (${seconds}s / ${RECORDING_DURATION}s)`, true);
+          progressBar.style.width = `${(seconds / RECORDING_DURATION) * 100}%`;
 
-          if (seconds >= 30) {
+          if (seconds >= RECORDING_DURATION) {
             clearInterval(recordingTimer);
             stopEnrollment();
           }
@@ -370,6 +834,8 @@
       } catch (error) {
         showStatus('Fehler beim Starten: ' + error.message, 'error');
         isRecording = false;
+        progressBarContainer.classList.remove('visible');
+        cancelBtn.classList.remove('visible');
         updateButton('Aufnahme starten (30 Sekunden)', false);
       }
     }
@@ -380,15 +846,21 @@
         recordingTimer = null;
       }
 
+      // Stop audio monitoring
+      stopAudioMonitoring();
+
       try {
         updateButton('Verarbeite Aufnahme...', true);
+        cancelBtn.classList.remove('visible');
         showStatus('⏳ Stimmprofil wird erstellt...', 'processing');
 
         await ipcRenderer.invoke('stop-voice-enrollment');
 
         showStatus('✅ Stimmprofil erfolgreich erstellt!', 'success');
         document.getElementById('speakerName').value = '';
-        document.getElementById('speakerRole').value = 'Arzt';
+        document.getElementById('speakerRole').value = '';
+        progressBarContainer.classList.remove('visible');
+        progressBar.style.width = '0%';
         loadProfiles();
 
         setTimeout(() => {
@@ -399,6 +871,8 @@
         showStatus('Fehler: ' + error.message, 'error');
       } finally {
         isRecording = false;
+        progressBarContainer.classList.remove('visible');
+        cancelBtn.classList.remove('visible');
         updateButton('Aufnahme starten (30 Sekunden)', false);
       }
     }

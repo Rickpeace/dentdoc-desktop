@@ -14,6 +14,8 @@ let store = new Store({
  * Set a custom storage path for voice profiles
  * @param {string} customPath - Custom directory path (e.g., network folder)
  */
+let currentStorePath = null;
+
 function setStorePath(customPath) {
   if (!customPath) {
     // Reset to default
@@ -21,6 +23,7 @@ function setStorePath(customPath) {
       name: 'voice-profiles',
       defaults: { profiles: [] }
     });
+    currentStorePath = null;
     return;
   }
 
@@ -30,12 +33,21 @@ function setStorePath(customPath) {
   }
 
   // Create store in custom location
-  const storePath = path.join(customPath, 'voice-profiles.json');
+  currentStorePath = customPath;
   store = new Store({
     name: 'voice-profiles',
     cwd: customPath,
     defaults: { profiles: [] }
   });
+}
+
+function getStorePath() {
+  if (currentStorePath) {
+    return currentStorePath;
+  }
+  // Return default path
+  const { app } = require('electron');
+  return path.join(app.getPath('userData'));
 }
 
 /**
@@ -170,5 +182,6 @@ module.exports = {
   updateProfile,
   deleteProfile,
   clearAllProfiles,
-  setStorePath
+  setStorePath,
+  getStorePath
 };

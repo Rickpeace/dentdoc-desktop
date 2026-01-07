@@ -79,7 +79,7 @@ function openSettings() {
 
   settingsWindow = new BrowserWindow({
     width: 550,
-    height: 520,
+    height: 600,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -105,13 +105,15 @@ function openVoiceProfiles() {
 
   voiceProfilesWindow = new BrowserWindow({
     width: 650,
-    height: 700,
+    height: 750,
+    minWidth: 500,
+    minHeight: 600,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
-    resizable: false,
+    resizable: true,
     title: 'DentDoc Stimmprofile'
   });
 
@@ -159,12 +161,52 @@ function registerShortcut(shortcut) {
 }
 
 /**
- * Save transcript and summary to a text file
- * @param {string} folderPath - Folder to save the file
+ * Extract doctors and ZFAs from speaker mapping
+ * @param {Object} speakerMapping - Speaker mapping object (e.g., { "A": "Arzt - Dr. Notle", "B": "ZFA - Maria" })
+ * @returns {Object} { aerzte: string[], zfa: string[] }
+ */
+function extractRolesFromSpeakerMapping(speakerMapping) {
+  const aerzte = [];
+  const zfa = [];
+
+  if (!speakerMapping) return { aerzte, zfa };
+
+  for (const [, label] of Object.entries(speakerMapping)) {
+    if (typeof label === 'string') {
+      // Check if format is "Role - Name"
+      const match = label.match(/^(Arzt|ZFA)\s*-\s*(.+)$/i);
+      if (match) {
+        const role = match[1].toLowerCase();
+        const name = match[2].trim();
+        if (role === 'arzt') {
+          aerzte.push(name);
+        } else if (role === 'zfa') {
+          zfa.push(name);
+        }
+      }
+    }
+  }
+
+  return { aerzte, zfa };
+}
+
+/**
+ * Sanitize filename by removing invalid characters
+ * @param {string} name - Name to sanitize
+ * @returns {string} Sanitized name
+ */
+function sanitizeFilename(name) {
+  return name.replace(/[<>:"/\\|?*]/g, '_').trim();
+}
+
+/**
+ * Save transcript and summary to text files (one per doctor)
+ * @param {string} baseFolderPath - Base folder to save the files
  * @param {string} summary - Documentation/summary text
  * @param {string} transcript - Full transcript text
+ * @param {Object} speakerMapping - Speaker mapping object
  */
-function saveTranscriptToFile(folderPath, summary, transcript) {
+function saveTranscriptToFile(baseFolderPath, summary, transcript, speakerMapping = null) {
   // Create filename with date and time
   const now = new Date();
   const year = now.getFullYear();
@@ -173,13 +215,17 @@ function saveTranscriptToFile(folderPath, summary, transcript) {
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
 
-  const filename = `${year}-${month}-${day}_${hours}-${minutes}_Transkript.txt`;
-  const filePath = path.join(folderPath, filename);
+  // Extract roles from speaker mapping
+  const { aerzte, zfa } = extractRolesFromSpeakerMapping(speakerMapping);
 
-  // Ensure folder exists
-  if (!fs.existsSync(folderPath)) {
-    fs.mkdirSync(folderPath, { recursive: true });
-  }
+  // Build filename suffix with doctors and ZFAs
+  const nameParts = [];
+  aerzte.forEach(name => nameParts.push(sanitizeFilename(name)));
+  zfa.forEach(name => nameParts.push(sanitizeFilename(name)));
+
+  // Create filename: YYYY-MM-DD_HH-MM_[Names].txt
+  let filenameSuffix = nameParts.length > 0 ? nameParts.join('_') : 'Unbekannt';
+  const filename = `${year}-${month}-${day}_${hours}-${minutes}_${filenameSuffix}.txt`;
 
   // Create file content
   const content = `╔════════════════════════════════════════════════════════════════════╗
@@ -208,9 +254,30 @@ ${transcript}
 ════════════════════════════════════════════════════════════════════
 `;
 
-  // Write file
-  fs.writeFileSync(filePath, content, 'utf8');
-  console.log('Transcript saved to:', filePath);
+  // Determine target folders based on doctors
+  const targetFolders = [];
+
+  if (aerzte.length > 0) {
+    // Create one folder per doctor
+    aerzte.forEach(arzt => {
+      targetFolders.push(path.join(baseFolderPath, sanitizeFilename(arzt)));
+    });
+  } else {
+    // No doctors recognized - save to "Ohne Zuordnung" folder
+    targetFolders.push(path.join(baseFolderPath, 'Ohne Zuordnung'));
+  }
+
+  // Save file to each target folder
+  targetFolders.forEach(folderPath => {
+    // Ensure folder exists
+    if (!fs.existsSync(folderPath)) {
+      fs.mkdirSync(folderPath, { recursive: true });
+    }
+
+    const filePath = path.join(folderPath, filename);
+    fs.writeFileSync(filePath, content, 'utf8');
+    console.log('Transcript saved to:', filePath);
+  });
 }
 
 function createLoginWindow() {
@@ -462,6 +529,7 @@ async function stopRecording() {
     }
 
     // Identify speakers if we have utterances
+    let currentSpeakerMapping = null; // Store for file saving
     if (transcription.utterances) {
       debugLog('=== Starting speaker identification ===');
       debugLog(`Has utterances: true`);
@@ -479,16 +547,16 @@ async function stopRecording() {
         debugLog(`Calling speakerRecognition.identifySpeakersFromUtterances...`);
 
         // Use local audio file for speaker identification
-        const speakerMapping = await speakerRecognition.identifySpeakersFromUtterances(
+        currentSpeakerMapping = await speakerRecognition.identifySpeakersFromUtterances(
           currentRecordingPath,
           utterances
         );
 
-        console.log('Speaker mapping:', speakerMapping);
-        debugLog(`Speaker mapping result: ${JSON.stringify(speakerMapping)}`);
+        console.log('Speaker mapping:', currentSpeakerMapping);
+        debugLog(`Speaker mapping result: ${JSON.stringify(currentSpeakerMapping)}`);
 
         // Update backend with speaker mapping
-        await apiClient.updateSpeakerMapping(transcriptionId, speakerMapping, token);
+        await apiClient.updateSpeakerMapping(transcriptionId, currentSpeakerMapping, token);
         console.log('Speaker mapping updated in backend');
         debugLog('Speaker mapping updated in backend successfully');
       } catch (error) {
@@ -520,7 +588,7 @@ async function stopRecording() {
     const transcriptPath = store.get('transcriptPath');
     if (autoExport && transcriptPath && transcript) {
       try {
-        saveTranscriptToFile(transcriptPath, documentation, transcript);
+        saveTranscriptToFile(transcriptPath, documentation, transcript, currentSpeakerMapping);
       } catch (error) {
         console.error('Failed to save transcript file:', error);
         // Don't block the workflow if file save fails
@@ -786,7 +854,31 @@ ipcMain.handle('save-settings', async (event, settings) => {
     }
   }
 
-  showNotification('Einstellungen gespeichert', `Tastenkombination: ${settings.shortcut}`);
+  return { success: true, message: 'Einstellungen gespeichert' };
+});
+
+// Save profiles path separately (from voice profiles window)
+ipcMain.handle('save-profiles-path', async (event, profilesPath) => {
+  store.set('profilesPath', profilesPath);
+  // Reload voice profiles with new path
+  const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
+  voiceProfiles.setStorePath(profilesPath);
+  return { success: true };
+});
+
+// Open profiles folder in explorer
+ipcMain.handle('open-profiles-folder', async () => {
+  const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
+  const profilesPath = voiceProfiles.getStorePath();
+
+  // Ensure folder exists
+  if (!fs.existsSync(profilesPath)) {
+    fs.mkdirSync(profilesPath, { recursive: true });
+  }
+
+  // Open in explorer
+  const { shell } = require('electron');
+  shell.openPath(profilesPath);
   return { success: true };
 });
 
@@ -894,10 +986,81 @@ ipcMain.handle('stop-voice-enrollment', async () => {
   }
 });
 
+// Cancel voice enrollment (without saving)
+ipcMain.handle('cancel-voice-enrollment', async () => {
+  if (!isEnrolling) {
+    return { success: true };
+  }
+
+  const pathToDelete = currentEnrollmentPath;
+
+  try {
+    await audioRecorder.stopRecording();
+  } catch (error) {
+    console.error('Error stopping recording during cancel:', error);
+  }
+
+  // Delete the temporary recording file
+  if (pathToDelete && fs.existsSync(pathToDelete)) {
+    try {
+      fs.unlinkSync(pathToDelete);
+      console.log('Deleted cancelled enrollment recording:', pathToDelete);
+    } catch (error) {
+      console.error('Error deleting cancelled recording:', error);
+    }
+  }
+
+  isEnrolling = false;
+  currentEnrollmentName = null;
+  currentEnrollmentPath = null;
+  currentEnrollmentRole = null;
+
+  return { success: true };
+});
+
 // Forward audio level updates from recorder to status overlay
 ipcMain.on('audio-level-update', (event, level) => {
   if (statusOverlay && !statusOverlay.isDestroyed()) {
     statusOverlay.webContents.send('audio-level', level);
+  }
+});
+
+// Open Windows sound settings
+ipcMain.handle('open-sound-settings', async () => {
+  const { exec } = require('child_process');
+  exec('start ms-settings:sound');
+  return { success: true };
+});
+
+// Disable global shortcut (for shortcut recording in settings)
+ipcMain.handle('disable-global-shortcut', () => {
+  globalShortcut.unregisterAll();
+  return { success: true };
+});
+
+// Re-enable global shortcut
+ipcMain.handle('enable-global-shortcut', () => {
+  const savedShortcut = store.get('shortcut') || 'F9';
+  registerShortcut(savedShortcut);
+  return { success: true };
+});
+
+// Show unsaved changes dialog
+ipcMain.handle('show-unsaved-changes-dialog', async () => {
+  const result = await dialog.showMessageBox(settingsWindow, {
+    type: 'question',
+    buttons: ['Speichern', 'Verwerfen', 'Abbrechen'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'Ungespeicherte Änderungen',
+    message: 'Sie haben ungespeicherte Änderungen.',
+    detail: 'Möchten Sie die Änderungen speichern bevor Sie das Fenster schließen?'
+  });
+
+  switch (result.response) {
+    case 0: return 'save';
+    case 1: return 'discard';
+    default: return 'cancel';
   }
 });
 
