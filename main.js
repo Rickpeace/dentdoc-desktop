@@ -1,6 +1,8 @@
-require('dotenv').config();
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, dialog, shell } = require('electron');
+// Load environment variables (.env.local overrides .env for local development)
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env.local'), override: true });
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, dialog, shell } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const Store = require('electron-store');
@@ -41,7 +43,9 @@ let tray = null;
 let loginWindow = null;
 let settingsWindow = null;
 let voiceProfilesWindow = null;
+let bausteineWindow = null;
 let statusOverlay = null;
+let feedbackWindow = null;
 let isRecording = false;
 let isProcessing = false;
 let isEnrolling = false;
@@ -122,6 +126,60 @@ function openVoiceProfiles() {
 
   voiceProfilesWindow.on('closed', () => {
     voiceProfilesWindow = null;
+  });
+}
+
+function openBausteine() {
+  if (bausteineWindow && !bausteineWindow.isDestroyed()) {
+    bausteineWindow.focus();
+    return;
+  }
+
+  bausteineWindow = new BrowserWindow({
+    width: 700,
+    height: 800,
+    minWidth: 600,
+    minHeight: 600,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    },
+    icon: path.join(__dirname, 'assets', 'icon.png'),
+    resizable: true,
+    title: 'DentDoc Bausteine'
+  });
+
+  bausteineWindow.loadFile('src/bausteine/bausteine.html');
+  bausteineWindow.setMenu(null);
+
+  bausteineWindow.on('closed', () => {
+    bausteineWindow = null;
+  });
+}
+
+function openFeedback() {
+  if (feedbackWindow && !feedbackWindow.isDestroyed()) {
+    feedbackWindow.focus();
+    return;
+  }
+
+  feedbackWindow = new BrowserWindow({
+    width: 500,
+    height: 450,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    },
+    icon: path.join(__dirname, 'assets', 'icon.png'),
+    resizable: false,
+    title: 'DentDoc Feedback'
+  });
+
+  feedbackWindow.loadFile('src/feedback.html');
+  feedbackWindow.setMenu(null);
+
+  feedbackWindow.on('closed', () => {
+    feedbackWindow = null;
   });
 }
 
@@ -353,7 +411,6 @@ function updateTrayMenu() {
     return;
   }
 
-  const minutesText = user?.minutesRemaining ? `${user.minutesRemaining} Minuten übrig` : 'Keine Minuten';
   const shortcut = store.get('shortcut') || 'F9';
 
   // Determine menu label based on state
@@ -370,11 +427,6 @@ function updateTrayMenu() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: minutesText,
-      enabled: false
-    },
-    { type: 'separator' },
-    {
       label: recordingLabel,
       enabled: recordingEnabled,
       click: () => {
@@ -383,6 +435,20 @@ function updateTrayMenu() {
         } else {
           startRecording();
         }
+      }
+    },
+    {
+      label: 'Audio-Datei transkribieren...',
+      enabled: !isRecording && !isProcessing,
+      click: () => {
+        selectAndTranscribeAudioFile();
+      }
+    },
+    {
+      label: 'Letzte Dokumentation anzeigen',
+      enabled: lastDocumentation !== null,
+      click: () => {
+        showLastResult();
       }
     },
     { type: 'separator' },
@@ -399,9 +465,21 @@ function updateTrayMenu() {
       }
     },
     {
+      label: 'Bausteine verwalten',
+      click: () => {
+        openBausteine();
+      }
+    },
+    {
       label: 'Einstellungen',
       click: () => {
         openSettings();
+      }
+    },
+    {
+      label: 'Feedback',
+      click: () => {
+        openFeedback();
       }
     },
     { type: 'separator' },
@@ -423,6 +501,220 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
+// Select and transcribe an existing audio file
+async function selectAndTranscribeAudioFile() {
+  const token = store.get('authToken');
+  if (!token) {
+    showNotification('Fehler', 'Bitte melden Sie sich zuerst an');
+    createLoginWindow();
+    return;
+  }
+
+  if (isProcessing || isRecording) {
+    showNotification('Bitte warten', 'Es läuft bereits eine Verarbeitung...');
+    return;
+  }
+
+  // Open file dialog
+  const { dialog } = require('electron');
+  const result = await dialog.showOpenDialog({
+    title: 'Audio-Datei auswählen',
+    filters: [
+      { name: 'Audio-Dateien', extensions: ['mp3', 'wav', 'webm', 'm4a', 'ogg', 'flac', 'aac'] },
+      { name: 'Alle Dateien', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    return;
+  }
+
+  const audioFilePath = result.filePaths[0];
+  console.log('Selected audio file:', audioFilePath);
+  debugLog(`Selected audio file: ${audioFilePath}`);
+
+  // Process the selected audio file
+  await processAudioFile(audioFilePath);
+}
+
+// Process an audio file (shared by recording and file selection)
+async function processAudioFile(audioFilePath) {
+  const token = store.get('authToken');
+
+  isProcessing = true;
+  updateTrayMenu();
+
+  // Change tray icon to processing state (use regular icon)
+  const processingIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  tray.setImage(processingIconPath);
+  tray.setToolTip('DentDoc - Verarbeitung...');
+
+  updateStatusOverlay('Audio wird hochgeladen...', 'Bitte warten...', 'processing', { step: 1 });
+
+  try {
+    // Upload audio
+    const transcriptionId = await apiClient.uploadAudio(audioFilePath, token);
+    updateStatusOverlay('Transkription läuft...', 'Audio wird analysiert...', 'processing', { step: 2 });
+
+    // Poll for transcription result
+    let transcriptionResult;
+    let attempts = 0;
+    const maxAttempts = 120;
+
+    while (attempts < maxAttempts) {
+      transcriptionResult = await apiClient.getTranscription(transcriptionId, token);
+
+      if (transcriptionResult.status === 'completed') {
+        break;
+      } else if (transcriptionResult.status === 'error' || transcriptionResult.status === 'failed') {
+        throw new Error(transcriptionResult.error || 'Transkription fehlgeschlagen');
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      attempts++;
+    }
+
+    if (attempts >= maxAttempts) {
+      throw new Error('Zeitüberschreitung bei der Transkription');
+    }
+
+    const transcript = transcriptionResult.transcript;
+
+    // Handle utterances (can be string or object from backend)
+    const utterances = typeof transcriptionResult.utterances === 'string'
+      ? JSON.parse(transcriptionResult.utterances)
+      : transcriptionResult.utterances;
+
+    // Check if speech was detected
+    if (!utterances || utterances.length === 0) {
+      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+    }
+
+    // Speaker recognition
+    let currentSpeakerMapping = null;
+    updateStatusOverlay('Sprecher werden erkannt...', 'Stimmen werden analysiert...', 'processing', { step: 3 });
+
+    try {
+      if (speakerRecognition && utterances && utterances.length > 0) {
+        debugLog(`Utterances count: ${utterances.length}`);
+        debugLog('Calling speakerRecognition.identifySpeakersFromUtterances...');
+
+        currentSpeakerMapping = await speakerRecognition.identifySpeakersFromUtterances(
+          audioFilePath,
+          utterances
+        );
+
+        debugLog('Speaker mapping result: ' + JSON.stringify(currentSpeakerMapping));
+
+        // Update backend with speaker mapping
+        await apiClient.updateSpeakerMapping(transcriptionId, currentSpeakerMapping, token);
+        debugLog('Speaker mapping updated in backend successfully');
+      }
+    } catch (speakerError) {
+      console.error('Speaker recognition failed:', speakerError);
+      debugLog('Speaker recognition error: ' + speakerError.message);
+      // Continue anyway - speaker identification is optional
+    }
+
+    // Generate documentation
+    const docMode = store.get('docMode', 'single');
+    let result;
+
+    if (docMode === 'agent-chain') {
+      // Agent-Kette: Use V2 endpoint with Bausteine
+      updateStatusOverlay('Dokumentation wird erstellt...', 'Agent-Kette analysiert Kategorien...', 'processing', { step: 4 });
+      const bausteine = bausteineManager.getAllBausteine();
+      result = await apiClient.getDocumentationV2(transcriptionId, token, bausteine);
+    } else {
+      // Single Prompt: Use standard endpoint
+      updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
+      result = await apiClient.getDocumentation(transcriptionId, token);
+    }
+
+    const documentation = result.documentation;
+    const finalTranscript = result.transcript || transcript;
+
+    // Store for "show last result"
+    lastDocumentation = documentation;
+    lastTranscript = finalTranscript;
+
+    // Copy to clipboard
+    clipboard.writeText(documentation);
+
+    // Auto-save transcript if enabled
+    const autoExport = store.get('autoExport', true);
+    const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
+    const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
+    if (autoExport && finalTranscript) {
+      try {
+        saveTranscriptToFile(transcriptPath, documentation, finalTranscript, currentSpeakerMapping);
+      } catch (error) {
+        console.error('Failed to save transcript file:', error);
+      }
+    }
+
+    isProcessing = false;
+    updateTrayMenu();
+
+    // Reset tray icon
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+
+    const autoClose = store.get('autoCloseOverlay', false);
+    updateStatusOverlay(
+      'Fertig!',
+      'Dokumentation in Zwischenablage kopiert (Strg+V)',
+      'success',
+      { documentation, transcript: finalTranscript, autoClose }
+    );
+
+    // Update user minutes
+    try {
+      const user = await apiClient.getUser(token);
+      if (user) {
+        store.set('user', user);
+        updateTrayMenu();
+      }
+    } catch (e) {
+      console.error('Failed to update user info:', e);
+    }
+
+  } catch (error) {
+    console.error('Audio file processing error:', error);
+    debugLog('Audio file processing error: ' + error.message);
+
+    isProcessing = false;
+    updateTrayMenu();
+
+    // Reset tray icon
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+
+    // Categorize errors for better UX
+    let errorTitle = 'Fehler';
+    let errorMessage = error.message || 'Unbekannter Fehler';
+
+    if (error.message.includes('Keine Sprache erkannt')) {
+      errorTitle = 'Keine Sprache erkannt';
+      errorMessage = 'Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.';
+    } else if (error.message.includes('zu kurz') || error.message.includes('leer')) {
+      errorTitle = 'Aufnahme zu kurz';
+      errorMessage = 'Bitte sprechen Sie mindestens 2-3 Sekunden.';
+    } else if (error.message.includes('Minuten') || error.message.includes('Guthaben')) {
+      errorTitle = 'Kein Guthaben';
+      errorMessage = 'Bitte laden Sie Ihr Minuten-Guthaben im Dashboard auf.';
+    } else if (error.message.includes('Server') || error.message.includes('Internet')) {
+      errorTitle = 'Verbindungsfehler';
+      errorMessage = 'Bitte prüfen Sie Ihre Internetverbindung.';
+    }
+
+    updateStatusOverlay(errorTitle, errorMessage, 'error');
+  }
+}
+
 async function startRecording() {
   const token = store.get('authToken');
   if (!token) {
@@ -437,6 +729,11 @@ async function startRecording() {
     return;
   }
 
+  // Get deleteAudio setting - cleanup is handled by audioRecorder
+  const deleteAudio = store.get('deleteAudio', true);
+  console.log('deleteAudio setting:', deleteAudio);
+  debugLog(`deleteAudio setting: ${deleteAudio}`);
+
   try {
     isRecording = true;
     updateTrayMenu();
@@ -446,7 +743,7 @@ async function startRecording() {
     tray.setImage(recordingIconPath);
     tray.setToolTip('DentDoc - 🔴 Aufnahme läuft...');
 
-    currentRecordingPath = await audioRecorder.startRecording();
+    currentRecordingPath = await audioRecorder.startRecording(deleteAudio);
 
     const shortcut = store.get('shortcut') || 'F9';
     updateStatusOverlay('Aufnahme läuft...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
@@ -464,187 +761,29 @@ async function stopRecording() {
 
     await audioRecorder.stopRecording();
     isRecording = false;
-    isProcessing = true; // Start processing state
     updateTrayMenu();
 
-    // Reset tray icon but show processing state
+    // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(iconPath);
 
-    updateStatusOverlay('Audio wird hochgeladen...', 'Bitte warten...', 'processing', { step: 1 });
-
-    // Upload and transcribe
-    const token = store.get('authToken');
-    let transcriptionId;
-
-    try {
-      transcriptionId = await apiClient.uploadAudio(currentRecordingPath, token);
-    } catch (uploadError) {
-      // If upload fails, show error and exit
-      throw uploadError;
-    }
-
-    updateStatusOverlay('Transkription läuft...', 'Audio wird analysiert...', 'processing', { step: 2 });
-
-    // Poll for transcription completion
-    let transcription = null;
-    let attempts = 0;
-    const maxAttempts = 60; // 60 attempts * 3 seconds = 3 minutes max
-
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      try {
-        transcription = await apiClient.getTranscription(transcriptionId, token);
-
-        if (transcription.status === 'completed') {
-          console.log('Transcription completed');
-          break;
-        } else if (transcription.status === 'failed' || transcription.status === 'error') {
-          throw new Error('Transkription fehlgeschlagen');
-        }
-      } catch (error) {
-        // If it's a network error, continue polling
-        if (error.message.includes('Transkription fehlgeschlagen')) {
-          // Transcription actually failed, stop polling
-          throw error;
-        }
-        console.log('Waiting for transcription...', error.message);
-      }
-
-      attempts++;
-    }
-
-    if (!transcription || transcription.status !== 'completed') {
-      throw new Error('Transkription dauert zu lange. Bitte versuchen Sie es später erneut.');
-    }
-
-    // Check if we have utterances (speech detected)
-    const utterancesData = typeof transcription.utterances === 'string'
-      ? JSON.parse(transcription.utterances)
-      : transcription.utterances;
-
-    if (!utterancesData || utterancesData.length === 0) {
-      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
-    }
-
-    // Identify speakers if we have utterances
-    let currentSpeakerMapping = null; // Store for file saving
-    if (transcription.utterances) {
-      debugLog('=== Starting speaker identification ===');
-      debugLog(`Has utterances: true`);
-      debugLog(`Current recording path: ${currentRecordingPath}`);
-
-      updateStatusOverlay('Sprecher werden erkannt...', 'Stimmen werden analysiert...', 'processing', { step: 3 });
-
-      try {
-        // Handle both string and object utterances
-        const utterances = typeof transcription.utterances === 'string'
-          ? JSON.parse(transcription.utterances)
-          : transcription.utterances;
-
-        debugLog(`Utterances count: ${utterances.length}`);
-        debugLog(`Calling speakerRecognition.identifySpeakersFromUtterances...`);
-
-        // Use local audio file for speaker identification
-        currentSpeakerMapping = await speakerRecognition.identifySpeakersFromUtterances(
-          currentRecordingPath,
-          utterances
-        );
-
-        console.log('Speaker mapping:', currentSpeakerMapping);
-        debugLog(`Speaker mapping result: ${JSON.stringify(currentSpeakerMapping)}`);
-
-        // Update backend with speaker mapping
-        await apiClient.updateSpeakerMapping(transcriptionId, currentSpeakerMapping, token);
-        console.log('Speaker mapping updated in backend');
-        debugLog('Speaker mapping updated in backend successfully');
-      } catch (error) {
-        console.error('Speaker identification failed:', error);
-        debugLog(`ERROR in speaker identification: ${error.message}`);
-        debugLog(`Stack: ${error.stack}`);
-        // Continue anyway - speaker identification is optional
-      }
-    } else {
-      debugLog('No utterances available for speaker identification');
-    }
-
-    updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
-
-    // Get documentation (returns { documentation, transcript })
-    const result = await apiClient.getDocumentation(transcriptionId, token);
-    const documentation = result.documentation;
-    const transcript = result.transcript;
-
-    // Store for later copying
-    lastDocumentation = documentation;
-    lastTranscript = transcript;
-
-    // Copy to clipboard
-    clipboard.writeText(documentation);
-
-    // Auto-save transcript if enabled and path is configured
-    const autoExport = store.get('autoExport', false);
-    const transcriptPath = store.get('transcriptPath');
-    if (autoExport && transcriptPath && transcript) {
-      try {
-        saveTranscriptToFile(transcriptPath, documentation, transcript, currentSpeakerMapping);
-      } catch (error) {
-        console.error('Failed to save transcript file:', error);
-        // Don't block the workflow if file save fails
-      }
-    }
-
-    isProcessing = false; // Processing complete
-    updateTrayMenu();
-
-    // Check if auto-close is enabled
-    const autoClose = store.get('autoCloseOverlay', false);
-
-    updateStatusOverlay(
-      'Fertig!',
-      'Dokumentation in Zwischenablage kopiert (Strg+V)',
-      'success',
-      { documentation, transcript, autoClose }
-    );
-
-    // Update user minutes
-    const user = await apiClient.getUser(token);
-    store.set('user', user);
-    updateTrayMenu();
-    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+    // Process the recorded audio file (same as manual file upload)
+    await processAudioFile(currentRecordingPath);
 
   } catch (error) {
     console.error('Stop recording error:', error);
 
-    // Reset tray icon on error
-    const errorIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-    tray.setImage(errorIconPath);
+    // Reset state on error
+    isRecording = false;
+    isProcessing = false;
+    updateTrayMenu();
+
+    // Reset tray icon
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
     tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
 
-    // Show user-friendly error notification
-    let errorTitle = 'Fehler';
-    let errorMessage = error.message;
-
-    // Categorize errors for better UX
-    if (error.message.includes('Keine Sprache erkannt')) {
-      errorTitle = 'Keine Sprache erkannt';
-      errorMessage = 'Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.';
-    } else if (error.message.includes('zu kurz') || error.message.includes('leer')) {
-      errorTitle = 'Aufnahme zu kurz';
-      errorMessage = 'Bitte sprechen Sie mindestens 2-3 Sekunden.';
-    } else if (error.message.includes('Minuten') || error.message.includes('Guthaben')) {
-      errorTitle = 'Kein Guthaben';
-      errorMessage = 'Bitte laden Sie Ihr Minuten-Guthaben im Dashboard auf.';
-    } else if (error.message.includes('Server') || error.message.includes('Internet')) {
-      errorTitle = 'Verbindungsfehler';
-      errorMessage = 'Bitte prüfen Sie Ihre Internetverbindung.';
-    }
-
-    updateStatusOverlay(errorTitle, errorMessage, 'error');
-    isRecording = false;
-    isProcessing = false; // Reset processing state on error
-    updateTrayMenu();
+    updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestoppt werden', 'error');
   }
 }
 
@@ -656,26 +795,77 @@ function showNotification(title, body) {
   }).show();
 }
 
+function getValidOverlayPosition() {
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+  const workArea = primaryDisplay.workArea;
+
+  const overlayWidth = 440;
+  const overlayHeight = 360;
+
+  // Default position: bottom-right corner
+  const defaultX = width - overlayWidth - 20;
+  const defaultY = height - overlayHeight - 20;
+
+  // Load saved position
+  const savedPosition = store.get('overlayPosition', null);
+
+  if (!savedPosition) {
+    return { x: defaultX, y: defaultY };
+  }
+
+  let { x, y } = savedPosition;
+
+  // Validate position is within screen bounds
+  // Get all displays to check if position is valid on any screen
+  const displays = screen.getAllDisplays();
+  let isOnAnyScreen = false;
+
+  for (const display of displays) {
+    const bounds = display.workArea;
+    // Check if at least part of the window is visible on this screen
+    if (x < bounds.x + bounds.width &&
+        x + overlayWidth > bounds.x &&
+        y < bounds.y + bounds.height &&
+        y + overlayHeight > bounds.y) {
+      isOnAnyScreen = true;
+
+      // Clamp to this display's bounds
+      x = Math.max(bounds.x, Math.min(x, bounds.x + bounds.width - overlayWidth));
+      y = Math.max(bounds.y, Math.min(y, bounds.y + bounds.height - overlayHeight));
+      break;
+    }
+  }
+
+  // If not on any screen, reset to default on primary display
+  if (!isOnAnyScreen) {
+    x = Math.max(workArea.x, Math.min(defaultX, workArea.x + workArea.width - overlayWidth));
+    y = Math.max(workArea.y, Math.min(defaultY, workArea.y + workArea.height - overlayHeight));
+  }
+
+  return { x, y };
+}
+
 function createStatusOverlay() {
   if (statusOverlay && !statusOverlay.isDestroyed()) {
     return statusOverlay;
   }
 
-  const { screen } = require('electron');
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width, height } = primaryDisplay.workAreaSize;
+  const position = getValidOverlayPosition();
 
   statusOverlay = new BrowserWindow({
     width: 440,
     height: 360,
-    x: width - 460,
-    y: height - 380,
+    x: position.x,
+    y: position.y,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
-    focusable: false,
+    movable: true,
+    focusable: true, // Allow focus for dragging
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -686,7 +876,121 @@ function createStatusOverlay() {
   statusOverlay.setVisibleOnAllWorkspaces(true);
   statusOverlay.setAlwaysOnTop(true, 'screen-saver'); // Höhere Priorität
 
+  // Validate and save position when window is moved
+  statusOverlay.on('moved', () => {
+    if (statusOverlay && !statusOverlay.isDestroyed()) {
+      const { screen } = require('electron');
+      const [currentX, currentY] = statusOverlay.getPosition();
+      const [windowWidth, windowHeight] = statusOverlay.getSize();
+
+      // Find which display the window is on (use full bounds for detection)
+      const displays = screen.getAllDisplays();
+      let targetDisplay = screen.getPrimaryDisplay();
+
+      for (const display of displays) {
+        const db = display.bounds;
+        const centerX = currentX + windowWidth / 2;
+        const centerY = currentY + windowHeight / 2;
+
+        if (centerX >= db.x && centerX < db.x + db.width &&
+            centerY >= db.y && centerY < db.y + db.height) {
+          targetDisplay = display;
+          break;
+        }
+      }
+
+      // Use full screen bounds, not workArea (which excludes taskbar)
+      const bounds = targetDisplay.bounds;
+
+      // Clamp position to screen bounds
+      let newX = currentX;
+      let newY = currentY;
+
+      // Left edge
+      if (newX < bounds.x) {
+        newX = bounds.x;
+      }
+      // Right edge
+      if (newX + windowWidth > bounds.x + bounds.width) {
+        newX = bounds.x + bounds.width - windowWidth;
+      }
+      // Top edge
+      if (newY < bounds.y) {
+        newY = bounds.y;
+      }
+      // Bottom edge - window can go until taskbar (approx 85px from bottom)
+      const bottomLimit = bounds.y + bounds.height - 85;
+      if (newY > bottomLimit) {
+        newY = bottomLimit;
+      }
+
+      // If position changed, move the window back
+      if (newX !== currentX || newY !== currentY) {
+        statusOverlay.setPosition(newX, newY);
+      }
+
+      // Save the valid position
+      store.set('overlayPosition', { x: newX, y: newY });
+    }
+  });
+
   return statusOverlay;
+}
+
+// Validate and adjust overlay position to ensure it stays within screen bounds
+function validateOverlayPosition() {
+  if (!statusOverlay || statusOverlay.isDestroyed()) return;
+
+  const { screen } = require('electron');
+  const [currentX, currentY] = statusOverlay.getPosition();
+  const [windowWidth, windowHeight] = statusOverlay.getSize();
+
+  // Find which display the window is on
+  const displays = screen.getAllDisplays();
+  let targetDisplay = screen.getPrimaryDisplay();
+
+  for (const display of displays) {
+    const db = display.bounds;
+    const centerX = currentX + windowWidth / 2;
+    const centerY = currentY + windowHeight / 2;
+
+    if (centerX >= db.x && centerX < db.x + db.width &&
+        centerY >= db.y && centerY < db.y + db.height) {
+      targetDisplay = display;
+      break;
+    }
+  }
+
+  // Use workArea to respect taskbar
+  const workArea = targetDisplay.workArea;
+
+  // Clamp position to work area bounds
+  let newX = currentX;
+  let newY = currentY;
+
+  // Left edge
+  if (newX < workArea.x) {
+    newX = workArea.x;
+  }
+  // Right edge
+  if (newX + windowWidth > workArea.x + workArea.width) {
+    newX = workArea.x + workArea.width - windowWidth;
+  }
+  // Top edge
+  if (newY < workArea.y) {
+    newY = workArea.y;
+  }
+  // Bottom edge
+  if (newY + windowHeight > workArea.y + workArea.height) {
+    newY = workArea.y + workArea.height - windowHeight;
+  }
+
+  // If position changed, move the window
+  if (newX !== currentX || newY !== currentY) {
+    statusOverlay.setPosition(newX, newY);
+    // Save the corrected position
+    store.set('overlayPosition', { x: newX, y: newY });
+  }
 }
 
 function updateStatusOverlay(title, message, type, extra = {}) {
@@ -709,6 +1013,11 @@ function updateStatusOverlay(title, message, type, extra = {}) {
   overlay.setAlwaysOnTop(true, 'screen-saver'); // Stelle sicher, dass es im Vordergrund bleibt
   overlay.focus(); // Bringe es in den Fokus
 
+  // When showing success with actions, validate position to ensure window stays on screen
+  if (type === 'success' && extra.documentation) {
+    validateOverlayPosition();
+  }
+
   // Auto-hide after error (5 seconds) or success if auto-close enabled
   if (type === 'error') {
     autoHideTimeout = setTimeout(() => {
@@ -729,6 +1038,24 @@ function hideStatusOverlay() {
   if (statusOverlay && !statusOverlay.isDestroyed()) {
     statusOverlay.hide();
   }
+}
+
+// Show last documentation result again
+function showLastResult() {
+  if (!lastDocumentation) {
+    showNotification('Keine Dokumentation', 'Es gibt keine letzte Dokumentation zum Anzeigen');
+    return;
+  }
+
+  updateStatusOverlay(
+    'Fertig!',
+    'Dokumentation bereit',
+    'success',
+    {
+      documentation: lastDocumentation,
+      transcript: lastTranscript
+    }
+  );
 }
 
 // IPC handler for closing status overlay
@@ -775,6 +1102,22 @@ ipcMain.handle('copy-to-clipboard', (event, text) => {
   return true;
 });
 
+// Feedback handler
+ipcMain.handle('submit-feedback', async (event, data) => {
+  try {
+    const token = store.get('authToken');
+    if (!token) {
+      return { success: false, error: 'Nicht angemeldet' };
+    }
+
+    const result = await apiClient.submitFeedback(token, data.category, data.message);
+    return result;
+  } catch (error) {
+    console.error('Failed to submit feedback:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Window control handlers
 ipcMain.on('minimize-window', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
@@ -807,13 +1150,20 @@ ipcMain.handle('login', async (event, email, password) => {
 
 // IPC Handlers for settings window
 ipcMain.handle('get-settings', async () => {
+  // Default paths in Documents folder
+  const documentsPath = app.getPath('documents');
+  const defaultTranscriptPath = path.join(documentsPath, 'DentDoc', 'Transkripte');
+  const defaultProfilesPath = path.join(documentsPath, 'DentDoc', 'Stimmprofile');
+
   return {
     shortcut: store.get('shortcut') || 'F9',
     microphoneId: store.get('microphoneId') || null,
-    transcriptPath: store.get('transcriptPath') || '',
-    profilesPath: store.get('profilesPath') || '',
+    transcriptPath: store.get('transcriptPath') || defaultTranscriptPath,
+    profilesPath: store.get('profilesPath') || defaultProfilesPath,
     autoClose: store.get('autoCloseOverlay', false),
-    autoExport: store.get('autoExport', false)
+    autoExport: store.get('autoExport', true),
+    deleteAudio: store.get('deleteAudio', true),
+    docMode: store.get('docMode', 'single')
   };
 });
 
@@ -846,6 +1196,16 @@ ipcMain.handle('save-settings', async (event, settings) => {
     store.set('autoExport', settings.autoExport);
   }
 
+  // Save delete audio setting
+  if (settings.deleteAudio !== undefined) {
+    store.set('deleteAudio', settings.deleteAudio);
+  }
+
+  // Save documentation mode
+  if (settings.docMode !== undefined) {
+    store.set('docMode', settings.docMode);
+  }
+
   // Register new shortcut
   if (settings.shortcut) {
     const success = registerShortcut(settings.shortcut);
@@ -863,6 +1223,23 @@ ipcMain.handle('save-profiles-path', async (event, profilesPath) => {
   // Reload voice profiles with new path
   const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
   voiceProfiles.setStorePath(profilesPath);
+  return { success: true };
+});
+
+// Open any folder in explorer
+ipcMain.handle('open-folder', async (event, folderPath) => {
+  if (!folderPath) {
+    return { success: false, error: 'Kein Pfad angegeben' };
+  }
+
+  // Ensure folder exists
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath, { recursive: true });
+  }
+
+  // Open in explorer
+  const { shell } = require('electron');
+  shell.openPath(folderPath);
   return { success: true };
 });
 
@@ -923,6 +1300,40 @@ ipcMain.handle('select-folder', async () => {
   }
 
   return result.filePaths[0];
+});
+
+// IPC Handlers for Bausteine
+const bausteineManager = require('./src/bausteine');
+
+ipcMain.handle('get-bausteine', async () => {
+  return {
+    bausteine: bausteineManager.getAllBausteine(),
+    defaults: bausteineManager.getDefaultBausteine()
+  };
+});
+
+ipcMain.handle('save-bausteine', async (event, bausteine) => {
+  bausteineManager.saveAllBausteine(bausteine);
+  return { success: true };
+});
+
+ipcMain.handle('reset-baustein', async (event, kategorie) => {
+  bausteineManager.resetBaustein(kategorie);
+  return { success: true };
+});
+
+ipcMain.handle('reset-all-bausteine', async () => {
+  bausteineManager.resetAllBausteine();
+  return { success: true };
+});
+
+ipcMain.handle('import-bausteine', async (event, json) => {
+  bausteineManager.importBausteine(json);
+  return { success: true };
+});
+
+ipcMain.handle('export-bausteine', async () => {
+  return bausteineManager.exportBausteine();
 });
 
 // IPC Handlers for voice profiles

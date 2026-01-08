@@ -35,3 +35,15 @@
 - Unpacked ffmpeg from ASAR archive
 - Version: 1.0.3
 - Completed: Previous session
+
+
+
+lizensen für gleichzeitig installierte apps / über gleichzeitigen login ?
+-----
+knopf für aufnahme .... FLIC !? oder selber bauen ?
+-----
+16k datei ist sehr groß bei einer großen aufnahme... manuel getestet !
+-----
+
+microphone: https://www.amazon.de/Anker-Konferenzlautsprecher-integrierte-verbesserter-Gespr%C3%A4chszeit/dp/B0899S421T/ref=sr_1_1?adgrpid=77903328184&dib=eyJ2IjoiMSJ9.7-IkzsIU43ER2uVd-vdFiUZw5bsn5187DLYzlxCPhXjaYdd9GvPk4pFk9bZ2cN_Ef5ApbkTkVUz4rRJ2yy9lBvTO-D5toxmTTDqUQZu5DcyhVMb51iDe5nuAjCGI92UwG7rwLtZBEGRUhQ0a6pqYM-C_dDtpY_eg_ZAzJkmyKt69GsOEeA25NX1JmfJFyvLzZKUjKW_-ztzaItOay1UDbW1eOK3XUNoe7ltbS1SAf6U.gF7b4uPWJFIGDiTIr4HP0wkdSwL82apKWEECOPIejhE&dib_tag=se&hvadid=352728096168&hvdev=c&hvexpln=0&hvlocphy=9192964&hvnetw=g&hvocijid=3668850731596253718--&hvqmt=e&hvrand=3668850731596253718&hvtargid=kwd-940776181362&hydadcr=26672_1770882&keywords=anker%2Bpowerconf%2Bs3&mcid=35ac095e312e356a86875e33e268f56f&qid=1767732848&sr=8-1&th=1
+

@@ -105,38 +105,56 @@ async function initialize() {
  * @returns {Float32Array} Audio samples
  */
 function extractAudioSegment(audioFilePath, startMs, durationMs = 30000) {
-  // Read WAV file and extract PCM data
-  const wavData = fs.readFileSync(audioFilePath);
+  // Read only the WAV header first (44 bytes)
+  const headerBuffer = Buffer.alloc(44);
+  const fd = fs.openSync(audioFilePath, 'r');
 
-  // Parse WAV header (44 bytes typically)
-  const dataStart = 44; // Standard WAV header size
-  const sampleRate = wavData.readUInt32LE(24); // Sample rate at byte 24
-  const bitsPerSample = wavData.readUInt16LE(34); // Bits per sample at byte 34
+  try {
+    fs.readSync(fd, headerBuffer, 0, 44, 0);
 
-  if (sampleRate !== 16000) {
-    throw new Error(`Audio must be 16kHz, got ${sampleRate}Hz`);
+    // Parse WAV header
+    const dataStart = 44; // Standard WAV header size
+    const sampleRate = headerBuffer.readUInt32LE(24);
+    const bitsPerSample = headerBuffer.readUInt16LE(34);
+
+    if (sampleRate !== 16000) {
+      throw new Error(`Audio must be 16kHz, got ${sampleRate}Hz`);
+    }
+
+    if (bitsPerSample !== 16) {
+      throw new Error(`Audio must be 16-bit PCM, got ${bitsPerSample}-bit`);
+    }
+
+    // Calculate byte positions
+    const startSample = Math.floor((startMs / 1000) * sampleRate);
+    const numSamples = Math.floor((durationMs / 1000) * sampleRate);
+    const startByte = dataStart + (startSample * 2);
+    const bytesToRead = numSamples * 2; // 2 bytes per sample for 16-bit
+
+    // Get file size to avoid reading past end
+    const fileStats = fs.fstatSync(fd);
+    const actualBytesToRead = Math.min(bytesToRead, fileStats.size - startByte);
+
+    if (actualBytesToRead <= 0) {
+      return new Float32Array(0);
+    }
+
+    // Read only the segment we need
+    const segmentBuffer = Buffer.alloc(actualBytesToRead);
+    fs.readSync(fd, segmentBuffer, 0, actualBytesToRead, startByte);
+
+    // Convert to Float32Array
+    const numSamplesActual = Math.floor(actualBytesToRead / 2);
+    const pcmData = new Float32Array(numSamplesActual);
+
+    for (let i = 0; i < numSamplesActual; i++) {
+      pcmData[i] = segmentBuffer.readInt16LE(i * 2) / 32768.0;
+    }
+
+    return pcmData;
+  } finally {
+    fs.closeSync(fd);
   }
-
-  if (bitsPerSample !== 16) {
-    throw new Error(`Audio must be 16-bit PCM, got ${bitsPerSample}-bit`);
-  }
-
-  // Calculate sample positions
-  const startSample = Math.floor((startMs / 1000) * sampleRate);
-  const numSamples = Math.floor((durationMs / 1000) * sampleRate);
-
-  // Extract PCM data (2 bytes per sample for 16-bit)
-  const pcmData = [];
-  const startByte = dataStart + (startSample * 2);
-  const endByte = Math.min(startByte + (numSamples * 2), wavData.length);
-
-  for (let i = startByte; i < endByte; i += 2) {
-    // Read 16-bit signed integer, normalize to -1.0 to 1.0
-    const sample = wavData.readInt16LE(i) / 32768.0;
-    pcmData.push(sample);
-  }
-
-  return new Float32Array(pcmData);
 }
 
 /**

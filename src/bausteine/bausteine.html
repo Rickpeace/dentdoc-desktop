@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DentDoc Bausteine</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: #4CAF50;
+      margin-bottom: 10px;
+      font-size: 24px;
+    }
+
+    .subtitle {
+      color: #888;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .toolbar button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #45a049;
+    }
+
+    .btn-secondary {
+      background: #555;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #666;
+    }
+
+    .btn-danger {
+      background: #f44336;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #d32f2f;
+    }
+
+    .bausteine-list {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .baustein-card {
+      background: #333;
+      border-radius: 8px;
+      padding: 15px;
+      border-left: 4px solid #4CAF50;
+    }
+
+    .baustein-card.custom {
+      border-left-color: #2196F3;
+    }
+
+    .baustein-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .baustein-name {
+      font-weight: 600;
+      font-size: 16px;
+      color: #fff;
+    }
+
+    .baustein-id {
+      font-size: 11px;
+      color: #888;
+      background: #444;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .baustein-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+
+    .badge-default {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .badge-custom {
+      background: #2196F3;
+      color: white;
+    }
+
+    .baustein-text {
+      margin-bottom: 10px;
+    }
+
+    .baustein-text label {
+      display: block;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 5px;
+    }
+
+    .baustein-text textarea {
+      width: 100%;
+      min-height: 80px;
+      padding: 10px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #2a2a2a;
+      color: #e0e0e0;
+      font-size: 13px;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .baustein-text textarea:focus {
+      outline: none;
+      border-color: #4CAF50;
+    }
+
+    .baustein-keywords {
+      margin-bottom: 10px;
+    }
+
+    .baustein-keywords label {
+      display: block;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 5px;
+    }
+
+    .baustein-keywords input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #2a2a2a;
+      color: #e0e0e0;
+      font-size: 13px;
+    }
+
+    .baustein-keywords input:focus {
+      outline: none;
+      border-color: #4CAF50;
+    }
+
+    .baustein-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .baustein-actions button {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .btn-reset {
+      background: #ff9800;
+      color: white;
+    }
+
+    .btn-reset:hover {
+      background: #f57c00;
+    }
+
+    .btn-reset:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    .info-box {
+      background: #2a3a2a;
+      border: 1px solid #4CAF50;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+
+    .info-box h3 {
+      color: #4CAF50;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .info-box p {
+      font-size: 13px;
+      color: #aaa;
+      line-height: 1.5;
+    }
+
+    .status-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #333;
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid #444;
+    }
+
+    .status-message {
+      font-size: 13px;
+      color: #888;
+    }
+
+    .status-message.success {
+      color: #4CAF50;
+    }
+
+    .status-message.error {
+      color: #f44336;
+    }
+
+    .footer-spacer {
+      height: 60px;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal {
+      background: #333;
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 500px;
+      width: 90%;
+    }
+
+    .modal h2 {
+      color: #fff;
+      margin-bottom: 15px;
+      font-size: 18px;
+    }
+
+    .modal textarea {
+      width: 100%;
+      height: 200px;
+      padding: 10px;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #2a2a2a;
+      color: #e0e0e0;
+      font-family: monospace;
+      font-size: 12px;
+      margin-bottom: 15px;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Dokumentations-Bausteine</h1>
+    <p class="subtitle">Standard-Aufklärungstexte für die Agent-Kette Dokumentation</p>
+
+    <div class="info-box">
+      <h3>So funktionieren Bausteine</h3>
+      <p>
+        Wenn die Agent-Kette eine Behandlungskategorie erkennt, wird der entsprechende Baustein
+        <strong>automatisch eingefügt</strong>. Die KI prüft zusätzlich, ob im Gespräch etwas
+        <strong>Abweichendes</strong> oder <strong>Zusätzliches</strong> gesagt wurde und ergänzt dies.
+      </p>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn-primary" onclick="saveAllChanges()">Alle speichern</button>
+      <button class="btn-secondary" onclick="showExportModal()">Exportieren</button>
+      <button class="btn-secondary" onclick="showImportModal()">Importieren</button>
+      <button class="btn-danger" onclick="confirmResetAll()">Alle zurücksetzen</button>
+    </div>
+
+    <div class="bausteine-list" id="bausteineList">
+      <!-- Wird dynamisch gefüllt -->
+    </div>
+
+    <div class="footer-spacer"></div>
+  </div>
+
+  <div class="status-bar">
+    <span class="status-message" id="statusMessage">Bereit</span>
+    <span id="bausteinCount">0 Bausteine</span>
+  </div>
+
+  <!-- Export Modal -->
+  <div class="modal-overlay" id="exportModal">
+    <div class="modal">
+      <h2>Bausteine exportieren</h2>
+      <textarea id="exportData" readonly></textarea>
+      <div class="modal-actions">
+        <button class="btn-secondary" onclick="copyExport()">In Zwischenablage</button>
+        <button class="btn-secondary" onclick="closeModal('exportModal')">Schließen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Modal -->
+  <div class="modal-overlay" id="importModal">
+    <div class="modal">
+      <h2>Bausteine importieren</h2>
+      <textarea id="importData" placeholder="JSON hier einfügen..."></textarea>
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="doImport()">Importieren</button>
+        <button class="btn-secondary" onclick="closeModal('importModal')">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let bausteine = {};
+    let defaultBausteine = {};
+    let hasUnsavedChanges = false;
+
+    // Initialisierung
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadBausteine();
+      renderBausteine();
+    });
+
+    async function loadBausteine() {
+      try {
+        const result = await ipcRenderer.invoke('get-bausteine');
+        bausteine = result.bausteine;
+        defaultBausteine = result.defaults;
+        updateCount();
+      } catch (error) {
+        showStatus('Fehler beim Laden: ' + error.message, 'error');
+      }
+    }
+
+    function renderBausteine() {
+      const container = document.getElementById('bausteineList');
+      container.innerHTML = '';
+
+      for (const [id, baustein] of Object.entries(bausteine)) {
+        const isCustom = isCustomBaustein(id);
+        const card = document.createElement('div');
+        card.className = `baustein-card ${isCustom ? 'custom' : ''}`;
+        card.innerHTML = `
+          <div class="baustein-header">
+            <div>
+              <span class="baustein-name">${baustein.name}</span>
+              <span class="baustein-badge ${isCustom ? 'badge-custom' : 'badge-default'}">
+                ${isCustom ? 'Angepasst' : 'Standard'}
+              </span>
+            </div>
+            <span class="baustein-id">${id}</span>
+          </div>
+          <div class="baustein-text">
+            <label>Aufklärungstext (wird automatisch eingefügt):</label>
+            <textarea
+              id="text-${id}"
+              onchange="markChanged('${id}')"
+            >${baustein.standardText}</textarea>
+          </div>
+          <div class="baustein-keywords">
+            <label>Schlüsselwörter (kommagetrennt):</label>
+            <input
+              type="text"
+              id="keywords-${id}"
+              value="${(baustein.keywords || []).join(', ')}"
+              onchange="markChanged('${id}')"
+            />
+          </div>
+          <div class="baustein-actions">
+            <button
+              class="btn-reset"
+              onclick="resetBaustein('${id}')"
+              ${!isCustom ? 'disabled' : ''}
+            >
+              Auf Standard zurücksetzen
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      }
+    }
+
+    function isCustomBaustein(id) {
+      if (!defaultBausteine[id]) return true;
+      const current = bausteine[id];
+      const defaultB = defaultBausteine[id];
+      return current.standardText !== defaultB.standardText ||
+             JSON.stringify(current.keywords) !== JSON.stringify(defaultB.keywords);
+    }
+
+    function markChanged(id) {
+      hasUnsavedChanges = true;
+      showStatus('Ungespeicherte Änderungen', 'warning');
+
+      // Update local data
+      const textEl = document.getElementById(`text-${id}`);
+      const keywordsEl = document.getElementById(`keywords-${id}`);
+
+      if (textEl && keywordsEl) {
+        bausteine[id].standardText = textEl.value;
+        bausteine[id].keywords = keywordsEl.value.split(',').map(k => k.trim().toLowerCase()).filter(k => k);
+      }
+
+      // Re-render to update badge
+      renderBausteine();
+    }
+
+    async function saveAllChanges() {
+      try {
+        // Collect all current values
+        for (const id of Object.keys(bausteine)) {
+          const textEl = document.getElementById(`text-${id}`);
+          const keywordsEl = document.getElementById(`keywords-${id}`);
+
+          if (textEl && keywordsEl) {
+            bausteine[id].standardText = textEl.value;
+            bausteine[id].keywords = keywordsEl.value.split(',').map(k => k.trim().toLowerCase()).filter(k => k);
+          }
+        }
+
+        await ipcRenderer.invoke('save-bausteine', bausteine);
+        hasUnsavedChanges = false;
+        showStatus('Alle Bausteine gespeichert!', 'success');
+        renderBausteine();
+      } catch (error) {
+        showStatus('Fehler beim Speichern: ' + error.message, 'error');
+      }
+    }
+
+    async function resetBaustein(id) {
+      if (!confirm(`Baustein "${bausteine[id].name}" auf Standard zurücksetzen?`)) {
+        return;
+      }
+
+      try {
+        await ipcRenderer.invoke('reset-baustein', id);
+        await loadBausteine();
+        renderBausteine();
+        showStatus(`"${bausteine[id].name}" zurückgesetzt`, 'success');
+      } catch (error) {
+        showStatus('Fehler: ' + error.message, 'error');
+      }
+    }
+
+    async function confirmResetAll() {
+      if (!confirm('ALLE Bausteine auf Standard zurücksetzen?\n\nDies kann nicht rückgängig gemacht werden!')) {
+        return;
+      }
+
+      try {
+        await ipcRenderer.invoke('reset-all-bausteine');
+        await loadBausteine();
+        renderBausteine();
+        hasUnsavedChanges = false;
+        showStatus('Alle Bausteine zurückgesetzt', 'success');
+      } catch (error) {
+        showStatus('Fehler: ' + error.message, 'error');
+      }
+    }
+
+    function showExportModal() {
+      document.getElementById('exportData').value = JSON.stringify(bausteine, null, 2);
+      document.getElementById('exportModal').classList.add('active');
+    }
+
+    function showImportModal() {
+      document.getElementById('importData').value = '';
+      document.getElementById('importModal').classList.add('active');
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('active');
+    }
+
+    function copyExport() {
+      const data = document.getElementById('exportData').value;
+      navigator.clipboard.writeText(data);
+      showStatus('In Zwischenablage kopiert!', 'success');
+    }
+
+    async function doImport() {
+      const data = document.getElementById('importData').value;
+
+      try {
+        await ipcRenderer.invoke('import-bausteine', data);
+        await loadBausteine();
+        renderBausteine();
+        closeModal('importModal');
+        showStatus('Bausteine importiert!', 'success');
+      } catch (error) {
+        showStatus('Import fehlgeschlagen: ' + error.message, 'error');
+      }
+    }
+
+    function showStatus(message, type = '') {
+      const el = document.getElementById('statusMessage');
+      el.textContent = message;
+      el.className = 'status-message ' + type;
+    }
+
+    function updateCount() {
+      document.getElementById('bausteinCount').textContent =
+        `${Object.keys(bausteine).length} Bausteine`;
+    }
+
+    // Warn before closing with unsaved changes
+    window.addEventListener('beforeunload', (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+  </script>
+</body>
+</html>

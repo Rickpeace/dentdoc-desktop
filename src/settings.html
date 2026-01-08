@@ -201,6 +201,12 @@
       display: flex;
       gap: 12px;
       align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .shortcut-input input[type="text"] {
+      flex: 1;
+      margin-bottom: 0;
     }
 
     .shortcut-display {
@@ -335,17 +341,36 @@
 
       <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 16px;">
         <input type="checkbox" id="autoExportCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
-        <span>Transkripte automatisch speichern</span>
+        <span>Transkripte speichern</span>
       </label>
 
       <div id="exportPathSection">
         <label for="transcriptPath">Speicherort:</label>
         <div class="shortcut-input">
           <input type="text" id="transcriptPath" readonly placeholder="Noch nicht festgelegt">
-          <button id="browseTranscriptBtn" class="btn-secondary">Durchsuchen</button>
+          <button id="browseTranscriptBtn" class="btn-secondary">Ändern</button>
+          <button id="openTranscriptFolderBtn" class="btn-secondary">Öffnen</button>
         </div>
         <p class="helper-text">Transkripte werden als TXT-Dateien gespeichert (Datum_Uhrzeit.txt)</p>
       </div>
+    </div>
+
+    <!-- Recordings Section -->
+    <div class="section">
+      <h2>Aufnahmen</h2>
+
+      <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 16px;">
+        <input type="checkbox" id="deleteAudioCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
+        <span>Aufnahmen nach erfolgreicher Verarbeitung löschen</span>
+      </label>
+
+      <label for="recordingsPath">Speicherort:</label>
+      <div class="shortcut-input">
+        <input type="text" id="recordingsPath" readonly placeholder="Standard (temporär)">
+        <button id="browseRecordingsBtn" class="btn-secondary">Ändern</button>
+        <button id="openRecordingsFolderBtn" class="btn-secondary">Öffnen</button>
+      </div>
+      <p class="helper-text">Bei deaktivierter Löschung bleiben die Aufnahmen hier gespeichert.</p>
     </div>
 
     <!-- Voice Profiles Section -->
@@ -355,9 +380,25 @@
       <label for="profilesPath">Speicherort für Stimmprofile:</label>
       <div class="shortcut-input">
         <input type="text" id="profilesPath" readonly placeholder="Standard (lokal)">
-        <button id="browseProfilesBtn" class="btn-secondary">Durchsuchen</button>
+        <button id="browseProfilesBtn" class="btn-secondary">Ändern</button>
+        <button id="openProfilesFolderBtn" class="btn-secondary">Öffnen</button>
       </div>
       <p class="helper-text">⚠️ Für mehrere PCs: Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\profiles)</p>
+    </div>
+
+    <!-- Documentation Mode Section -->
+    <div class="section">
+      <h2>Dokumentations-Modus</h2>
+
+      <label for="docModeSelect">Modus auswählen:</label>
+      <select id="docModeSelect">
+        <option value="single">Single Prompt (Standard)</option>
+        <option value="agent-chain">Agent-Kette mit Bausteinen</option>
+      </select>
+      <p class="helper-text">
+        <strong>Single Prompt:</strong> Ein KI-Aufruf für die gesamte Dokumentation.<br>
+        <strong>Agent-Kette:</strong> Erkennt Behandlungskategorien und fügt automatisch Standard-Aufklärungstexte hinzu.
+      </p>
     </div>
 
     <!-- Behavior Section -->
@@ -384,12 +425,6 @@
       </div>
 
       <div id="logStatus" class="status info" style="display: none; margin-top: 12px;"></div>
-
-      <p class="helper-text" style="margin-top: 20px; margin-bottom: 12px;">
-        Hier finden Sie die letzte Audioaufnahme (falls vorhanden).
-      </p>
-
-      <button id="openTempFolderBtn" class="btn-secondary" style="width: 100%;">Aufnahme-Ordner öffnen</button>
     </div>
 
     <!-- Buttons -->
@@ -424,13 +459,19 @@
     const shortcutStatus = document.getElementById('shortcutStatus');
     const transcriptPath = document.getElementById('transcriptPath');
     const browseTranscriptBtn = document.getElementById('browseTranscriptBtn');
+    const openTranscriptFolderBtn = document.getElementById('openTranscriptFolderBtn');
     const profilesPath = document.getElementById('profilesPath');
     const browseProfilesBtn = document.getElementById('browseProfilesBtn');
+    const openProfilesFolderBtn = document.getElementById('openProfilesFolderBtn');
     const autoCloseCheckbox = document.getElementById('autoCloseCheckbox');
     const autoExportCheckbox = document.getElementById('autoExportCheckbox');
+    const deleteAudioCheckbox = document.getElementById('deleteAudioCheckbox');
+    const docModeSelect = document.getElementById('docModeSelect');
+    const recordingsPath = document.getElementById('recordingsPath');
+    const browseRecordingsBtn = document.getElementById('browseRecordingsBtn');
+    const openRecordingsFolderBtn = document.getElementById('openRecordingsFolderBtn');
     const openLogBtn = document.getElementById('openLogBtn');
     const copyLogPathBtn = document.getElementById('copyLogPathBtn');
-    const openTempFolderBtn = document.getElementById('openTempFolderBtn');
     const logStatus = document.getElementById('logStatus');
     const saveBtn = document.getElementById('saveBtn');
     const cancelBtn = document.getElementById('cancelBtn');
@@ -444,8 +485,11 @@
       selectedMicId = settings.microphoneId || null;
       transcriptPath.value = settings.transcriptPath || '';
       profilesPath.value = settings.profilesPath || '';
+      recordingsPath.value = settings.recordingsPath || '';
       autoCloseCheckbox.checked = settings.autoClose || false;
       autoExportCheckbox.checked = settings.autoExport || false;
+      deleteAudioCheckbox.checked = settings.deleteAudio || false;
+      docModeSelect.value = settings.docMode || 'single';
 
       // Load microphones
       await loadMicrophones();
@@ -456,8 +500,11 @@
         microphoneId: selectedMicId,
         transcriptPath: settings.transcriptPath || '',
         profilesPath: settings.profilesPath || '',
+        recordingsPath: settings.recordingsPath || '',
         autoClose: settings.autoClose || false,
-        autoExport: settings.autoExport || false
+        autoExport: settings.autoExport || false,
+        deleteAudio: settings.deleteAudio || false,
+        docMode: settings.docMode || 'single'
       };
     }
 
@@ -468,8 +515,11 @@
         microphoneId: micSelect.value,
         transcriptPath: transcriptPath.value,
         profilesPath: profilesPath.value,
+        recordingsPath: recordingsPath.value,
         autoClose: autoCloseCheckbox.checked,
-        autoExport: autoExportCheckbox.checked
+        autoExport: autoExportCheckbox.checked,
+        deleteAudio: deleteAudioCheckbox.checked,
+        docMode: docModeSelect.value
       };
 
       hasUnsavedChanges = JSON.stringify(currentSettings) !== JSON.stringify(initialSettings);
@@ -587,8 +637,11 @@
     // Track changes on all inputs
     transcriptPath.addEventListener('input', checkForChanges);
     profilesPath.addEventListener('input', checkForChanges);
+    recordingsPath.addEventListener('input', checkForChanges);
     autoCloseCheckbox.addEventListener('change', checkForChanges);
     autoExportCheckbox.addEventListener('change', checkForChanges);
+    deleteAudioCheckbox.addEventListener('change', checkForChanges);
+    docModeSelect.addEventListener('change', checkForChanges);
 
     // Open Windows sound settings
     openSoundSettingsBtn.addEventListener('click', async () => {
@@ -664,12 +717,45 @@
       }
     });
 
+    // Open transcript folder
+    openTranscriptFolderBtn.addEventListener('click', async () => {
+      if (transcriptPath.value) {
+        await ipcRenderer.invoke('open-folder', transcriptPath.value);
+      }
+    });
+
     // Browse for profiles folder
     browseProfilesBtn.addEventListener('click', async () => {
       const result = await ipcRenderer.invoke('select-folder');
       if (result) {
         profilesPath.value = result;
         checkForChanges();
+      }
+    });
+
+    // Open profiles folder
+    openProfilesFolderBtn.addEventListener('click', async () => {
+      if (profilesPath.value) {
+        await ipcRenderer.invoke('open-folder', profilesPath.value);
+      }
+    });
+
+    // Browse for recordings folder
+    browseRecordingsBtn.addEventListener('click', async () => {
+      const result = await ipcRenderer.invoke('select-folder');
+      if (result) {
+        recordingsPath.value = result;
+        checkForChanges();
+      }
+    });
+
+    // Open recordings folder
+    openRecordingsFolderBtn.addEventListener('click', async () => {
+      if (recordingsPath.value) {
+        await ipcRenderer.invoke('open-folder', recordingsPath.value);
+      } else {
+        // Open temp folder if no custom path is set
+        await ipcRenderer.invoke('open-temp-folder');
       }
     });
 
@@ -680,8 +766,11 @@
         microphoneId: micSelect.value,
         transcriptPath: transcriptPath.value,
         profilesPath: profilesPath.value,
+        recordingsPath: recordingsPath.value,
         autoClose: autoCloseCheckbox.checked,
-        autoExport: autoExportCheckbox.checked
+        autoExport: autoExportCheckbox.checked,
+        deleteAudio: deleteAudioCheckbox.checked,
+        docMode: docModeSelect.value
       };
 
       try {
@@ -750,14 +839,6 @@
         await navigator.clipboard.writeText(path);
         showStatus(logStatus, 'Pfad kopiert: ' + path, 'success');
         setTimeout(() => hideStatus(logStatus), 3000);
-      } catch (error) {
-        showStatus(logStatus, 'Fehler: ' + error.message, 'error');
-      }
-    });
-
-    openTempFolderBtn.addEventListener('click', async () => {
-      try {
-        await ipcRenderer.invoke('open-temp-folder');
       } catch (error) {
         showStatus(logStatus, 'Fehler: ' + error.message, 'error');
       }

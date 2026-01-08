@@ -38,20 +38,31 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       background: transparent;
       overflow: hidden;
+      padding: 4px;
     }
 
     .container {
       background: rgba(30, 30, 30, 0.98);
       border-radius: 14px;
       padding: 20px 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
       border: 1px solid rgba(255, 255, 255, 0.1);
+      position: relative;
     }
 
     .header {
       display: flex;
       align-items: center;
       gap: 14px;
+    }
+
+    /* Drag handle for moving the window - leave space for close button */
+    .drag-handle {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 50px; /* Space for close button */
+      height: 50px;
+      cursor: move;
       -webkit-app-region: drag;
     }
 
@@ -322,6 +333,7 @@
 </head>
 <body>
   <div class="container">
+    <div class="drag-handle"></div>
     <div class="header">
       <div id="icon" class="icon recording">
         <span id="iconEmoji">🔴</span>
@@ -448,10 +460,27 @@
         step4.className = 'progress-step done';
       } else {
         progressFill.classList.remove('complete');
-        if (step >= 1) step1.className = step === 1 ? 'progress-step active' : 'progress-step done';
-        if (step >= 2) step2.className = step === 2 ? 'progress-step active' : 'progress-step done';
-        if (step >= 3) step3.className = step === 3 ? 'progress-step active' : 'progress-step done';
-        if (step >= 4) step4.className = step === 4 ? 'progress-step active' : 'progress-step done';
+        // Reset all steps to grey (not started)
+        step1.className = 'progress-step';
+        step2.className = 'progress-step';
+        step3.className = 'progress-step';
+        step4.className = 'progress-step';
+        // Mark steps: done (green) for completed, active (orange) for current, grey for not started
+        if (step === 1) {
+          step1.className = 'progress-step active';
+        } else if (step === 2) {
+          step1.className = 'progress-step done';
+          step2.className = 'progress-step active';
+        } else if (step === 3) {
+          step1.className = 'progress-step done';
+          step2.className = 'progress-step done';
+          step3.className = 'progress-step active';
+        } else if (step === 4) {
+          step1.className = 'progress-step done';
+          step2.className = 'progress-step done';
+          step3.className = 'progress-step done';
+          step4.className = 'progress-step active';
+        }
       }
     }
 

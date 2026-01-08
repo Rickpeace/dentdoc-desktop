@@ -44,7 +44,7 @@ function cleanupOldRecordings(tempDir) {
   }
 }
 
-function startRecording() {
+function startRecording(deleteAudio = false) {
   return new Promise((resolve, reject) => {
     try {
       // Create temp directory if it doesn't exist
@@ -53,8 +53,10 @@ function startRecording() {
         fs.mkdirSync(tempDir, { recursive: true });
       }
 
-      // Clean up any previous recordings - keep only the new one
-      cleanupOldRecordings(tempDir);
+      // Clean up previous recordings only if deleteAudio setting is enabled
+      if (deleteAudio) {
+        cleanupOldRecordings(tempDir);
+      }
 
       // Generate unique filename
       const timestamp = Date.now();
