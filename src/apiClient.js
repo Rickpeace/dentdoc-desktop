@@ -1,21 +1,129 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 
 // DentDoc Vercel API URL
 
 const API_BASE_URL = process.env.API_URL || 'https://dentdoc-app.vercel.app/';
 
-async function login(email, password) {
+/**
+ * Get or create a unique device ID for this installation
+ * @param {Object} store - electron-store instance
+ * @returns {string} Device ID
+ */
+function getDeviceId(store) {
+  let deviceId = store.get('deviceId');
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    store.set('deviceId', deviceId);
+  }
+  return deviceId;
+}
+
+/**
+ * Get device info for identification
+ * @returns {Object} Device info
+ */
+function getDeviceInfo() {
+  return {
+    os: `${os.platform()} ${os.release()}`,
+    hostname: os.hostname(),
+    arch: os.arch(),
+  };
+}
+
+/**
+ * Login with device tracking
+ * @param {string} email
+ * @param {string} password
+ * @param {Object} store - electron-store instance for device ID
+ * @returns {Promise<Object>} Login response with token and user
+ */
+async function login(email, password, store) {
   try {
+    const deviceId = getDeviceId(store);
+    const deviceInfo = getDeviceInfo();
+
     const response = await axios.post(`${API_BASE_URL}/api/auth/login`, {
       email,
-      password
+      password,
+      deviceId,
+      deviceName: deviceInfo.hostname,
+      deviceInfo,
     });
 
     return response.data;
   } catch (error) {
-    throw new Error(error.response?.data?.error || 'Login fehlgeschlagen');
+    const errorData = error.response?.data;
+
+    // Handle max devices reached error
+    if (errorData?.error === 'max_devices_reached') {
+      throw new Error(`MAX_DEVICES:${errorData.message}`);
+    }
+
+    throw new Error(errorData?.error || 'Login fehlgeschlagen');
+  }
+}
+
+/**
+ * Logout and free device slot
+ * @param {string} token - Auth token
+ * @param {Object} store - electron-store instance
+ * @returns {Promise<void>}
+ */
+async function logout(token, store) {
+  try {
+    const deviceId = store.get('deviceId');
+    if (!deviceId) return;
+
+    await axios.post(`${API_BASE_URL}/api/auth/logout`,
+      { deviceId },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Logout error:', error.response?.data || error.message);
+    // Don't throw - logout should always succeed locally even if server fails
+  }
+}
+
+/**
+ * Send heartbeat to keep device session active
+ * @param {string} token - Auth token
+ * @param {Object} store - electron-store instance
+ * @returns {Promise<boolean>} True if successful, false if session expired
+ */
+async function heartbeat(token, store) {
+  try {
+    const deviceId = store.get('deviceId');
+    if (!deviceId) return false;
+
+    const response = await axios.post(`${API_BASE_URL}/api/device/heartbeat`,
+      { deviceId },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      }
+    );
+
+    return response.data.success;
+  } catch (error) {
+    const errorData = error.response?.data;
+
+    // Session expired - device was logged out remotely
+    if (errorData?.error === 'session_expired' || error.response?.status === 401) {
+      return false;
+    }
+
+    console.error('Heartbeat error:', error.response?.data || error.message);
+    // Return true on network errors - don't logout user for temporary issues
+    return true;
   }
 }
 
@@ -68,6 +176,15 @@ async function uploadAudio(audioFilePath, token) {
 
     const serverError = error.response?.data?.error;
     if (serverError) {
+      // Handle trial expired
+      if (serverError === 'trial_expired') {
+        throw new Error('TRIAL_EXPIRED:Ihre kostenlosen Testminuten sind aufgebraucht. Bitte abonnieren Sie, um fortzufahren.');
+      }
+      // Handle subscription inactive
+      if (serverError === 'subscription_inactive') {
+        throw new Error('SUBSCRIPTION_INACTIVE:Ihr Abonnement ist nicht aktiv. Bitte überprüfen Sie Ihren Zahlungsstatus.');
+      }
+      // Legacy minutes error
       if (serverError.includes('minutes') || serverError.includes('Minuten')) {
         throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
       }
@@ -264,6 +381,8 @@ async function submitFeedback(token, category, message) {
 
 module.exports = {
   login,
+  logout,
+  heartbeat,
   getUser,
   uploadAudio,
   getDocumentation,
@@ -271,5 +390,7 @@ module.exports = {
   updateSpeakerMapping,
   getTranscription,
   getBaseUrl,
-  submitFeedback
+  submitFeedback,
+  getDeviceId,
+  getDeviceInfo,
 };

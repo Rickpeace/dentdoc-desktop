@@ -57,6 +57,7 @@ let currentShortcut = null;
 let autoHideTimeout = null;
 let lastDocumentation = null;
 let lastTranscript = null;
+let heartbeatInterval = null;
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -70,9 +71,9 @@ app.setLoginItemSettings({
   path: app.getPath('exe')
 });
 
-function openDashboard() {
+function openDashboard(path = '') {
   const baseUrl = apiClient.getBaseUrl().replace(/\/$/, '');
-  shell.openExternal(baseUrl + '/dashboard');
+  shell.openExternal(baseUrl + '/dashboard' + path);
 }
 
 function openSettings() {
@@ -365,53 +366,75 @@ function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
   tray = new Tray(iconPath);
 
-  updateTrayMenu();
-
+  // Don't set a static context menu - we'll show it dynamically on right-click
+  // This allows us to refresh user data before showing the menu
   tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
 
-  tray.on('click', async () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      // Show confirmation dialog before starting recording
-      const token = store.get('authToken');
-      if (!token) {
-        createLoginWindow();
-        return;
-      }
+  // Cooldown to prevent too many API calls
+  let lastRefreshTime = 0;
+  const REFRESH_COOLDOWN = 10000; // Only refresh every 10 seconds max
 
-      const shortcut = store.get('shortcut') || 'F9';
-      const { response } = await dialog.showMessageBox({
-        type: 'question',
-        buttons: ['Aufnahme starten', 'Abbrechen'],
-        defaultId: 0,
-        title: 'DentDoc',
-        message: 'Möchten Sie die Aufnahme starten?',
-        detail: `Drücken Sie ${shortcut} oder klicken Sie erneut auf das Tray-Icon um die Aufnahme zu stoppen.`
-      });
+  // Right-click: Refresh data, then show menu
+  tray.on('right-click', async () => {
+    const token = store.get('authToken');
+    const now = Date.now();
 
-      if (response === 0) {
-        startRecording();
-      }
+    // Refresh user data if logged in and cooldown has passed
+    if (token && (now - lastRefreshTime) > REFRESH_COOLDOWN) {
+      lastRefreshTime = now;
+      await refreshUserData();
     }
+
+    // Build and show menu with current data
+    const menu = buildTrayMenu();
+    tray.popUpContextMenu(menu);
+  });
+
+  // Left-click also opens the menu (same as right-click)
+  tray.on('click', async () => {
+    const token = store.get('authToken');
+    const now = Date.now();
+
+    // Refresh user data if logged in and cooldown has passed
+    if (token && (now - lastRefreshTime) > REFRESH_COOLDOWN) {
+      lastRefreshTime = now;
+      await refreshUserData();
+    }
+
+    // Build and show menu with current data
+    const menu = buildTrayMenu();
+    tray.popUpContextMenu(menu);
   });
 }
 
-function updateTrayMenu() {
+// Build and return the tray menu (called dynamically on right-click)
+function buildTrayMenu() {
   const token = store.get('authToken');
   const user = store.get('user');
 
   if (!token) {
-    const contextMenu = Menu.buildFromTemplate([
+    return Menu.buildFromTemplate([
       { label: 'Anmelden', click: () => createLoginWindow() },
       { type: 'separator' },
       { label: 'Beenden', click: () => app.quit() }
     ]);
-    tray.setContextMenu(contextMenu);
-    return;
   }
 
   const shortcut = store.get('shortcut') || 'F9';
+
+  // Check subscription/trial status (matching web app logic)
+  const hasActiveSubscription = user?.subscriptionStatus === 'active';
+  const isCanceled = user?.subscriptionStatus === 'canceled';
+  const minutesRemaining = user?.minutesRemaining || 0;
+
+  // Distinguish between true trial users and ex-subscribers
+  // Ex-subscriber: has stripeCustomerId (was once a paying customer) or subscription is canceled
+  const wasSubscriber = isCanceled || (user?.planTier === 'free_trial' && user?.stripeCustomerId);
+  const isRealTrial = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining > 0;
+  const trialExpired = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
+
+  // No active subscription (either trial expired or was subscriber)
+  const noActiveSubscription = !hasActiveSubscription && (trialExpired || wasSubscriber);
 
   // Determine menu label based on state
   let recordingLabel;
@@ -423,9 +446,43 @@ function updateTrayMenu() {
     recordingLabel = `⏺ Aufnahme stoppen (${shortcut})`;
   } else {
     recordingLabel = `▶ Aufnahme starten (${shortcut})`;
+    // Disable if no active subscription
+    if (noActiveSubscription) {
+      recordingEnabled = false;
+    }
   }
 
-  const contextMenu = Menu.buildFromTemplate([
+  // Build status label for trial/subscription (matching web app)
+  let statusLabel;
+  if (hasActiveSubscription) {
+    statusLabel = `✓ DentDoc Pro (${user?.maxDevices || 1} PC${(user?.maxDevices || 1) !== 1 ? 's' : ''})`;
+  } else if (isRealTrial) {
+    statusLabel = `Testphase: ${minutesRemaining} Min übrig`;
+  } else if (wasSubscriber) {
+    // Was a subscriber but now canceled/expired - same as web app
+    statusLabel = '⚠️ KEIN AKTIVES ABO';
+  } else if (trialExpired) {
+    // True trial user who never subscribed
+    statusLabel = '⚠️ TESTPHASE BEENDET';
+  } else {
+    statusLabel = 'Kein aktives Abo';
+  }
+
+  return Menu.buildFromTemplate([
+    // Status display - clickable if trial expired to open subscription page
+    {
+      label: statusLabel,
+      enabled: trialExpired ? true : false,
+      click: trialExpired ? () => openDashboard('/subscription') : undefined,
+    },
+    // If trial expired or no subscription, show upgrade link
+    ...(trialExpired || (!hasActiveSubscription && !isRealTrial) ? [{
+      label: '🛒 JETZT ABO KAUFEN →',
+      click: () => {
+        openDashboard('/subscription');
+      }
+    }] : []),
+    { type: 'separator' },
     {
       label: recordingLabel,
       enabled: recordingEnabled,
@@ -439,7 +496,7 @@ function updateTrayMenu() {
     },
     {
       label: 'Audio-Datei transkribieren...',
-      enabled: !isRecording && !isProcessing,
+      enabled: !isRecording && !isProcessing && !noActiveSubscription,
       click: () => {
         selectAndTranscribeAudioFile();
       }
@@ -485,10 +542,16 @@ function updateTrayMenu() {
     { type: 'separator' },
     {
       label: 'Abmelden',
-      click: () => {
+      click: async () => {
+        const token = store.get('authToken');
+        // Stop heartbeat
+        stopHeartbeat();
+        // Logout from server (free device slot)
+        if (token) {
+          await apiClient.logout(token, store);
+        }
         store.delete('authToken');
         store.delete('user');
-        updateTrayMenu();
         showNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet');
       }
     },
@@ -497,8 +560,12 @@ function updateTrayMenu() {
     { type: 'separator' },
     { label: `v${app.getVersion()}`, enabled: false }
   ]);
+}
 
-  tray.setContextMenu(contextMenu);
+// Legacy function for compatibility - just calls buildTrayMenu
+function updateTrayMenu() {
+  // No longer sets a static menu - menu is built dynamically on right-click
+  // This function is kept for compatibility with other code that calls it
 }
 
 // Select and transcribe an existing audio file
@@ -697,7 +764,17 @@ async function processAudioFile(audioFilePath) {
     let errorTitle = 'Fehler';
     let errorMessage = error.message || 'Unbekannter Fehler';
 
-    if (error.message.includes('Keine Sprache erkannt')) {
+    if (error.message.startsWith('TRIAL_EXPIRED:')) {
+      errorTitle = 'Testphase beendet';
+      errorMessage = error.message.substring('TRIAL_EXPIRED:'.length);
+      // Open dashboard for subscription
+      setTimeout(() => openDashboard(), 2000);
+    } else if (error.message.startsWith('SUBSCRIPTION_INACTIVE:')) {
+      errorTitle = 'Abonnement inaktiv';
+      errorMessage = error.message.substring('SUBSCRIPTION_INACTIVE:'.length);
+      // Open dashboard for subscription
+      setTimeout(() => openDashboard(), 2000);
+    } else if (error.message.includes('Keine Sprache erkannt')) {
       errorTitle = 'Keine Sprache erkannt';
       errorMessage = 'Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.';
     } else if (error.message.includes('zu kurz') || error.message.includes('leer')) {
@@ -726,6 +803,33 @@ async function startRecording() {
   // Prevent starting new recording while processing
   if (isProcessing) {
     showNotification('Bitte warten', 'Die vorherige Aufnahme wird noch verarbeitet...');
+    return;
+  }
+
+  // Fetch fresh user data from server to check trial/subscription status
+  let user = store.get('user');
+  try {
+    const freshUser = await apiClient.getUser(token);
+    if (freshUser) {
+      user = freshUser;
+      store.set('user', freshUser);
+      updateTrayMenu();
+    }
+  } catch (e) {
+    console.log('Could not fetch fresh user data, using cached:', e.message);
+  }
+
+  // Check trial/subscription status before recording
+  const isTrialUser = user?.planTier === 'free_trial';
+  const hasActiveSubscription = user?.subscriptionStatus === 'active';
+  const minutesRemaining = user?.minutesRemaining ?? 0;
+
+  console.log('Recording check - planTier:', user?.planTier, 'subscriptionStatus:', user?.subscriptionStatus, 'minutesRemaining:', minutesRemaining);
+
+  if (isTrialUser && minutesRemaining <= 0 && !hasActiveSubscription) {
+    showNotification('Testphase beendet', 'Ihre kostenlosen Testminuten sind aufgebraucht. Bitte abonnieren Sie DentDoc Pro.');
+    updateStatusOverlay('Testphase beendet', 'Bitte abonnieren Sie DentDoc Pro um fortzufahren.', 'error');
+    setTimeout(() => openDashboard('/subscription'), 2000);
     return;
   }
 
@@ -787,12 +891,18 @@ async function stopRecording() {
   }
 }
 
-function showNotification(title, body) {
-  new Notification({
+function showNotification(title, body, onClick = null) {
+  const notification = new Notification({
     title,
     body,
     icon: path.join(__dirname, 'assets', 'icon.png')
-  }).show();
+  });
+
+  if (onClick) {
+    notification.on('click', onClick);
+  }
+
+  notification.show();
 }
 
 function getValidOverlayPosition() {
@@ -1129,21 +1239,139 @@ ipcMain.on('close-window', (event) => {
   if (window) window.close();
 });
 
+// Start heartbeat to keep device session active
+function startHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+
+  // Send heartbeat every 5 minutes (just to keep session alive)
+  heartbeatInterval = setInterval(async () => {
+    const token = store.get('authToken');
+    if (!token) {
+      stopHeartbeat();
+      return;
+    }
+
+    const isValid = await apiClient.heartbeat(token, store);
+    if (!isValid) {
+      // Session expired - device was logged out remotely
+      console.log('Session expired - logging out locally');
+      stopHeartbeat();
+      store.delete('authToken');
+      store.delete('user');
+      updateTrayMenu();
+      showNotification('Sitzung beendet', 'Sie wurden von einem anderen Gerät abgemeldet.');
+      createLoginWindow();
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+
+  // Also send immediate heartbeat on start
+  const token = store.get('authToken');
+  if (token) {
+    apiClient.heartbeat(token, store).catch(console.error);
+  }
+}
+
+// Refresh user data and check for subscription changes
+async function refreshUserData() {
+  const token = store.get('authToken');
+  if (!token) return;
+
+  try {
+    const oldUser = store.get('user');
+    const newUser = await apiClient.getUser(token);
+    if (newUser) {
+      store.set('user', newUser);
+
+      // Check if subscription status changed (e.g., user just subscribed)
+      const wasTrialExpired = oldUser?.planTier === 'free_trial' && (oldUser?.minutesRemaining || 0) <= 0 && oldUser?.subscriptionStatus !== 'active';
+      const isNowActive = newUser.subscriptionStatus === 'active';
+
+      if (wasTrialExpired && isNowActive) {
+        // User just subscribed! Show notification
+        showNotification(
+          '🎉 Willkommen bei DentDoc Pro!',
+          `Ihr Abonnement ist jetzt aktiv. Sie können unbegrenzt dokumentieren.`
+        );
+      }
+
+      updateTrayMenu();
+    }
+  } catch (e) {
+    console.log('Could not refresh user data:', e.message);
+  }
+}
+
+function stopHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}
+
 // IPC Handlers for login window
 ipcMain.handle('login', async (event, email, password) => {
   try {
-    const response = await apiClient.login(email, password);
+    const response = await apiClient.login(email, password, store);
     store.set('authToken', response.token);
     store.set('user', response.user);
     updateTrayMenu();
+
+    // Start heartbeat
+    startHeartbeat();
 
     if (loginWindow) {
       loginWindow.close();
     }
 
-    showNotification('Angemeldet', `Willkommen ${response.user.email}!`);
+    // Check trial/subscription status and show appropriate notification
+    const user = response.user;
+    const isTrialUser = user?.planTier === 'free_trial';
+    const hasActiveSubscription = user?.subscriptionStatus === 'active';
+    const isCanceled = user?.subscriptionStatus === 'canceled';
+    const minutesRemaining = user?.minutesRemaining || 0;
+
+    // Distinguish between true trial users and ex-subscribers
+    const wasSubscriber = isCanceled || (isTrialUser && user?.stripeCustomerId);
+    const trialExpired = isTrialUser && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
+
+    if (wasSubscriber && !hasActiveSubscription) {
+      // Ex-subscriber - show "no active subscription" notification (no auto-redirect)
+      showNotification(
+        '⚠️ Kein aktives Abo',
+        'Ihr Abonnement ist nicht mehr aktiv. Klicken Sie hier um es zu reaktivieren.',
+        () => openDashboard('/subscription')
+      );
+    } else if (trialExpired) {
+      // True trial expired - show notification (no auto-redirect)
+      showNotification(
+        '⚠️ Testphase beendet',
+        'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier um ein Abo abzuschließen.',
+        () => openDashboard('/subscription')
+      );
+    } else if (isTrialUser && !wasSubscriber && minutesRemaining > 0 && minutesRemaining <= 10) {
+      // Trial running low
+      showNotification(
+        'Testphase endet bald',
+        `Nur noch ${minutesRemaining} Minuten übrig. Jetzt Abo kaufen!`,
+        () => openDashboard('/subscription')
+      );
+    } else if (hasActiveSubscription) {
+      // Pro user
+      showNotification('Angemeldet', `Willkommen! DentDoc Pro (${user?.maxDevices || 1} PC${(user?.maxDevices || 1) !== 1 ? 's' : ''})`);
+    } else {
+      // Normal welcome
+      showNotification('Angemeldet', `Willkommen ${response.user.email}!`);
+    }
+
     return { success: true };
   } catch (error) {
+    // Check for max devices error
+    if (error.message.startsWith('MAX_DEVICES:')) {
+      const message = error.message.substring('MAX_DEVICES:'.length);
+      return { success: false, error: message, code: 'MAX_DEVICES' };
+    }
     return { success: false, error: error.message };
   }
 });
@@ -1563,13 +1791,63 @@ app.whenReady().then(() => {
   if (!token) {
     createLoginWindow();
   } else {
-    // Validate token and get user data
-    apiClient.getUser(token).then(user => {
+    // Validate token and start heartbeat
+    apiClient.heartbeat(token, store).then(isValid => {
+      if (isValid) {
+        // Token valid, start heartbeat and get user data
+        startHeartbeat();
+        return apiClient.getUser(token);
+      } else {
+        // Session expired
+        throw new Error('Session expired');
+      }
+    }).then(user => {
       store.set('user', user);
       updateTrayMenu();
+
+      // Check trial/subscription status on app start and show notification if needed
+      const isTrialUser = user?.planTier === 'free_trial';
+      const hasActiveSubscription = user?.subscriptionStatus === 'active';
+      const isCanceled = user?.subscriptionStatus === 'canceled';
+      const minutesRemaining = user?.minutesRemaining || 0;
+
+      // Distinguish between true trial users and ex-subscribers
+      const wasSubscriber = isCanceled || (isTrialUser && user?.stripeCustomerId);
+      const trialExpired = isTrialUser && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
+
+      if (wasSubscriber && !hasActiveSubscription) {
+        // Ex-subscriber - show "no active subscription" notification
+        setTimeout(() => {
+          showNotification(
+            '⚠️ Kein aktives Abo',
+            'Ihr Abonnement ist nicht mehr aktiv. Klicken Sie hier um es zu reaktivieren.',
+            () => openDashboard('/subscription')
+          );
+        }, 2000);
+      } else if (trialExpired) {
+        // True trial expired - show notification after a short delay
+        setTimeout(() => {
+          showNotification(
+            '⚠️ Testphase beendet',
+            'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier um ein Abo abzuschließen.',
+            () => openDashboard('/subscription')
+          );
+        }, 2000);
+      } else if (isTrialUser && !wasSubscriber && minutesRemaining > 0 && minutesRemaining <= 10) {
+        // Trial running low
+        setTimeout(() => {
+          showNotification(
+            'Testphase endet bald',
+            `Nur noch ${minutesRemaining} Minuten übrig. Jetzt Abo kaufen!`,
+            () => openDashboard('/subscription')
+          );
+        }, 2000);
+      }
     }).catch(() => {
-      // Token invalid, show login
+      // Token invalid or session expired, show login
+      stopHeartbeat();
       store.delete('authToken');
+      store.delete('user');
       createLoginWindow();
     });
   }
