@@ -1541,6 +1541,15 @@ app.whenReady().then(() => {
   if (!app.isPackaged) {
     console.log('Development mode - skipping auto-update check');
   } else {
+    // Configure GitHub token for private repo access
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner: 'Rickpeace',
+      repo: 'dentdoc-desktop',
+      private: true,
+      token: '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'
+    });
+
     autoUpdater.checkForUpdatesAndNotify();
 
     // Check for updates every 4 hours
