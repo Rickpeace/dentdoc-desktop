@@ -4,204 +4,195 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DentDoc Einstellungen</title>
+  <link rel="stylesheet" href="styles/design-system.css">
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+    .page-header {
+      margin-bottom: var(--space-6);
+      animation: slideUp 0.3s ease-out;
     }
 
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
+    .page-header h1 {
+      margin-bottom: var(--space-2);
     }
 
-    ::-webkit-scrollbar-track {
-      background: rgba(0, 0, 0, 0.2);
-      border-radius: 4px;
+    .page-header p {
+      color: var(--text-tertiary);
     }
 
-    ::-webkit-scrollbar-thumb {
-      background: rgba(249, 115, 22, 0.4);
-      border-radius: 4px;
+    .hint-banner {
+      background: linear-gradient(135deg, rgba(249, 115, 22, 0.15), rgba(249, 115, 22, 0.05));
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      border-radius: var(--radius-lg);
+      padding: var(--space-4);
+      margin-bottom: var(--space-6);
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      animation: slideUp 0.35s ease-out;
     }
 
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(249, 115, 22, 0.6);
+    [data-theme="light"] .hint-banner {
+      background: #fff7ed;
+      border-color: #fed7aa;
+      color: #9a3412;
     }
 
-    ::-webkit-scrollbar-corner {
-      background: transparent;
+    .hint-banner svg {
+      flex-shrink: 0;
+      color: var(--primary-500);
     }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-      background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
-      padding: 20px;
-      min-height: 100vh;
+    [data-theme="light"] .hint-banner svg {
+      color: #ea580c;
     }
 
-    .container {
-      max-width: 640px;
-      margin: 0 auto;
+    .save-confirmation {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      background: linear-gradient(135deg, var(--success-500), var(--success-600));
+      color: white;
+      padding: var(--space-5) var(--space-8);
+      border-radius: var(--radius-xl);
+      font-size: 1.125rem;
+      font-weight: 600;
+      box-shadow: none;
+      z-index: 1000;
+      display: none;
+      animation: savePopup 0.8s ease-out forwards;
     }
 
-    h1 {
-      color: #f97316;
-      font-size: 32px;
-      margin-bottom: 32px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
+    @keyframes savePopup {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+      20% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+      40% { transform: translate(-50%, -50%) scale(1); }
+      80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
     }
 
     .section {
-      background: rgba(255, 255, 255, 0.05);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      padding: 28px;
-      margin-bottom: 20px;
-      transition: all 0.2s;
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+      margin-bottom: var(--space-5);
+      transition: all var(--transition-normal);
+      position: relative;
+      animation: slideUp 0.4s ease-out;
+      animation-fill-mode: both;
+    }
+
+    .section:nth-child(1) { animation-delay: 0.05s; }
+    .section:nth-child(2) { animation-delay: 0.1s; }
+    .section:nth-child(3) { animation-delay: 0.15s; }
+    .section:nth-child(4) { animation-delay: 0.2s; }
+    .section:nth-child(5) { animation-delay: 0.25s; }
+    .section:nth-child(6) { animation-delay: 0.3s; }
+    .section:nth-child(7) { animation-delay: 0.35s; }
+
+    .section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    }
+
+    [data-theme="light"] .section::before {
+      background: linear-gradient(90deg, transparent, rgba(249, 115, 22, 0.15), transparent);
     }
 
     .section:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(249, 115, 22, 0.3);
+      background: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
+      box-shadow: none;
     }
 
     .section h2 {
-      color: rgba(255, 255, 255, 0.95);
-      font-size: 18px;
-      margin-bottom: 20px;
-      font-weight: 600;
-      letter-spacing: -0.3px;
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-5);
+      font-size: 1.125rem;
     }
 
-    label {
-      display: block;
-      margin-bottom: 10px;
-      color: rgba(255, 255, 255, 0.7);
-      font-size: 14px;
-      font-weight: 500;
-    }
-
-    select, input[type="text"] {
-      width: 100%;
-      padding: 13px 16px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 12px;
-      font-size: 14px;
-      margin-bottom: 16px;
-      color: rgba(255, 255, 255, 0.9);
-      transition: all 0.2s;
-    }
-
-    select:focus, input[type="text"]:focus {
-      outline: none;
-      border-color: #f97316;
-      background: rgba(0, 0, 0, 0.4);
-      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
-    }
-
-    button {
-      padding: 13px 26px;
-      border: none;
-      border-radius: 12px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-      color: white;
-      box-shadow: 0 4px 14px rgba(249, 115, 22, 0.35);
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 18px rgba(249, 115, 22, 0.45);
-    }
-
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.08);
-      color: rgba(255, 255, 255, 0.9);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-    }
-
-    .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.13);
-      border-color: rgba(255, 255, 255, 0.25);
-    }
-
-    .btn-success {
-      background: #22c55e;
-      color: white;
-    }
-
-    .btn-danger {
-      background: #ef4444;
-      color: white;
+    .section h2 svg {
+      width: 22px;
+      height: 22px;
+      color: var(--primary-500);
     }
 
     .mic-test {
       display: flex;
-      gap: 12px;
+      gap: var(--space-3);
       align-items: center;
-      margin-top: 4px;
+      margin-top: var(--space-4);
     }
 
     .mic-level {
       flex: 1;
-      height: 28px;
+      height: 10px;
       background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 14px;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-full);
       overflow: hidden;
+    }
+
+    [data-theme="light"] .mic-level {
+      background: #e5e7eb;
+      border-color: #d1d5db;
     }
 
     .mic-level-bar {
       height: 100%;
-      background: linear-gradient(90deg, #22c55e, #f97316, #ef4444);
+      background: linear-gradient(90deg, var(--success-500), var(--primary-500), var(--error-500));
       width: 0%;
       transition: width 0.1s;
-      box-shadow: 0 0 12px rgba(249, 115, 22, 0.5);
+      box-shadow: none;
     }
 
     .status {
-      padding: 12px 16px;
-      border-radius: 10px;
-      font-size: 13px;
-      margin-bottom: 12px;
+      padding: var(--space-3) var(--space-4);
+      border-radius: var(--radius-md);
+      font-size: 0.875rem;
+      margin-top: var(--space-4);
       border: 1px solid;
+      display: none;
+    }
+
+    .status.show {
+      display: block;
     }
 
     .status.success {
-      background: rgba(34, 197, 94, 0.15);
-      color: #22c55e;
+      background: rgba(34, 197, 94, 0.1);
+      color: var(--success-500);
       border-color: rgba(34, 197, 94, 0.3);
     }
 
     .status.error {
-      background: rgba(239, 68, 68, 0.15);
-      color: #ef4444;
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--error-500);
       border-color: rgba(239, 68, 68, 0.3);
     }
 
     .status.info {
-      background: rgba(249, 115, 22, 0.15);
-      color: #f97316;
+      background: rgba(249, 115, 22, 0.1);
+      color: var(--primary-500);
       border-color: rgba(249, 115, 22, 0.3);
     }
 
     .shortcut-input {
       display: flex;
-      gap: 12px;
+      gap: var(--space-3);
       align-items: center;
-      margin-bottom: 8px;
     }
 
     .shortcut-input input[type="text"] {
@@ -211,145 +202,213 @@
 
     .shortcut-display {
       flex: 1;
-      padding: 15px;
+      padding: var(--space-4);
       background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 12px;
-      font-family: 'SF Mono', 'Consolas', monospace;
-      font-size: 15px;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: 1rem;
       text-align: center;
-      color: rgba(255, 255, 255, 0.9);
+      color: var(--text-primary);
       font-weight: 600;
-      letter-spacing: 1.5px;
+      letter-spacing: 2px;
+    }
+
+    [data-theme="light"] .shortcut-display {
+      background: #f9fafb;
+      border-color: #e5e7eb;
     }
 
     .shortcut-display.recording {
-      border-color: #f97316;
-      background: rgba(249, 115, 22, 0.15);
-      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+      border-color: var(--primary-500);
+      background: rgba(249, 115, 22, 0.1);
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    [data-theme="light"] .shortcut-display.recording {
+      background: #fff7ed;
+    }
+
+    .current-shortcut {
+      font-size: 0.875rem;
+      color: var(--text-tertiary);
+      margin-bottom: var(--space-3);
+    }
+
+    .current-shortcut strong {
+      color: var(--primary-500);
+      font-family: var(--font-mono);
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      cursor: pointer;
+      padding: var(--space-3);
+      border-radius: var(--radius-md);
+      transition: background var(--transition-fast);
+      margin: calc(-1 * var(--space-3));
+      margin-bottom: var(--space-3);
+    }
+
+    .checkbox-label:hover {
+      background: var(--glass-bg);
+    }
+
+    .checkbox-label input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+    }
+
+    .checkbox-label span {
+      font-size: 0.9375rem;
+      color: var(--text-primary);
+    }
+
+    .debug-buttons {
+      display: flex;
+      gap: var(--space-3);
+    }
+
+    .debug-buttons button {
+      flex: 1;
     }
 
     .buttons {
       display: flex;
-      gap: 12px;
+      gap: var(--space-3);
       justify-content: flex-end;
-      margin-top: 32px;
-      padding-top: 8px;
+      margin-top: var(--space-8);
+      padding-top: var(--space-6);
+      border-top: 1px solid var(--border-default);
     }
 
-    .current-shortcut {
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.5);
-      margin-top: -8px;
-      margin-bottom: 16px;
-    }
-
-    .helper-text {
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.5);
-      margin-top: -8px;
-      line-height: 1.5;
-    }
-
-    .hint-banner {
-      background: rgba(249, 115, 22, 0.15);
-      border: 1px solid rgba(249, 115, 22, 0.3);
-      border-radius: 10px;
-      padding: 12px 16px;
-      margin-bottom: 20px;
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.8);
-      text-align: center;
-    }
-
-    .save-confirmation {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(34, 197, 94, 0.95);
-      color: white;
-      padding: 20px 40px;
-      border-radius: 12px;
-      font-size: 18px;
-      font-weight: 600;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-      z-index: 1000;
-      animation: fadeInOut 1s ease-in-out;
-    }
-
-    @keyframes fadeInOut {
-      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
-      20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-      80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-      100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+    .buttons button {
+      min-width: 120px;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Einstellungen</h1>
+  <script>
+    // Load theme immediately to prevent flash
+    const { ipcRenderer: themeRenderer } = require('electron');
+    themeRenderer.invoke('get-theme').then(theme => {
+      document.documentElement.setAttribute('data-theme', theme || 'dark');
+    });
+  </script>
+  <div class="titlebar">
+    <div class="titlebar-title">
+      <span>DentDoc Einstellungen</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="minimizeBtn">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <rect y="5" width="12" height="2" rx="1"/>
+        </svg>
+      </button>
+      <button class="titlebar-btn close" id="closeBtn">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <path d="M1.5 1.5l9 9m0-9l-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="container">
+      <div class="page-header">
+        <h1>Einstellungen</h1>
+        <p>Passen Sie DentDoc an Ihre Bedürfnisse an</p>
+      </div>
 
     <div class="hint-banner">
-      Änderungen werden erst nach Klick auf "Speichern" übernommen.
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 16v-4M12 8h.01"/>
+      </svg>
+      <span>Änderungen werden erst nach Klick auf "Speichern" übernommen.</span>
     </div>
 
-    <div id="saveConfirmation" class="save-confirmation" style="display: none;">
+    <div id="saveConfirmation" class="save-confirmation">
       ✓ Gespeichert
     </div>
 
     <!-- Microphone Section -->
     <div class="section">
-      <h2>Mikrofon</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        Mikrofon
+      </h2>
 
-      <label for="micSelect">Mikrofon auswählen:</label>
+      <label for="micSelect">Mikrofon auswählen</label>
       <select id="micSelect">
         <option value="">Lade Mikrofone...</option>
       </select>
 
       <div class="mic-test">
-        <button id="testMicBtn" class="btn-secondary">Test starten</button>
+        <button id="testMicBtn" class="btn btn-secondary">Test starten</button>
         <div class="mic-level">
           <div id="micLevelBar" class="mic-level-bar"></div>
         </div>
       </div>
 
-      <div id="micStatus" class="status info" style="display: none;"></div>
+      <div id="micStatus" class="status info"></div>
 
-      <button id="openSoundSettingsBtn" class="btn-secondary" style="width: 100%; margin-top: 16px;">Windows Sound-Einstellungen öffnen</button>
-      <p class="helper-text" style="margin-top: 8px;">Hier können Sie die Mikrofon-Lautstärke in Windows anpassen.</p>
+      <button id="openSoundSettingsBtn" class="btn btn-secondary w-full mt-4">
+        Windows Sound-Einstellungen öffnen
+      </button>
+      <p class="helper-text">Hier können Sie die Mikrofon-Lautstärke in Windows anpassen.</p>
     </div>
 
     <!-- Shortcut Section -->
     <div class="section">
-      <h2>Tastenkombination</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="4" width="20" height="16" rx="2"/>
+          <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h8M6 16h.01M18 16h.01"/>
+        </svg>
+        Tastenkombination
+      </h2>
 
-      <label>Aufnahme starten/stoppen:</label>
+      <label>Aufnahme starten/stoppen</label>
       <p class="current-shortcut">Aktuelle Tastenkombination: <strong id="currentShortcut">F9</strong></p>
 
       <div class="shortcut-input">
         <div id="shortcutDisplay" class="shortcut-display">F9</div>
-        <button id="recordShortcutBtn" class="btn-secondary">Ändern</button>
+        <button id="recordShortcutBtn" class="btn btn-secondary">Ändern</button>
       </div>
 
-      <div id="shortcutStatus" class="status info" style="display: none;"></div>
+      <div id="shortcutStatus" class="status info"></div>
     </div>
 
     <!-- Transcript Export Section -->
     <div class="section">
-      <h2>Transkript-Export</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+        </svg>
+        Transkript-Export
+      </h2>
 
-      <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 16px;">
-        <input type="checkbox" id="autoExportCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
+      <label class="checkbox-label">
+        <input type="checkbox" id="autoExportCheckbox">
         <span>Transkripte speichern</span>
       </label>
 
       <div id="exportPathSection">
-        <label for="transcriptPath">Speicherort:</label>
+        <label for="transcriptPath">Speicherort</label>
         <div class="shortcut-input">
-          <input type="text" id="transcriptPath" readonly placeholder="Noch nicht festgelegt">
-          <button id="browseTranscriptBtn" class="btn-secondary">Ändern</button>
-          <button id="openTranscriptFolderBtn" class="btn-secondary">Öffnen</button>
+          <input type="text" id="transcriptPath" readonly>
+          <button id="browseTranscriptBtn" class="btn btn-secondary">Ändern</button>
+          <button id="openTranscriptFolderBtn" class="btn btn-ghost">Öffnen</button>
         </div>
         <p class="helper-text">Transkripte werden als TXT-Dateien gespeichert (Datum_Uhrzeit.txt)</p>
       </div>
@@ -357,40 +416,79 @@
 
     <!-- Recordings Section -->
     <div class="section">
-      <h2>Aufnahmen</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        Aufnahmen
+      </h2>
 
-      <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 16px;">
-        <input type="checkbox" id="deleteAudioCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
-        <span>Aufnahmen nach erfolgreicher Verarbeitung löschen</span>
+      <label class="checkbox-label">
+        <input type="checkbox" id="keepAudioCheckbox">
+        <span>Aufnahmen speichern</span>
       </label>
 
-      <label for="recordingsPath">Speicherort:</label>
+      <label for="recordingsPath">Speicherort</label>
       <div class="shortcut-input">
-        <input type="text" id="recordingsPath" readonly placeholder="Standard (temporär)">
-        <button id="browseRecordingsBtn" class="btn-secondary">Ändern</button>
-        <button id="openRecordingsFolderBtn" class="btn-secondary">Öffnen</button>
+        <input type="text" id="recordingsPath" readonly>
+        <button id="browseRecordingsBtn" class="btn btn-secondary">Ändern</button>
+        <button id="openRecordingsFolderBtn" class="btn btn-ghost">Öffnen</button>
       </div>
-      <p class="helper-text">Bei deaktivierter Löschung bleiben die Aufnahmen hier gespeichert.</p>
+      <p class="helper-text">Aufnahmen werden hier gespeichert wenn aktiviert.</p>
     </div>
 
     <!-- Voice Profiles Section -->
     <div class="section">
-      <h2>Stimmprofile</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        Stimmprofile
+      </h2>
 
-      <label for="profilesPath">Speicherort für Stimmprofile:</label>
+      <label for="profilesPath">Speicherort für Stimmprofile</label>
       <div class="shortcut-input">
-        <input type="text" id="profilesPath" readonly placeholder="Standard (lokal)">
-        <button id="browseProfilesBtn" class="btn-secondary">Ändern</button>
-        <button id="openProfilesFolderBtn" class="btn-secondary">Öffnen</button>
+        <input type="text" id="profilesPath" readonly>
+        <button id="browseProfilesBtn" class="btn btn-secondary">Ändern</button>
+        <button id="openProfilesFolderBtn" class="btn btn-ghost">Öffnen</button>
       </div>
-      <p class="helper-text">⚠️ Für mehrere PCs: Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\profiles)</p>
+      <p class="helper-text warning">Für mehrere PCs: Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\profiles)</p>
+    </div>
+
+    <!-- Bausteine Section -->
+    <div class="section">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/>
+          <rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/>
+        </svg>
+        Bausteine
+      </h2>
+
+      <label for="bausteinePath">Speicherort für Bausteine-Datei</label>
+      <div class="shortcut-input">
+        <input type="text" id="bausteinePath" readonly>
+        <button id="browseBausteineBtn" class="btn btn-secondary">Ändern</button>
+        <button id="openBausteineFolderBtn" class="btn btn-ghost">Öffnen</button>
+      </div>
+      <p class="helper-text warning">Für mehrere PCs: Wählen Sie einen Netzwerkordner, damit alle PCs dieselben Bausteine verwenden.</p>
     </div>
 
     <!-- Documentation Mode Section -->
     <div class="section">
-      <h2>Dokumentations-Modus</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        Dokumentations-Modus
+      </h2>
 
-      <label for="docModeSelect">Modus auswählen:</label>
+      <label for="docModeSelect">Modus auswählen</label>
       <select id="docModeSelect">
         <option value="single">Single Prompt (Standard)</option>
         <option value="agent-chain">Agent-Kette mit Bausteinen</option>
@@ -401,36 +499,69 @@
       </p>
     </div>
 
+    <!-- Appearance Section -->
+    <div class="section">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+        Erscheinungsbild
+      </h2>
+
+      <label for="themeSelect">Design</label>
+      <select id="themeSelect">
+        <option value="dark">Dunkel</option>
+        <option value="light">Hell</option>
+      </select>
+      <p class="helper-text">Wählen Sie zwischen hellem und dunklem Design.</p>
+    </div>
+
     <!-- Behavior Section -->
     <div class="section">
-      <h2>Verhalten</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Verhalten
+      </h2>
 
-      <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-        <input type="checkbox" id="autoCloseCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
+      <label class="checkbox-label">
+        <input type="checkbox" id="autoCloseCheckbox">
         <span>Status-Fenster automatisch schließen nach erfolgreicher Transkription</span>
       </label>
     </div>
 
     <!-- Debug Section -->
     <div class="section">
-      <h2>Debug & Fehlerprotokoll</h2>
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+          <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+          <path d="M2 2l7.586 7.586"/>
+          <circle cx="11" cy="11" r="2"/>
+        </svg>
+        Debug & Fehlerprotokoll
+      </h2>
 
-      <p class="helper-text" style="margin-top: 0; margin-bottom: 16px;">
+      <p class="helper-text" style="margin-top: 0; margin-bottom: var(--space-4);">
         Bei Problemen können Sie das Debug-Protokoll an den Support senden.
       </p>
 
-      <div style="display: flex; gap: 12px;">
-        <button id="openLogBtn" class="btn-secondary" style="flex: 1;">Protokoll öffnen</button>
-        <button id="copyLogPathBtn" class="btn-secondary" style="flex: 1;">Pfad kopieren</button>
+      <div class="debug-buttons">
+        <button id="openLogBtn" class="btn btn-secondary">Protokoll öffnen</button>
+        <button id="copyLogPathBtn" class="btn btn-secondary">Pfad kopieren</button>
       </div>
 
-      <div id="logStatus" class="status info" style="display: none; margin-top: 12px;"></div>
+      <div id="logStatus" class="status info"></div>
     </div>
 
     <!-- Buttons -->
     <div class="buttons">
-      <button id="cancelBtn" class="btn-secondary">Abbrechen</button>
-      <button id="saveBtn" class="btn-primary">Speichern</button>
+      <button id="cancelBtn" class="btn btn-secondary">Abbrechen</button>
+      <button id="saveBtn" class="btn btn-primary">Speichern</button>
+    </div>
     </div>
   </div>
 
@@ -465,7 +596,7 @@
     const openProfilesFolderBtn = document.getElementById('openProfilesFolderBtn');
     const autoCloseCheckbox = document.getElementById('autoCloseCheckbox');
     const autoExportCheckbox = document.getElementById('autoExportCheckbox');
-    const deleteAudioCheckbox = document.getElementById('deleteAudioCheckbox');
+    const keepAudioCheckbox = document.getElementById('keepAudioCheckbox');
     const docModeSelect = document.getElementById('docModeSelect');
     const recordingsPath = document.getElementById('recordingsPath');
     const browseRecordingsBtn = document.getElementById('browseRecordingsBtn');
@@ -475,6 +606,10 @@
     const logStatus = document.getElementById('logStatus');
     const saveBtn = document.getElementById('saveBtn');
     const cancelBtn = document.getElementById('cancelBtn');
+    const themeSelect = document.getElementById('themeSelect');
+    const bausteinePath = document.getElementById('bausteinePath');
+    const browseBausteineBtn = document.getElementById('browseBausteineBtn');
+    const openBausteineFolderBtn = document.getElementById('openBausteineFolderBtn');
 
     // Load current settings
     async function loadSettings() {
@@ -488,8 +623,17 @@
       recordingsPath.value = settings.recordingsPath || '';
       autoCloseCheckbox.checked = settings.autoClose || false;
       autoExportCheckbox.checked = settings.autoExport || false;
-      deleteAudioCheckbox.checked = settings.deleteAudio || false;
+      keepAudioCheckbox.checked = settings.keepAudio || false;
       docModeSelect.value = settings.docMode || 'single';
+
+      // Load bausteine path
+      const bausteinePathValue = await ipcRenderer.invoke('get-bausteine-path');
+      bausteinePath.value = bausteinePathValue || '';
+
+      // Load theme
+      const theme = settings.theme || 'dark';
+      themeSelect.value = theme;
+      document.documentElement.setAttribute('data-theme', theme);
 
       // Load microphones
       await loadMicrophones();
@@ -501,10 +645,12 @@
         transcriptPath: settings.transcriptPath || '',
         profilesPath: settings.profilesPath || '',
         recordingsPath: settings.recordingsPath || '',
+        bausteinePath: bausteinePathValue || '',
         autoClose: settings.autoClose || false,
         autoExport: settings.autoExport || false,
-        deleteAudio: settings.deleteAudio || false,
-        docMode: settings.docMode || 'single'
+        keepAudio: settings.keepAudio || false,
+        docMode: settings.docMode || 'single',
+        theme: settings.theme || 'dark'
       };
     }
 
@@ -516,10 +662,12 @@
         transcriptPath: transcriptPath.value,
         profilesPath: profilesPath.value,
         recordingsPath: recordingsPath.value,
+        bausteinePath: bausteinePath.value,
         autoClose: autoCloseCheckbox.checked,
         autoExport: autoExportCheckbox.checked,
-        deleteAudio: deleteAudioCheckbox.checked,
-        docMode: docModeSelect.value
+        keepAudio: keepAudioCheckbox.checked,
+        docMode: docModeSelect.value,
+        theme: themeSelect.value
       };
 
       hasUnsavedChanges = JSON.stringify(currentSettings) !== JSON.stringify(initialSettings);
@@ -640,8 +788,14 @@
     recordingsPath.addEventListener('input', checkForChanges);
     autoCloseCheckbox.addEventListener('change', checkForChanges);
     autoExportCheckbox.addEventListener('change', checkForChanges);
-    deleteAudioCheckbox.addEventListener('change', checkForChanges);
+    keepAudioCheckbox.addEventListener('change', checkForChanges);
     docModeSelect.addEventListener('change', checkForChanges);
+
+    // Theme selection - apply immediately for preview
+    themeSelect.addEventListener('change', () => {
+      document.documentElement.setAttribute('data-theme', themeSelect.value);
+      checkForChanges();
+    });
 
     // Open Windows sound settings
     openSoundSettingsBtn.addEventListener('click', async () => {
@@ -740,6 +894,43 @@
       }
     });
 
+    // Browse for bausteine folder
+    browseBausteineBtn.addEventListener('click', async () => {
+      const result = await ipcRenderer.invoke('select-folder');
+      if (!result) return;
+
+      const newPath = result + '\\bausteine.json';
+
+      // Dialog anzeigen um zu entscheiden was passieren soll
+      const dialogResult = await ipcRenderer.invoke('show-bausteine-path-dialog', newPath);
+
+      if (dialogResult.action === 'cancel') {
+        return;
+      }
+
+      if (dialogResult.action === 'copy_current') {
+        // Aktuelle Bausteine in neuen Ordner kopieren
+        await ipcRenderer.invoke('copy-bausteine-to-path', newPath);
+      } else if (dialogResult.action === 'use_existing') {
+        // Nur Pfad ändern, vorhandene Datei nutzen
+        await ipcRenderer.invoke('set-bausteine-path', newPath);
+      } else if (dialogResult.action === 'use_defaults') {
+        // Pfad ändern, Defaults werden automatisch geladen
+        await ipcRenderer.invoke('set-bausteine-path', newPath);
+      }
+
+      bausteinePath.value = newPath;
+      checkForChanges();
+    });
+
+    // Open bausteine folder
+    openBausteineFolderBtn.addEventListener('click', async () => {
+      if (bausteinePath.value) {
+        const folderPath = bausteinePath.value.substring(0, bausteinePath.value.lastIndexOf('\\'));
+        await ipcRenderer.invoke('open-folder', folderPath);
+      }
+    });
+
     // Browse for recordings folder
     browseRecordingsBtn.addEventListener('click', async () => {
       const result = await ipcRenderer.invoke('select-folder');
@@ -769,8 +960,9 @@
         recordingsPath: recordingsPath.value,
         autoClose: autoCloseCheckbox.checked,
         autoExport: autoExportCheckbox.checked,
-        deleteAudio: deleteAudioCheckbox.checked,
-        docMode: docModeSelect.value
+        keepAudio: keepAudioCheckbox.checked,
+        docMode: docModeSelect.value,
+        theme: themeSelect.value
       };
 
       try {
@@ -847,16 +1039,28 @@
     // Helper functions
     function showStatus(element, message, type) {
       element.textContent = message;
-      element.className = 'status ' + type;
-      element.style.display = 'block';
+      element.className = 'status ' + type + ' show';
     }
 
     function hideStatus(element) {
-      element.style.display = 'none';
+      element.classList.remove('show');
     }
 
     // Initialize
     loadSettings();
+
+    // Window controls
+    document.getElementById('minimizeBtn').addEventListener('click', () => {
+      ipcRenderer.send('minimize-window');
+    });
+
+    document.getElementById('closeBtn').addEventListener('click', () => {
+      if (hasUnsavedChanges) {
+        cancelBtn.click();
+      } else {
+        window.close();
+      }
+    });
   </script>
 </body>
 </html>

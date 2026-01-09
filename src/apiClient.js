@@ -142,7 +142,19 @@ async function getUser(token) {
   }
 }
 
-async function uploadAudio(audioFilePath, token) {
+/**
+ * Upload audio file with progress tracking
+ * Now returns immediately after upload - caller should poll getTranscriptionStatus() for real status
+ * @param {string} audioFilePath - Path to audio file
+ * @param {string} token - Auth token
+ * @param {Function} onProgress - Progress callback: (progressInfo) => void
+ *   progressInfo: { phase, percent, message }
+ *     - phase: 'upload' | 'submitted'
+ *     - percent: 0-100 for upload phase
+ *     - message: Human-readable status
+ * @returns {Promise<number>} Transcription ID
+ */
+async function uploadAudio(audioFilePath, token, onProgress = null) {
   try {
     // Check if file exists and has content
     const stats = fs.statSync(audioFilePath);
@@ -150,16 +162,94 @@ async function uploadAudio(audioFilePath, token) {
       throw new Error('EMPTY_RECORDING');
     }
 
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(audioFilePath));
+    const fileName = require('path').basename(audioFilePath);
 
-    const response = await axios.post(`${API_BASE_URL}api/transcriptions/upload`, formData, {
-      headers: {
-        ...formData.getHeaders(),
-        'Authorization': `Bearer ${token}`,
-        'Cookie': `session=${token}`
-      },
-      timeout: 120000 // 2 minutes timeout
+    // Read file as buffer for progress tracking
+    const fileBuffer = fs.readFileSync(audioFilePath);
+
+    const formData = new FormData();
+    formData.append('file', fileBuffer, {
+      filename: fileName,
+      contentType: 'audio/webm'
+    });
+
+    // Get the form data as a buffer to track progress
+    const formBuffer = formData.getBuffer();
+    const formHeaders = formData.getHeaders();
+
+    // Create a custom upload with progress tracking
+    const response = await new Promise((resolve, reject) => {
+      const url = new URL(`${API_BASE_URL}api/transcriptions/upload`);
+      const isHttps = url.protocol === 'https:';
+      const httpModule = isHttps ? require('https') : require('http');
+
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          ...formHeaders,
+          'Content-Length': formBuffer.length,
+          'Authorization': `Bearer ${token}`,
+          'Cookie': `session=${token}`
+        },
+        timeout: 120000 // 2 minutes for upload
+      };
+
+      const req = httpModule.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const jsonData = JSON.parse(data);
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              if (onProgress) {
+                onProgress({ phase: 'submitted', percent: 100, message: 'Übermittelt an Server' });
+              }
+              resolve({ data: jsonData });
+            } else {
+              reject({ response: { data: jsonData, status: res.statusCode } });
+            }
+          } catch (e) {
+            reject(new Error(`Invalid response: ${data}`));
+          }
+        });
+      });
+
+      req.on('error', reject);
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject({ code: 'ECONNABORTED', message: 'timeout' });
+      });
+
+      // Track upload progress by writing in chunks
+      const chunkSize = 16384; // 16KB chunks
+      let uploaded = 0;
+
+      const writeChunk = () => {
+        while (uploaded < formBuffer.length) {
+          const end = Math.min(uploaded + chunkSize, formBuffer.length);
+          const chunk = formBuffer.subarray(uploaded, end);
+          const canContinue = req.write(chunk);
+          uploaded = end;
+
+          const percent = Math.round((uploaded * 100) / formBuffer.length);
+          if (onProgress) {
+            onProgress({ phase: 'upload', percent, message: `Upload ${percent}%` });
+          }
+
+          if (!canContinue) {
+            req.once('drain', writeChunk);
+            return;
+          }
+        }
+
+        req.end();
+      };
+
+      writeChunk();
     });
 
     return response.data.id;
@@ -354,6 +444,31 @@ async function getTranscription(transcriptionId, token) {
   }
 }
 
+/**
+ * Poll transcription status from AssemblyAI (real-time status)
+ * @param {number} transcriptionId - Transcription ID
+ * @param {string} token - Auth token
+ * @returns {Promise<{id: number, status: string, transcriptText?: string, utterances?: string, error?: string}>}
+ */
+async function getTranscriptionStatus(transcriptionId, token) {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}api/transcriptions/${transcriptionId}/status`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Cookie': `session=${token}`
+        }
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error('Get transcription status error:', error.response?.data || error.message);
+    throw new Error('Status konnte nicht abgerufen werden');
+  }
+}
+
 function getBaseUrl() {
   return API_BASE_URL;
 }
@@ -389,6 +504,7 @@ module.exports = {
   getDocumentationV2,
   updateSpeakerMapping,
   getTranscription,
+  getTranscriptionStatus,
   getBaseUrl,
   submitFeedback,
   getDeviceId,

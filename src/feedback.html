@@ -4,161 +4,79 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DentDoc Feedback</title>
+  <link rel="stylesheet" href="styles/design-system.css">
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-      background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
-      padding: 20px;
-      min-height: 100vh;
+    .main-content {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: var(--space-3);
+      padding-top: var(--space-2);
     }
 
     .container {
-      max-width: 500px;
-      margin: 0 auto;
-    }
-
-    h1 {
-      color: #f97316;
-      font-size: 28px;
-      margin-bottom: 8px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-    }
-
-    .subtitle {
-      color: rgba(255, 255, 255, 0.6);
-      font-size: 14px;
-      margin-bottom: 24px;
-    }
-
-    .form-group {
-      margin-bottom: 20px;
-    }
-
-    label {
-      display: block;
-      color: rgba(255, 255, 255, 0.9);
-      font-size: 14px;
-      font-weight: 500;
-      margin-bottom: 8px;
-    }
-
-    select, textarea {
       width: 100%;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 10px;
-      color: white;
-      font-size: 14px;
-      font-family: inherit;
-      transition: all 0.2s;
+      animation: slideUp 0.4s ease-out;
     }
 
-    select {
-      padding: 12px 16px;
-      cursor: pointer;
+    .feedback-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(40px);
+      -webkit-backdrop-filter: blur(40px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-5);
+      position: relative;
+      overflow: hidden;
     }
 
-    select option {
-      background: #2d2d2d;
-      color: white;
+    .feedback-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
     }
 
-    textarea {
-      padding: 14px 16px;
-      min-height: 150px;
-      resize: vertical;
+    .feedback-card::after {
+      display: none;
     }
 
-    select:focus, textarea:focus {
-      outline: none;
-      border-color: #f97316;
-      background: rgba(255, 255, 255, 0.1);
+    .header {
+      text-align: center;
+      margin-bottom: var(--space-4);
+      position: relative;
+      z-index: 1;
     }
 
-    textarea::placeholder {
-      color: rgba(255, 255, 255, 0.4);
-    }
-
-    .buttons {
+    .header-icon {
+      width: 56px;
+      height: 56px;
+      background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+      border-radius: var(--radius-lg);
       display: flex;
-      gap: 12px;
-      margin-top: 24px;
-    }
-
-    button {
-      flex: 1;
-      padding: 14px 20px;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      border: none;
-    }
-
-    .btn-cancel {
-      background: rgba(255, 255, 255, 0.1);
-      color: rgba(255, 255, 255, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-    }
-
-    .btn-cancel:hover {
-      background: rgba(255, 255, 255, 0.15);
-    }
-
-    .btn-submit {
-      background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-      color: white;
-    }
-
-    .btn-submit:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(249, 115, 22, 0.4);
-    }
-
-    .btn-submit:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto var(--space-3);
+      font-size: 24px;
       box-shadow: none;
     }
 
-    .success-message {
-      display: none;
-      text-align: center;
-      padding: 40px 20px;
+    .header h1 {
+      font-size: 1.5rem;
+      margin-bottom: var(--space-1);
     }
 
-    .success-message.visible {
-      display: block;
-    }
-
-    .success-icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-    }
-
-    .success-title {
-      color: #22c55e;
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-
-    .success-text {
-      color: rgba(255, 255, 255, 0.6);
-      font-size: 14px;
+    .header p {
+      color: var(--text-tertiary);
+      font-size: 0.9375rem;
     }
 
     .form-content {
-      display: block;
+      position: relative;
+      z-index: 1;
     }
 
     .form-content.hidden {
@@ -166,64 +84,249 @@
     }
 
     .error-message {
-      background: rgba(239, 68, 68, 0.2);
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      border-radius: 8px;
-      padding: 12px 16px;
-      color: #fca5a5;
-      font-size: 13px;
-      margin-bottom: 16px;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+      color: var(--error-500);
+      font-size: 0.875rem;
+      margin-bottom: var(--space-5);
       display: none;
+      animation: slideUp 0.2s ease-out;
     }
 
     .error-message.visible {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    .error-message::before {
+      content: '!';
+      width: 20px;
+      height: 20px;
+      background: var(--error-500);
+      color: white;
+      border-radius: var(--radius-full);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .form-group {
+      margin-bottom: var(--space-4);
+    }
+
+    .form-group label {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin-bottom: var(--space-1);
+      font-weight: 500;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    .form-group label svg {
+      width: 14px;
+      height: 14px;
+      opacity: 0.6;
+    }
+
+    select {
+      height: 44px;
+    }
+
+    textarea {
+      min-height: 110px;
+    }
+
+    .buttons {
+      display: flex;
+      gap: var(--space-3);
+      margin-top: var(--space-4);
+    }
+
+    .buttons button {
+      flex: 1;
+      height: 46px;
+      font-size: 0.9375rem;
+    }
+
+    .success-message {
+      display: none;
+      text-align: center;
+      padding: var(--space-8) var(--space-5);
+      position: relative;
+      z-index: 1;
+      animation: slideUp 0.4s ease-out;
+    }
+
+    .success-message.visible {
       display: block;
+    }
+
+    .success-icon {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, var(--success-500), var(--success-600));
+      border-radius: var(--radius-full);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto var(--space-5);
+      font-size: 40px;
+      box-shadow: none;
+      animation: successPop 0.5s ease-out 0.2s both;
+    }
+
+    @keyframes successPop {
+      0% { transform: scale(0); opacity: 0; }
+      50% { transform: scale(1.1); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .success-title {
+      background: linear-gradient(135deg, var(--success-500), var(--success-600));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: var(--space-2);
+    }
+
+    .success-text {
+      color: var(--text-tertiary);
+      font-size: 0.9375rem;
+    }
+
+    /* Light theme overrides */
+    [data-theme="light"] .feedback-card {
+      background: #ffffff;
+      border-color: #e5e7eb;
+      box-shadow: none;
+    }
+
+    [data-theme="light"] .feedback-card::before {
+      background: linear-gradient(90deg, transparent, rgba(249, 115, 22, 0.2), transparent);
+    }
+
+    [data-theme="light"] .feedback-card::after {
+      display: none;
+    }
+
+    [data-theme="light"] .error-message {
+      background: #fef2f2;
+      border-color: #fecaca;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="form-content" id="formContent">
-      <h1>Feedback</h1>
-      <p class="subtitle">Ihr Feedback hilft uns DentDoc zu verbessern</p>
-
-      <div id="errorMessage" class="error-message"></div>
-
-      <form id="feedbackForm">
-        <div class="form-group">
-          <label for="category">Kategorie</label>
-          <select id="category" required>
-            <option value="">Bitte wählen...</option>
-            <option value="bug">Fehlermeldung / Bug</option>
-            <option value="feature">Feature-Wunsch</option>
-            <option value="usability">Bedienung / Usability</option>
-            <option value="documentation">Dokumentationsqualität</option>
-            <option value="performance">Geschwindigkeit / Performance</option>
-            <option value="other">Sonstiges</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="message">Ihre Nachricht</label>
-          <textarea id="message" placeholder="Beschreiben Sie Ihr Anliegen möglichst detailliert..." required></textarea>
-        </div>
-
-        <div class="buttons">
-          <button type="button" class="btn-cancel" id="cancelBtn">Abbrechen</button>
-          <button type="submit" class="btn-submit" id="submitBtn">Absenden</button>
-        </div>
-      </form>
+  <script>
+    // Load theme immediately to prevent flash
+    const { ipcRenderer: themeRenderer } = require('electron');
+    themeRenderer.invoke('get-theme').then(theme => {
+      document.documentElement.setAttribute('data-theme', theme || 'dark');
+    });
+  </script>
+  <div class="titlebar">
+    <div class="titlebar-title">
+      <span>DentDoc Feedback</span>
     </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="minimizeBtn">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <rect y="5" width="12" height="2" rx="1"/>
+        </svg>
+      </button>
+      <button class="titlebar-btn close" id="closeBtn">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <path d="M1.5 1.5l9 9m0-9l-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
 
-    <div class="success-message" id="successMessage">
-      <div class="success-icon">✅</div>
-      <div class="success-title">Vielen Dank!</div>
-      <p class="success-text">Ihr Feedback wurde erfolgreich übermittelt.</p>
+  <div class="main-content">
+    <div class="container">
+    <div class="feedback-card">
+      <div class="form-content" id="formContent">
+        <div class="header">
+          <div class="header-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+            </svg>
+          </div>
+          <h1>Feedback</h1>
+          <p>Ihr Feedback hilft uns DentDoc zu verbessern</p>
+        </div>
+
+        <div id="errorMessage" class="error-message"></div>
+
+        <form id="feedbackForm">
+          <div class="form-group">
+            <label for="category">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 6h16M4 12h16M4 18h16"/>
+              </svg>
+              Kategorie
+            </label>
+            <select id="category" required>
+              <option value="">Bitte wählen...</option>
+              <option value="bug">Fehlermeldung / Bug</option>
+              <option value="feature">Feature-Wunsch</option>
+              <option value="usability">Bedienung / Usability</option>
+              <option value="documentation">Dokumentationsqualität</option>
+              <option value="performance">Geschwindigkeit / Performance</option>
+              <option value="other">Sonstiges</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="message">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              Ihre Nachricht
+            </label>
+            <textarea id="message" placeholder="Beschreiben Sie Ihr Anliegen möglichst detailliert..." required></textarea>
+          </div>
+
+          <div class="buttons">
+            <button type="button" class="btn btn-secondary" id="cancelBtn">Abbrechen</button>
+            <button type="submit" class="btn btn-primary" id="submitBtn">Absenden</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="success-message" id="successMessage">
+        <div class="success-icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="white">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+          </svg>
+        </div>
+        <div class="success-title">Vielen Dank!</div>
+        <p class="success-text">Ihr Feedback wurde erfolgreich übermittelt.</p>
+      </div>
+    </div>
     </div>
   </div>
 
   <script>
     const { ipcRenderer } = require('electron');
+
+    // Window controls
+    document.getElementById('minimizeBtn').addEventListener('click', () => {
+      ipcRenderer.send('minimize-window');
+    });
+
+    document.getElementById('closeBtn').addEventListener('click', () => {
+      ipcRenderer.send('close-window');
+    });
 
     const form = document.getElementById('feedbackForm');
     const formContent = document.getElementById('formContent');

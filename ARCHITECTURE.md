@@ -169,15 +169,19 @@ Stoppt die Aufnahme:
 **Die wichtigste Funktion der App** - verarbeitet Audio zu Dokumentation:
 
 ```
-Schritt 1: Audio Upload
-├── apiClient.uploadAudio(filePath)
-├── Erhält transcriptionId zurück
-└── Status: "Audio wird hochgeladen..."
+Schritt 1: Audio Upload (Async mit Progress)
+├── apiClient.uploadAudio(filePath, token, onProgress)
+├── onProgress erhält: { phase: 'upload', percent: 0-100 }
+├── Backend: file.upload() + transcripts.submit() (non-blocking)
+├── Erhält transcriptionId sofort zurück
+└── Status: "Audio wird gesendet... X%" → "Audio wird vorbereitet..."
 
-Schritt 2: Transkription abrufen (Polling)
-├── apiClient.getTranscription(id) - max 120 Versuche á 2 Sekunden
-├── Wartet auf status=completed
-└── Status: "Transkription läuft..."
+Schritt 2: Status-Polling (Echtzeit von AssemblyAI)
+├── apiClient.getTranscriptionStatus(id) - max 120 Versuche á 1 Sekunde
+├── Backend pollt AssemblyAI API für echten Status
+├── Status-Wechsel: queued → processing → completed
+├── Bei completed: Backend speichert Transcript, deducts Minuten, GDPR-Löschung
+└── Status: "Warte auf Verarbeitung..." → "Sprache wird erkannt..." → "Sprache erkannt"
 
 Schritt 3: Sprecher erkennen
 ├── speakerRecognition.identifySpeakersFromUtterances()
@@ -324,12 +328,43 @@ Backend-Kommunikationsschicht mit 396 Zeilen.
 | `logout(token, store)` | POST /api/auth/logout | Device-Slot freigeben |
 | `heartbeat(token, store)` | POST /api/device/heartbeat | Session Keep-Alive (5 Min) |
 | `getUser(token)` | GET /api/user | Subscription/Trial Status |
-| `uploadAudio(filePath, token)` | POST /api/transcriptions/upload | WebM Upload (120s Timeout) |
+| `uploadAudio(filePath, token, onProgress)` | POST /api/transcriptions/upload | Async Upload mit Progress-Callback |
+| `getTranscriptionStatus(id, token)` | GET /api/transcriptions/:id/status | Polling für AssemblyAI-Status |
 | `getTranscription(id, token)` | GET /api/transcriptions/:id | Transkription abrufen |
 | `getDocumentation(id, token)` | POST /api/.../generate-doc | Single-Prompt Dokumentation |
 | `getDocumentationV2(id, token, bausteine)` | POST /api/.../generate-doc-v2 | Agent-Chain mit Bausteinen |
 | `updateSpeakerMapping(id, mapping, token)` | POST /api/.../update-speakers | Speaker-IDs speichern |
 | `submitFeedback(token, category, message)` | POST /api/feedback | Feedback senden |
+
+### Async Upload & Status-Polling
+
+Der Upload-Prozess ist asynchron mit Echtzeit-Fortschritt:
+
+```javascript
+// 1. Upload mit Progress-Callback (0-50% der Gesamtanzeige)
+const onProgress = (info) => {
+  // info.phase: 'upload' | 'submitted'
+  // info.percent: 0-100 für Upload-Phase
+  // info.message: Status-Text
+};
+const transcriptionId = await uploadAudio(filePath, token, onProgress);
+
+// 2. Polling für AssemblyAI-Status (50-100% der Gesamtanzeige)
+let status = await getTranscriptionStatus(transcriptionId, token);
+// status.status: 'queued' | 'processing' | 'completed' | 'error'
+// status.transcriptText: Verfügbar bei 'completed'
+// status.utterances: Verfügbar bei 'completed'
+```
+
+**Benutzerfreundliche Status-Meldungen:**
+| API-Status | Angezeigte Meldung |
+|------------|-------------------|
+| Upload 0-50% | "Audio wird gesendet... X%" |
+| Upload 50%+ | "Audio wird vorbereitet..." |
+| submitted | "Audio übermittelt" |
+| queued | "Warte auf Verarbeitung..." |
+| processing | "Sprache wird erkannt..." |
+| completed | "Sprache erkannt" |
 
 ### Device Tracking
 
@@ -763,19 +798,25 @@ Inter-Process Communication zwischen Main und Renderer.
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 5a. apiClient.uploadAudio()                                 │
+│ 5a. apiClient.uploadAudio(filePath, token, onProgress)     │
 │    POST /api/transcriptions/upload                          │
-│    → transcriptionId                                        │
-│    Status: "Audio wird hochgeladen..."                      │
+│    • Desktop → Vercel: Progress 0-50%                       │
+│    • Vercel → AssemblyAI: file.upload() + transcripts.submit()
+│    • Kehrt sofort mit transcriptionId zurück (non-blocking) │
+│    Status: "Audio wird gesendet..." → "Audio wird vorbereitet..."
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 5b. apiClient.getTranscription(id) [Polling]               │
-│    GET /api/transcriptions/:id                              │
-│    Max 120 Versuche, 2 Sek Intervall                       │
-│    → { transcript, utterances }                             │
-│    Status: "Transkription läuft..."                        │
+│ 5b. apiClient.getTranscriptionStatus(id) [Polling]         │
+│    GET /api/transcriptions/:id/status                       │
+│    Max 120 Versuche, 1 Sek Intervall                       │
+│    Backend pollt AssemblyAI für echten Status               │
+│    • queued → "Warte auf Verarbeitung..."                   │
+│    • processing → "Sprache wird erkannt..."                 │
+│    • completed → "Sprache erkannt"                          │
+│    Bei completed: DB-Update, Minuten-Abzug, GDPR-Löschung  │
+│    → { status, transcriptText, utterances }                │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
@@ -1076,6 +1117,15 @@ npm run build:win
 
 ## Changelog
 
+### Version 1.3.2 (2025-01-09)
+
+**Async Upload mit Echtzeit-Status-Feedback:**
+- Upload-Prozess ist jetzt asynchron mit Progress-Callback
+- Neuer `/api/transcriptions/:id/status` Endpoint für Polling
+- Echte AssemblyAI-Status werden angezeigt (queued → processing → completed)
+- Benutzerfreundliche deutsche Status-Meldungen statt technischer Terminologie
+- Progress-Anzeige: 0-50% für Upload, 50-100% für Transkription
+
 ### Version 1.3.1 (2025-01-08)
 
 **Auto-Update mit GitHub Token:**
@@ -1112,5 +1162,5 @@ npm run build:win
 
 ## Version
 
-**Aktuelle Version:** 1.3.1
-**Letztes Update dieser Dokumentation:** 2025-01-08
+**Aktuelle Version:** 1.3.2
+**Letztes Update dieser Dokumentation:** 2025-01-09

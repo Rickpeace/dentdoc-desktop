@@ -45,6 +45,8 @@ let settingsWindow = null;
 let voiceProfilesWindow = null;
 let bausteineWindow = null;
 let statusOverlay = null;
+let statusOverlayReady = false;
+let pendingStatusUpdate = null;
 let feedbackWindow = null;
 let isRecording = false;
 let isProcessing = false;
@@ -83,15 +85,20 @@ function openSettings() {
   }
 
   settingsWindow = new BrowserWindow({
-    width: 550,
-    height: 600,
+    width: 1300,
+    height: 720,
+    minWidth: 800,
+    minHeight: 500,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
-    resizable: false,
-    title: 'DentDoc Einstellungen'
+    resizable: true,
+    title: 'DentDoc Einstellungen',
+    frame: false,
+    hasShadow: false,
+    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
   });
 
   settingsWindow.loadFile('src/settings.html');
@@ -109,9 +116,9 @@ function openVoiceProfiles() {
   }
 
   voiceProfilesWindow = new BrowserWindow({
-    width: 650,
-    height: 750,
-    minWidth: 500,
+    width: 1300,
+    height: 800,
+    minWidth: 800,
     minHeight: 600,
     webPreferences: {
       nodeIntegration: true,
@@ -119,7 +126,10 @@ function openVoiceProfiles() {
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     resizable: true,
-    title: 'DentDoc Stimmprofile'
+    title: 'DentDoc Stimmprofile',
+    frame: false,
+    hasShadow: false,
+    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
   });
 
   voiceProfilesWindow.loadFile('src/voice-profiles.html');
@@ -137,9 +147,9 @@ function openBausteine() {
   }
 
   bausteineWindow = new BrowserWindow({
-    width: 700,
+    width: 1300,
     height: 800,
-    minWidth: 600,
+    minWidth: 800,
     minHeight: 600,
     webPreferences: {
       nodeIntegration: true,
@@ -147,7 +157,10 @@ function openBausteine() {
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     resizable: true,
-    title: 'DentDoc Bausteine'
+    title: 'DentDoc Bausteine',
+    frame: false,
+    hasShadow: false,
+    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
   });
 
   bausteineWindow.loadFile('src/bausteine/bausteine.html');
@@ -165,19 +178,35 @@ function openFeedback() {
   }
 
   feedbackWindow = new BrowserWindow({
-    width: 500,
-    height: 450,
+    width: 480,
+    height: 600,
+    show: false,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     resizable: false,
-    title: 'DentDoc Feedback'
+    title: 'DentDoc Feedback',
+    frame: false,
+    hasShadow: false,
+    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
   });
 
   feedbackWindow.loadFile('src/feedback.html');
   feedbackWindow.setMenu(null);
+
+  // Dynamisch an Inhalt anpassen
+  feedbackWindow.webContents.on('did-finish-load', () => {
+    feedbackWindow.webContents.executeJavaScript(`
+      document.body.offsetHeight
+    `).then(height => {
+      const width = 480;
+      feedbackWindow.setSize(width, Math.min(height + 5, 800));
+      feedbackWindow.center();
+      feedbackWindow.show();
+    });
+  });
 
   feedbackWindow.on('closed', () => {
     feedbackWindow = null;
@@ -341,21 +370,32 @@ ${transcript}
 
 function createLoginWindow() {
   loginWindow = new BrowserWindow({
-    width: 400,
-    height: 500,
+    width: 480,
+    height: 650,
+    minHeight: 550,
+    useContentSize: true,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
-    resizable: false,
+    resizable: true,
     title: 'DentDoc Login',
     frame: false,
-    backgroundColor: '#1e1e1e'
+    hasShadow: false,
+    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
   });
 
   loginWindow.loadFile('src/login.html');
   loginWindow.setMenu(null);
+
+  // Auto-resize to fit content after load
+  loginWindow.webContents.on('did-finish-load', () => {
+    loginWindow.webContents.executeJavaScript('document.body.scrollHeight').then(height => {
+      const [width] = loginWindow.getSize();
+      loginWindow.setSize(width, Math.min(height, 800)); // Cap at 800px max
+    });
+  });
 
   loginWindow.on('closed', () => {
     loginWindow = null;
@@ -552,6 +592,21 @@ function buildTrayMenu() {
         }
         store.delete('authToken');
         store.delete('user');
+
+        // Close all open windows
+        if (settingsWindow && !settingsWindow.isDestroyed()) {
+          settingsWindow.close();
+        }
+        if (bausteineWindow && !bausteineWindow.isDestroyed()) {
+          bausteineWindow.close();
+        }
+        if (feedbackWindow && !feedbackWindow.isDestroyed()) {
+          feedbackWindow.close();
+        }
+        if (voiceProfilesWindow && !voiceProfilesWindow.isDestroyed()) {
+          voiceProfilesWindow.close();
+        }
+
         showNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet');
       }
     },
@@ -617,28 +672,73 @@ async function processAudioFile(audioFilePath) {
   tray.setImage(processingIconPath);
   tray.setToolTip('DentDoc - Verarbeitung...');
 
-  updateStatusOverlay('Audio wird hochgeladen...', 'Bitte warten...', 'processing', { step: 1 });
+  updateStatusOverlay('Verarbeitung...', 'Audio wird gesendet...', 'processing', { step: 1, uploadProgress: 0 });
 
   try {
-    // Upload audio
-    const transcriptionId = await apiClient.uploadAudio(audioFilePath, token);
-    updateStatusOverlay('Transkription läuft...', 'Audio wird analysiert...', 'processing', { step: 2 });
+    // Upload audio with progress tracking
+    let showServerUpload = null;
+    const onProgress = (progressInfo) => {
+      if (progressInfo.phase === 'upload') {
+        // Show as 0-50% (first half of total upload)
+        const scaledPercent = Math.round(progressInfo.percent / 2);
+        updateStatusOverlay(
+          'Verarbeitung...',
+          `Audio wird gesendet... ${scaledPercent}%`,
+          'processing',
+          { step: 1, uploadProgress: scaledPercent }
+        );
 
-    // Poll for transcription result
+        // When upload to our server hits 100%, show second phase
+        if (progressInfo.percent === 100 && !showServerUpload) {
+          showServerUpload = setTimeout(() => {
+            updateStatusOverlay(
+              'Verarbeitung...',
+              'Audio wird vorbereitet...',
+              'processing',
+              { step: 1, uploadProgress: 50 }
+            );
+          }, 300);
+        }
+      } else if (progressInfo.phase === 'submitted') {
+        if (showServerUpload) clearTimeout(showServerUpload);
+        updateStatusOverlay(
+          'Verarbeitung...',
+          'Audio übermittelt',
+          'processing',
+          { step: 1, uploadProgress: 100 }
+        );
+      }
+    };
+    const transcriptionId = await apiClient.uploadAudio(audioFilePath, token, onProgress);
+
+    // Poll for real transcription status from AssemblyAI
     let transcriptionResult;
     let attempts = 0;
-    const maxAttempts = 120;
+    const maxAttempts = 180; // 3 minutes max (180 * 1 second)
+    let lastStatus = '';
 
     while (attempts < maxAttempts) {
-      transcriptionResult = await apiClient.getTranscription(transcriptionId, token);
+      transcriptionResult = await apiClient.getTranscriptionStatus(transcriptionId, token);
+
+      // Update UI with real status (user-friendly messages)
+      if (transcriptionResult.status !== lastStatus) {
+        lastStatus = transcriptionResult.status;
+
+        if (transcriptionResult.status === 'queued') {
+          updateStatusOverlay('Verarbeitung...', 'Warte auf Verarbeitung...', 'processing', { step: 2 });
+        } else if (transcriptionResult.status === 'processing') {
+          updateStatusOverlay('Verarbeitung...', 'Sprache wird erkannt...', 'processing', { step: 2 });
+        }
+      }
 
       if (transcriptionResult.status === 'completed') {
+        updateStatusOverlay('Verarbeitung...', 'Sprache erkannt', 'processing', { step: 2 });
         break;
-      } else if (transcriptionResult.status === 'error' || transcriptionResult.status === 'failed') {
+      } else if (transcriptionResult.status === 'error') {
         throw new Error(transcriptionResult.error || 'Transkription fehlgeschlagen');
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Poll every 1 second
       attempts++;
     }
 
@@ -646,7 +746,7 @@ async function processAudioFile(audioFilePath) {
       throw new Error('Zeitüberschreitung bei der Transkription');
     }
 
-    const transcript = transcriptionResult.transcript;
+    const transcript = transcriptionResult.transcriptText;
 
     // Handle utterances (can be string or object from backend)
     const utterances = typeof transcriptionResult.utterances === 'string'
@@ -833,10 +933,12 @@ async function startRecording() {
     return;
   }
 
-  // Get deleteAudio setting - cleanup is handled by audioRecorder
-  const deleteAudio = store.get('deleteAudio', true);
-  console.log('deleteAudio setting:', deleteAudio);
-  debugLog(`deleteAudio setting: ${deleteAudio}`);
+  // Get keepAudio setting - cleanup is handled by audioRecorder
+  // keepAudio: false (default) = delete recordings, true = keep them
+  const keepAudio = store.get('keepAudio', false);
+  const deleteAudio = !keepAudio;
+  console.log('keepAudio setting:', keepAudio, '-> deleteAudio:', deleteAudio);
+  debugLog(`keepAudio setting: ${keepAudio} -> deleteAudio: ${deleteAudio}`);
 
   try {
     isRecording = true;
@@ -962,6 +1064,9 @@ function createStatusOverlay() {
     return statusOverlay;
   }
 
+  // Reset ready state when creating new overlay
+  statusOverlayReady = false;
+
   const position = getValidOverlayPosition();
 
   statusOverlay = new BrowserWindow({
@@ -971,6 +1076,7 @@ function createStatusOverlay() {
     y: position.y,
     frame: false,
     transparent: true,
+    hasShadow: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
@@ -985,6 +1091,15 @@ function createStatusOverlay() {
   statusOverlay.loadFile('src/status-overlay.html');
   statusOverlay.setVisibleOnAllWorkspaces(true);
   statusOverlay.setAlwaysOnTop(true, 'screen-saver'); // Höhere Priorität
+
+  // Mark overlay as ready once loaded and send any pending status
+  statusOverlay.webContents.on('did-finish-load', () => {
+    statusOverlayReady = true;
+    if (pendingStatusUpdate) {
+      statusOverlay.webContents.send('update-status', pendingStatusUpdate);
+      pendingStatusUpdate = null;
+    }
+  });
 
   // Validate and save position when window is moved
   statusOverlay.on('moved', () => {
@@ -1111,14 +1226,22 @@ function updateStatusOverlay(title, message, type, extra = {}) {
   }
 
   const overlay = createStatusOverlay();
-  overlay.webContents.send('update-status', {
+  const statusData = {
     title,
     message,
     type,
     step: extra.step || null,
+    uploadProgress: extra.uploadProgress,
     documentation: extra.documentation || null,
     transcript: extra.transcript || null
-  });
+  };
+
+  // If overlay is ready, send immediately; otherwise queue for when it's ready
+  if (statusOverlayReady) {
+    overlay.webContents.send('update-status', statusData);
+  } else {
+    pendingStatusUpdate = statusData;
+  }
   overlay.show();
   overlay.setAlwaysOnTop(true, 'screen-saver'); // Stelle sicher, dass es im Vordergrund bleibt
   overlay.focus(); // Bringe es in den Fokus
@@ -1204,6 +1327,16 @@ ipcMain.handle('get-auto-close-setting', () => {
 
 ipcMain.handle('set-auto-close-setting', (event, value) => {
   store.set('autoCloseOverlay', value);
+  return true;
+});
+
+// Theme handlers
+ipcMain.handle('get-theme', () => {
+  return store.get('theme', 'dark');
+});
+
+ipcMain.handle('set-theme', (event, theme) => {
+  store.set('theme', theme);
   return true;
 });
 
@@ -1311,6 +1444,13 @@ function stopHeartbeat() {
 }
 
 // IPC Handlers for login window
+ipcMain.handle('resize-login-window', (event, height) => {
+  if (loginWindow && !loginWindow.isDestroyed()) {
+    const [width] = loginWindow.getSize();
+    loginWindow.setSize(width, Math.min(height, 800));
+  }
+});
+
 ipcMain.handle('login', async (event, email, password) => {
   try {
     const response = await apiClient.login(email, password, store);
@@ -1382,16 +1522,19 @@ ipcMain.handle('get-settings', async () => {
   const documentsPath = app.getPath('documents');
   const defaultTranscriptPath = path.join(documentsPath, 'DentDoc', 'Transkripte');
   const defaultProfilesPath = path.join(documentsPath, 'DentDoc', 'Stimmprofile');
+  const defaultRecordingsPath = path.join(app.getPath('temp'), 'dentdoc');
 
   return {
     shortcut: store.get('shortcut') || 'F9',
     microphoneId: store.get('microphoneId') || null,
     transcriptPath: store.get('transcriptPath') || defaultTranscriptPath,
     profilesPath: store.get('profilesPath') || defaultProfilesPath,
+    recordingsPath: store.get('recordingsPath') || defaultRecordingsPath,
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
-    deleteAudio: store.get('deleteAudio', true),
-    docMode: store.get('docMode', 'single')
+    keepAudio: store.get('keepAudio', false),
+    docMode: store.get('docMode', 'single'),
+    theme: store.get('theme', 'dark')
   };
 });
 
@@ -1424,14 +1567,19 @@ ipcMain.handle('save-settings', async (event, settings) => {
     store.set('autoExport', settings.autoExport);
   }
 
-  // Save delete audio setting
-  if (settings.deleteAudio !== undefined) {
-    store.set('deleteAudio', settings.deleteAudio);
+  // Save keep audio setting
+  if (settings.keepAudio !== undefined) {
+    store.set('keepAudio', settings.keepAudio);
   }
 
   // Save documentation mode
   if (settings.docMode !== undefined) {
     store.set('docMode', settings.docMode);
+  }
+
+  // Save theme
+  if (settings.theme !== undefined) {
+    store.set('theme', settings.theme);
   }
 
   // Register new shortcut
@@ -1533,6 +1681,16 @@ ipcMain.handle('select-folder', async () => {
 // IPC Handlers for Bausteine
 const bausteineManager = require('./src/bausteine');
 
+// Bausteine mit Kategorien laden (neues Format)
+ipcMain.handle('get-bausteine-with-categories', async () => {
+  return {
+    data: bausteineManager.getAllBausteineWithCategories(),
+    defaults: bausteineManager.getDefaultBausteineWithCategories(),
+    path: bausteineManager.getBausteinePath()
+  };
+});
+
+// Legacy: Flaches Format für Kompatibilität
 ipcMain.handle('get-bausteine', async () => {
   return {
     bausteine: bausteineManager.getAllBausteine(),
@@ -1540,19 +1698,223 @@ ipcMain.handle('get-bausteine', async () => {
   };
 });
 
+// Bausteine speichern (neues Format mit Kategorien)
+ipcMain.handle('save-bausteine-with-categories', async (event, data) => {
+  bausteineManager.saveAllBausteineWithCategories(data);
+  return { success: true };
+});
+
+// Legacy: Flaches Format speichern
 ipcMain.handle('save-bausteine', async (event, bausteine) => {
   bausteineManager.saveAllBausteine(bausteine);
   return { success: true };
 });
 
-ipcMain.handle('reset-baustein', async (event, kategorie) => {
-  bausteineManager.resetBaustein(kategorie);
+// Pfad-Management
+ipcMain.handle('get-bausteine-path', async () => {
+  return bausteineManager.getBausteinePath();
+});
+
+ipcMain.handle('set-bausteine-path', async (event, newPath) => {
+  bausteineManager.setBausteinePath(newPath);
+  return { success: true };
+});
+
+// Prüft ob im Zielordner bereits eine bausteine.json existiert
+ipcMain.handle('check-bausteine-exists', async (event, targetPath) => {
+  return fs.existsSync(targetPath);
+});
+
+// Kopiert die aktuelle bausteine.json in einen neuen Ordner
+ipcMain.handle('copy-bausteine-to-path', async (event, targetPath) => {
+  const currentPath = bausteineManager.getBausteinePath();
+  const currentData = bausteineManager.getAllBausteineWithCategories();
+
+  // Zielordner erstellen falls nötig
+  const targetDir = path.dirname(targetPath);
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  // Daten in neue Datei schreiben
+  fs.writeFileSync(targetPath, JSON.stringify(currentData, null, 2), 'utf8');
+
+  // Pfad umstellen
+  bausteineManager.setBausteinePath(targetPath);
+
+  return { success: true };
+});
+
+// Dialog für Bausteine-Pfad-Wechsel
+ipcMain.handle('show-bausteine-path-dialog', async (event, targetPath) => {
+  const targetExists = fs.existsSync(targetPath);
+  const currentPath = bausteineManager.getBausteinePath();
+  const hasCurrentFile = fs.existsSync(currentPath);
+
+  // Prüfe ob aktuelle Datei Änderungen hat (nicht nur Defaults)
+  let hasCustomData = false;
+  if (hasCurrentFile) {
+    try {
+      const data = JSON.parse(fs.readFileSync(currentPath, 'utf8'));
+      hasCustomData = true; // Wenn Datei existiert, hat sie potenziell custom Daten
+    } catch (e) {
+      hasCustomData = false;
+    }
+  }
+
+  let buttons = [];
+  let message = '';
+  let detail = '';
+
+  if (targetExists && hasCurrentFile) {
+    // Beide existieren
+    buttons = ['Aktuelle Bausteine kopieren', 'Vorhandene Datei verwenden', 'Abbrechen'];
+    message = 'Im Zielordner existiert bereits eine Bausteine-Datei.';
+    detail = 'Möchten Sie Ihre aktuellen Bausteine dorthin kopieren (überschreibt vorhandene) oder die vorhandene Datei verwenden?';
+  } else if (targetExists) {
+    // Nur Ziel existiert
+    buttons = ['Vorhandene Datei verwenden', 'Mit Standards überschreiben', 'Abbrechen'];
+    message = 'Im Zielordner existiert bereits eine Bausteine-Datei.';
+    detail = 'Möchten Sie diese verwenden oder mit Standard-Bausteinen überschreiben?';
+  } else if (hasCurrentFile) {
+    // Nur aktuelle existiert
+    buttons = ['Aktuelle Bausteine kopieren', 'Mit Standards beginnen', 'Abbrechen'];
+    message = 'Bausteine-Speicherort ändern';
+    detail = 'Möchten Sie Ihre aktuellen Bausteine in den neuen Ordner kopieren oder mit Standard-Bausteinen neu beginnen?';
+  } else {
+    // Keine existiert - einfach wechseln
+    return { action: 'use_defaults' };
+  }
+
+  const window = settingsWindow || bausteineWindow;
+  const result = await dialog.showMessageBox(window, {
+    type: 'question',
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    title: 'Bausteine-Speicherort ändern',
+    message,
+    detail
+  });
+
+  // Mapping der Antworten
+  if (result.response === buttons.length - 1) {
+    return { action: 'cancel' };
+  }
+
+  if (targetExists && hasCurrentFile) {
+    // Beide existieren
+    if (result.response === 0) return { action: 'copy_current' };
+    if (result.response === 1) return { action: 'use_existing' };
+  } else if (targetExists) {
+    // Nur Ziel existiert
+    if (result.response === 0) return { action: 'use_existing' };
+    if (result.response === 1) return { action: 'use_defaults' };
+  } else if (hasCurrentFile) {
+    // Nur aktuelle existiert
+    if (result.response === 0) return { action: 'copy_current' };
+    if (result.response === 1) return { action: 'use_defaults' };
+  }
+
+  return { action: 'cancel' };
+});
+
+// Kategorien-Management
+ipcMain.handle('create-category', async (event, name) => {
+  const category = bausteineManager.createCategory(name);
+  return { success: true, category };
+});
+
+ipcMain.handle('rename-category', async (event, categoryId, newName) => {
+  bausteineManager.renameCategory(categoryId, newName);
+  return { success: true };
+});
+
+ipcMain.handle('delete-category', async (event, categoryId) => {
+  bausteineManager.deleteCategory(categoryId);
+  return { success: true };
+});
+
+// Baustein-Management
+ipcMain.handle('create-baustein', async (event, categoryId, baustein) => {
+  const newBaustein = bausteineManager.createBaustein(categoryId, baustein);
+  return { success: true, baustein: newBaustein };
+});
+
+ipcMain.handle('update-baustein', async (event, bausteinId, updates) => {
+  bausteineManager.updateBaustein(bausteinId, updates);
+  return { success: true };
+});
+
+ipcMain.handle('delete-baustein', async (event, bausteinId) => {
+  bausteineManager.deleteBaustein(bausteinId);
+  return { success: true };
+});
+
+ipcMain.handle('move-baustein', async (event, bausteinId, targetCategoryId) => {
+  bausteineManager.moveBausteinToCategory(bausteinId, targetCategoryId);
+  return { success: true };
+});
+
+ipcMain.handle('reset-baustein', async (event, bausteinId) => {
+  bausteineManager.resetBaustein(bausteinId);
   return { success: true };
 });
 
 ipcMain.handle('reset-all-bausteine', async () => {
   bausteineManager.resetAllBausteine();
   return { success: true };
+});
+
+ipcMain.handle('confirm-reset-baustein', async (event, bausteinName) => {
+  const result = await dialog.showMessageBox(bausteineWindow, {
+    type: 'question',
+    buttons: ['Zurücksetzen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Baustein zurücksetzen',
+    message: `Baustein "${bausteinName}" auf Standard zurücksetzen?`
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('confirm-reset-all-bausteine', async () => {
+  const result = await dialog.showMessageBox(bausteineWindow, {
+    type: 'warning',
+    buttons: ['Alle zurücksetzen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Alle Bausteine zurücksetzen',
+    message: 'ALLE Bausteine auf Standard zurücksetzen?',
+    detail: 'Dies kann nicht rückgängig gemacht werden!'
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('confirm-delete-category', async (event, categoryName) => {
+  const result = await dialog.showMessageBox(bausteineWindow, {
+    type: 'warning',
+    buttons: ['Löschen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Kategorie löschen',
+    message: `Kategorie "${categoryName}" wirklich löschen?`,
+    detail: 'Die Bausteine werden in die Kategorie "Allgemein" verschoben.'
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('confirm-delete-baustein', async (event, bausteinName) => {
+  const result = await dialog.showMessageBox(bausteineWindow, {
+    type: 'warning',
+    buttons: ['Löschen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Baustein löschen',
+    message: `Baustein "${bausteinName}" wirklich löschen?`,
+    detail: 'Dies kann nicht rückgängig gemacht werden!'
+  });
+  return result.response === 0;
 });
 
 ipcMain.handle('import-bausteine', async (event, json) => {

@@ -4,96 +4,99 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stimmprofile - DentDoc</title>
+  <link rel="stylesheet" href="styles/design-system.css">
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: rgba(0, 0, 0, 0.2);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: rgba(249, 115, 22, 0.4);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(249, 115, 22, 0.6);
-    }
-
-    ::-webkit-scrollbar-corner {
-      background: transparent;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
-      padding: 20px;
-      min-height: 100vh;
-    }
-
     .container {
-      max-width: 600px;
+      max-width: 900px;
       margin: 0 auto;
     }
 
-    .header {
+    .page-header {
       text-align: center;
-      margin-bottom: 24px;
+      margin-bottom: var(--space-6);
+      animation: slideUp 0.3s ease-out;
     }
 
-    .header h1 {
-      font-size: 28px;
-      color: #f97316;
-      margin-bottom: 8px;
-      font-weight: 600;
-      letter-spacing: -0.5px;
+    .page-header h1 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-2);
     }
 
-    .header p {
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.6);
+    .page-header h1 svg {
+      width: 32px;
+      height: 32px;
+      color: var(--primary-500);
     }
 
-    .content {
-      padding: 0;
+    .page-header p {
+      color: var(--text-tertiary);
     }
 
     .section {
-      background: rgba(255, 255, 255, 0.05);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 14px;
-      padding: 24px;
-      margin-bottom: 16px;
-      transition: all 0.2s;
+      background: var(--glass-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-6);
+      margin-bottom: var(--space-5);
+      transition: all var(--transition-normal);
+      position: relative;
+      animation: slideUp 0.4s ease-out;
+      animation-fill-mode: both;
+    }
+
+    .section:nth-child(1) { animation-delay: 0.05s; }
+    .section:nth-child(2) { animation-delay: 0.1s; }
+    .section:nth-child(3) { animation-delay: 0.15s; }
+
+    .section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
     }
 
     .section:hover {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(249, 115, 22, 0.3);
+      background: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
+      box-shadow: none;
     }
 
     .section h2 {
-      font-size: 16px;
-      margin-bottom: 16px;
-      color: rgba(255, 255, 255, 0.95);
-      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-5);
+      font-size: 1.125rem;
     }
 
+    .section h2 svg {
+      width: 22px;
+      height: 22px;
+      color: var(--primary-500);
+    }
+
+    /* Storage Path */
+    .path-input-row {
+      display: flex;
+      gap: var(--space-3);
+    }
+
+    .path-input-row input {
+      flex: 1;
+    }
+
+    /* Profile Columns */
     .profile-columns {
       display: flex;
-      gap: 16px;
+      gap: var(--space-5);
     }
 
     .profile-column {
@@ -102,19 +105,19 @@
     }
 
     .profile-column-header {
-      font-size: 14px;
+      font-size: 0.875rem;
       font-weight: 600;
-      color: rgba(255, 255, 255, 0.7);
-      margin-bottom: 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-secondary);
+      margin-bottom: var(--space-3);
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--border-default);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--space-2);
     }
 
-    .profile-column-header .role-icon {
-      font-size: 16px;
+    .role-icon {
+      font-size: 1rem;
     }
 
     .profile-list {
@@ -125,206 +128,116 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 12px;
+      padding: var(--space-3) var(--space-4);
       background: rgba(0, 0, 0, 0.2);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 10px;
-      margin-bottom: 8px;
-      transition: all 0.2s;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      margin-bottom: var(--space-2);
+      transition: all var(--transition-fast);
     }
 
     .profile-item:hover {
       background: rgba(0, 0, 0, 0.3);
-      border-color: rgba(249, 115, 22, 0.3);
+      border-color: var(--glass-border-hover);
     }
 
     .profile-name {
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.95);
+      font-size: 0.9375rem;
+      color: var(--text-primary);
       font-weight: 500;
     }
 
     .profile-date {
-      font-size: 11px;
-      color: rgba(255, 255, 255, 0.5);
+      font-size: 0.75rem;
+      color: var(--text-muted);
       margin-top: 2px;
     }
 
     .btn-delete {
-      background: #ef4444;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 8px;
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--error-500);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-sm);
       cursor: pointer;
-      font-size: 13px;
+      font-size: 0.875rem;
       font-weight: 500;
-      transition: all 0.2s;
+      transition: all var(--transition-fast);
     }
 
     .btn-delete:hover {
-      background: #dc2626;
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
-    }
-
-    .enroll-form {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .form-group label {
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.7);
-      font-weight: 500;
-    }
-
-    .form-group input,
-    .form-group select {
-      padding: 12px 14px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 10px;
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.9);
-      transition: all 0.2s;
-      width: 100%;
-    }
-
-    .form-group input:focus,
-    .form-group select:focus {
-      outline: none;
-      border-color: #f97316;
-      background: rgba(0, 0, 0, 0.4);
-      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
-    }
-
-    .form-group select option {
-      background: #2d2d2d;
-      color: rgba(255, 255, 255, 0.9);
-    }
-
-    .btn-enroll {
-      background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+      background: var(--error-500);
       color: white;
-      border: none;
-      padding: 14px;
-      border-radius: 10px;
-      cursor: pointer;
-      font-size: 16px;
-      font-weight: 600;
-      box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
-      transition: all 0.2s;
-    }
-
-    .btn-enroll:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 16px rgba(249, 115, 22, 0.4);
-    }
-
-    .btn-enroll:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
-    }
-
-    .status {
-      padding: 12px 16px;
-      border-radius: 10px;
-      font-size: 13px;
-      text-align: center;
-      border: 1px solid;
-    }
-
-    .status.recording {
-      background: rgba(249, 115, 22, 0.15);
-      color: #f97316;
-      border-color: rgba(249, 115, 22, 0.3);
-    }
-
-    .status.processing {
-      background: rgba(59, 130, 246, 0.15);
-      color: #3b82f6;
-      border-color: rgba(59, 130, 246, 0.3);
-    }
-
-    .status.success {
-      background: rgba(34, 197, 94, 0.15);
-      color: #22c55e;
-      border-color: rgba(34, 197, 94, 0.3);
-    }
-
-    .status.error {
-      background: rgba(239, 68, 68, 0.15);
-      color: #ef4444;
-      border-color: rgba(239, 68, 68, 0.3);
+      border-color: var(--error-500);
     }
 
     .empty-state {
       text-align: center;
-      padding: 40px 20px;
-      color: rgba(255, 255, 255, 0.4);
-      font-size: 14px;
+      padding: var(--space-8) var(--space-5);
+      color: var(--text-muted);
+      font-size: 0.875rem;
     }
 
-    .info-box {
-      background: rgba(249, 115, 22, 0.1);
-      border-left: 4px solid #f97316;
-      padding: 14px;
-      border-radius: 10px;
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.8);
-      margin-bottom: 16px;
-      line-height: 1.5;
+    /* Enrollment Form */
+    .enroll-form {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-5);
     }
 
-    .read-text-section {
-      margin-top: 16px;
+    .form-row {
+      display: flex;
+      gap: var(--space-4);
     }
 
+    .form-row .form-group {
+      flex: 1;
+      margin-bottom: 0;
+    }
+
+    /* Read Text Section */
     .read-text-box {
       background: rgba(0, 0, 0, 0.3);
-      border: 2px solid rgba(249, 115, 22, 0.4);
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 16px;
+      border: 2px solid rgba(249, 115, 22, 0.3);
+      border-radius: var(--radius-lg);
+      padding: var(--space-5);
+      position: relative;
     }
 
     .read-text-label {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.5);
-      margin-bottom: 12px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: var(--space-3);
       text-transform: uppercase;
       letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
     }
 
     .read-text-content {
-      font-size: 16px;
+      font-size: 1rem;
       line-height: 1.8;
-      color: rgba(255, 255, 255, 0.95);
+      color: var(--text-primary);
     }
 
     .read-text-hint {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.5);
-      margin-top: 12px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: var(--space-4);
       font-style: italic;
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--border-default);
     }
 
+    /* Progress Bar */
     .progress-bar-container {
       width: 100%;
       height: 8px;
       background: rgba(0, 0, 0, 0.3);
-      border-radius: 4px;
+      border-radius: var(--radius-full);
       overflow: hidden;
-      margin-top: 16px;
+      margin-top: var(--space-4);
       display: none;
     }
 
@@ -334,20 +247,34 @@
 
     .progress-bar {
       height: 100%;
-      background: linear-gradient(90deg, #f97316, #ea580c);
-      border-radius: 4px;
+      background: linear-gradient(90deg, var(--primary-500), var(--primary-400));
+      border-radius: var(--radius-full);
       transition: width 0.5s ease;
       width: 0%;
+      position: relative;
     }
 
+    .progress-bar::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+      animation: shimmer 1.5s infinite;
+    }
+
+    /* Audio Indicator */
     .audio-indicator {
       display: none;
       align-items: center;
-      gap: 10px;
-      margin-top: 12px;
-      padding: 10px 14px;
+      gap: var(--space-3);
+      margin-top: var(--space-4);
+      padding: var(--space-3) var(--space-4);
       background: rgba(0, 0, 0, 0.2);
-      border-radius: 8px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-default);
     }
 
     .audio-indicator.visible {
@@ -355,21 +282,17 @@
     }
 
     .audio-indicator-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #ef4444;
+      width: 12px;
+      height: 12px;
+      border-radius: var(--radius-full);
+      background: var(--error-500);
       animation: pulse 1s ease-in-out infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.6; transform: scale(0.9); }
+      box-shadow: none;
     }
 
     .audio-indicator-label {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.6);
+      font-size: 0.8125rem;
+      color: var(--text-tertiary);
       flex-shrink: 0;
     }
 
@@ -377,29 +300,37 @@
       flex: 1;
       height: 6px;
       background: rgba(255, 255, 255, 0.1);
-      border-radius: 3px;
+      border-radius: var(--radius-full);
       overflow: hidden;
     }
 
     .audio-level-bar {
       height: 100%;
-      background: linear-gradient(90deg, #22c55e, #f97316, #ef4444);
-      border-radius: 3px;
+      background: linear-gradient(90deg, var(--success-500), var(--primary-500), var(--error-500));
+      border-radius: var(--radius-full);
       transition: width 0.05s ease;
       width: 0%;
     }
 
+    /* Buttons */
+    .button-row {
+      display: flex;
+      gap: var(--space-3);
+    }
+
+    .button-row .btn-enroll {
+      flex: 1;
+    }
+
+    .btn-enroll {
+      width: 100%;
+    }
+
     .btn-cancel {
-      background: rgba(239, 68, 68, 0.2);
-      color: #ef4444;
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      padding: 14px;
-      border-radius: 10px;
-      cursor: pointer;
-      font-size: 16px;
-      font-weight: 600;
-      transition: all 0.2s;
       display: none;
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--error-500);
+      border: 1px solid rgba(239, 68, 68, 0.3);
     }
 
     .btn-cancel.visible {
@@ -407,138 +338,236 @@
     }
 
     .btn-cancel:hover {
-      background: rgba(239, 68, 68, 0.3);
-      border-color: rgba(239, 68, 68, 0.6);
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.5);
     }
 
-    .button-row {
-      display: flex;
-      gap: 12px;
+    /* Status Messages */
+    .status {
+      padding: var(--space-3) var(--space-4);
+      border-radius: var(--radius-md);
+      font-size: 0.875rem;
+      text-align: center;
+      border: 1px solid;
     }
 
-    .button-row .btn-enroll {
-      flex: 1;
+    .status.recording {
+      background: rgba(249, 115, 22, 0.1);
+      color: var(--primary-500);
+      border-color: rgba(249, 115, 22, 0.3);
     }
 
-    .button-row .btn-cancel {
-      flex: 0 0 auto;
-      padding: 14px 24px;
+    .status.processing {
+      background: rgba(59, 130, 246, 0.1);
+      color: var(--info-500);
+      border-color: rgba(59, 130, 246, 0.3);
     }
 
-    /* Storage path section */
-    .path-input-row {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 8px;
+    .status.success {
+      background: rgba(34, 197, 94, 0.1);
+      color: var(--success-500);
+      border-color: rgba(34, 197, 94, 0.3);
     }
 
-    .path-input {
-      flex: 1;
-      padding: 10px 14px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 8px;
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.9);
+    .status.error {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--error-500);
+      border-color: rgba(239, 68, 68, 0.3);
     }
 
-    .btn-browse {
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: rgba(255, 255, 255, 0.8);
-      padding: 10px 16px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-      white-space: nowrap;
+    /* Light theme overrides */
+    [data-theme="light"] .section::before {
+      background: linear-gradient(90deg, transparent, rgba(249, 115, 22, 0.15), transparent);
     }
 
-    .btn-browse:hover {
-      background: rgba(255, 255, 255, 0.15);
-      border-color: rgba(249, 115, 22, 0.4);
+    [data-theme="light"] .profile-item {
+      background: #f9fafb;
+      border-color: #e5e7eb;
     }
 
-    .btn-open-folder {
-      background: rgba(249, 115, 22, 0.15);
-      border: 1px solid rgba(249, 115, 22, 0.3);
-      color: #f97316;
-      padding: 10px 16px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: all 0.2s;
-      white-space: nowrap;
+    [data-theme="light"] .profile-item:hover {
+      background: #f3f4f6;
+      border-color: #fdba74;
     }
 
-    .btn-open-folder:hover {
-      background: rgba(249, 115, 22, 0.25);
-      border-color: rgba(249, 115, 22, 0.5);
+    [data-theme="light"] .read-text-box {
+      background: #fff7ed;
+      border-color: #fdba74;
     }
 
-    .helper-text {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.5);
-      line-height: 1.5;
+    [data-theme="light"] .progress-bar-container {
+      background: #e5e7eb;
     }
 
-    .helper-text.warning {
-      color: #f97316;
+    [data-theme="light"] .audio-indicator {
+      background: #f9fafb;
+      border-color: #e5e7eb;
+    }
+
+    [data-theme="light"] .audio-level-bar-container {
+      background: #e5e7eb;
+    }
+
+    [data-theme="light"] .btn-delete {
+      background: #fef2f2;
+      border-color: #fecaca;
+    }
+
+    [data-theme="light"] .btn-cancel {
+      background: #fef2f2;
+      border-color: #fecaca;
+    }
+
+    [data-theme="light"] .btn-cancel:hover {
+      background: #fee2e2;
+      border-color: #f87171;
+    }
+
+    [data-theme="light"] .status.recording {
+      background: #fff7ed;
+      border-color: #fed7aa;
+      color: #ea580c;
+    }
+
+    [data-theme="light"] .status.processing {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: #2563eb;
+    }
+
+    [data-theme="light"] .status.success {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
+      color: #16a34a;
+    }
+
+    [data-theme="light"] .status.error {
+      background: #fef2f2;
+      border-color: #fecaca;
+      color: #dc2626;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>🎤 Stimmprofile</h1>
+  <script>
+    // Load theme immediately to prevent flash
+    const { ipcRenderer: themeRenderer } = require('electron');
+    themeRenderer.invoke('get-theme').then(theme => {
+      document.documentElement.setAttribute('data-theme', theme || 'dark');
+    });
+  </script>
+  <div class="titlebar">
+    <div class="titlebar-title">
+      <span>DentDoc Stimmprofile</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="minimizeBtn">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <rect y="5" width="12" height="2" rx="1"/>
+        </svg>
+      </button>
+      <button class="titlebar-btn close" id="closeBtn">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <path d="M1.5 1.5l9 9m0-9l-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="container">
+    <div class="page-header">
+      <h1>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        Stimmprofile
+      </h1>
       <p>Erstellen und verwalten Sie Stimmprofile für die automatische Sprechererkennung</p>
     </div>
 
     <div class="content">
+      <!-- Storage Path Section -->
       <div class="section">
-        <h2>Speicherort</h2>
+        <h2>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          Speicherort
+        </h2>
         <div class="path-input-row">
-          <input type="text" id="profilesPath" class="path-input" readonly placeholder="Standard-Speicherort">
-          <button type="button" id="openFolderBtn" class="btn-open-folder">Öffnen</button>
-          <button type="button" id="browseBtn" class="btn-browse">Ändern</button>
+          <input type="text" id="profilesPath" readonly placeholder="Standard-Speicherort">
+          <button type="button" id="openFolderBtn" class="btn btn-secondary">Öffnen</button>
+          <button type="button" id="browseBtn" class="btn btn-secondary">Ändern</button>
         </div>
-        <p class="helper-text warning">⚠️ Für mehrere PCs: Wählen Sie einen Netzwerkordner (z.B. \\\\server\\dentdoc\\profiles), damit die Stimmprofile auf allen Rechnern verfügbar sind.</p>
+        <p class="helper-text warning">Für mehrere PCs: Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\profiles), damit die Stimmprofile auf allen Rechnern verfügbar sind.</p>
       </div>
 
+      <!-- Saved Profiles Section -->
       <div class="section">
-        <h2>Gespeicherte Profile</h2>
+        <h2>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          Gespeicherte Profile
+        </h2>
         <div id="profileContainer">
           <div class="empty-state">Keine Stimmprofile vorhanden</div>
         </div>
       </div>
 
+      <!-- New Profile Section -->
       <div class="section">
-        <h2>Neues Profil erstellen</h2>
-        <div class="info-box">
-          💡 Sprechen Sie für 30 Sekunden, damit das System Ihre Stimme lernen kann. Sie können den Beispieltext vorlesen oder frei sprechen.
+        <h2>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="16"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+          Neues Profil erstellen
+        </h2>
+
+        <div class="info-box" style="margin-bottom: var(--space-5);">
+          Sprechen Sie für 30 Sekunden, damit das System Ihre Stimme lernen kann. Sie können den Beispieltext vorlesen oder frei sprechen.
         </div>
+
         <form class="enroll-form" id="enrollForm">
-          <div class="form-group">
-            <label for="speakerRole">Rolle</label>
-            <select id="speakerRole" required>
-              <option value="">Bitte auswählen...</option>
-              <option value="Arzt">Arzt</option>
-              <option value="ZFA">ZFA</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="speakerName">Name des Sprechers</label>
-            <input type="text" id="speakerName" placeholder="z.B. Dr. Notle" required>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="speakerRole">Rolle</label>
+              <select id="speakerRole" required>
+                <option value="">Bitte auswählen...</option>
+                <option value="Arzt">Arzt</option>
+                <option value="ZFA">ZFA</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="speakerName">Name des Sprechers</label>
+              <input type="text" id="speakerName" placeholder="z.B. Dr. Notle" required>
+            </div>
           </div>
 
           <div class="read-text-section" id="readTextSection">
             <div class="read-text-box">
-              <div class="read-text-label">📖 Beispieltext zum Vorlesen (optional)</div>
+              <div class="read-text-label">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                </svg>
+                Beispieltext zum Vorlesen (optional)
+              </div>
               <div class="read-text-content" id="readTextContent">
                 Der Patient kommt heute zur Kontrolle in die Praxis. Bei der Untersuchung zeigt sich ein unauffälliger Befund im Bereich der Frontzähne. Die Mundhygiene ist gut, das Zahnfleisch zeigt keine Entzündungszeichen. Im Seitenzahnbereich rechts oben finden wir eine kleine kariöse Läsion am Zahn 16 distal. Diese sollte zeitnah versorgt werden. Der Zahnstein wurde heute entfernt und eine professionelle Zahnreinigung durchgeführt. Wir empfehlen dem Patienten, die Zahnzwischenräume täglich mit Interdentalbürsten zu reinigen. Der nächste Kontrolltermin wird für das kommende Halbjahr vereinbart. Der Patient wurde über alle Befunde aufgeklärt und hat keine weiteren Fragen.
               </div>
               <div class="read-text-hint">Tipp: Sie können diesen Text vorlesen oder frei sprechen - wichtig ist nur, dass Sie 30 Sekunden lang sprechen.</div>
             </div>
+
             <div class="progress-bar-container" id="progressBarContainer">
               <div class="progress-bar" id="progressBar"></div>
             </div>
@@ -553,19 +582,30 @@
           </div>
 
           <div id="statusMessage"></div>
+
           <div class="button-row">
-            <button type="submit" class="btn-enroll" id="enrollBtn">
+            <button type="submit" class="btn btn-primary btn-lg btn-enroll" id="enrollBtn">
               <span id="btnText">Aufnahme starten (30 Sekunden)</span>
             </button>
-            <button type="button" class="btn-cancel" id="cancelBtn">Abbrechen</button>
+            <button type="button" class="btn btn-cancel btn-lg" id="cancelBtn">Abbrechen</button>
           </div>
         </form>
       </div>
+    </div>
     </div>
   </div>
 
   <script>
     const { ipcRenderer } = require('electron');
+
+    // Window controls
+    document.getElementById('minimizeBtn').addEventListener('click', () => {
+      ipcRenderer.send('minimize-window');
+    });
+
+    document.getElementById('closeBtn').addEventListener('click', () => {
+      ipcRenderer.send('close-window');
+    });
 
     let isRecording = false;
     let recordingTimer = null;
@@ -744,7 +784,7 @@
                     <div class="profile-name">${profile.name}</div>
                     <div class="profile-date">${new Date(profile.createdAt).toLocaleDateString('de-DE')}</div>
                   </div>
-                  <button class="btn-delete" onclick="deleteProfile('${profile.id}')">×</button>
+                  <button class="btn-delete" onclick="deleteProfile('${profile.id}')">Löschen</button>
                 </li>
               `).join('')}
             </ul>

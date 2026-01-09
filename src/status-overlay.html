@@ -3,151 +3,159 @@
 <head>
   <meta charset="UTF-8">
   <title>DentDoc Status</title>
+  <link rel="stylesheet" href="styles/design-system.css">
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: rgba(0, 0, 0, 0.2);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: rgba(249, 115, 22, 0.4);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(249, 115, 22, 0.6);
-    }
-
-    ::-webkit-scrollbar-corner {
-      background: transparent;
-    }
-
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       background: transparent;
       overflow: hidden;
-      padding: 4px;
+      padding: 6px;
+      min-height: auto;
+    }
+
+    body::before {
+      display: none;
     }
 
     .container {
-      background: rgba(30, 30, 30, 0.98);
-      border-radius: 14px;
-      padding: 20px 24px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--overlay-bg, rgba(10, 10, 11, 0.95));
+      backdrop-filter: blur(40px);
+      -webkit-backdrop-filter: blur(40px);
+      border-radius: var(--radius-xl);
+      padding: var(--space-5) var(--space-6);
+      border: 1px solid var(--overlay-border, rgba(255, 255, 255, 0.1));
       position: relative;
+      box-shadow: none;
+      width: 400px;
+    }
+
+    [data-theme="light"] .container {
+      --overlay-bg: rgba(255, 255, 255, 0.95);
+      --overlay-border: rgba(0, 0, 0, 0.1);
+    }
+
+    .container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
     }
 
     .header {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: var(--space-4);
     }
 
-    /* Drag handle for moving the window - leave space for close button */
+    /* Drag handle for moving the window */
     .drag-handle {
       position: absolute;
       top: 0;
       left: 0;
-      right: 50px; /* Space for close button */
+      right: 50px;
       height: 50px;
       cursor: move;
       -webkit-app-region: drag;
     }
 
     .icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
+      width: 52px;
+      height: 52px;
+      border-radius: var(--radius-lg);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 22px;
+      font-size: 24px;
       flex-shrink: 0;
-    }
-
-    .icon.recording {
-      background: #ef4444;
+      position: relative;
       transition: transform 0.1s ease-out;
     }
 
+    .icon.recording {
+      background: linear-gradient(135deg, var(--error-500), #dc2626);
+      box-shadow: none;
+      animation: recordingPulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes recordingPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
     .icon.processing {
-      background: #f97316;
+      background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+      box-shadow: none;
       animation: processingPulse 1.5s ease-in-out infinite;
     }
 
     @keyframes processingPulse {
-      0%, 100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.08); opacity: 0.85; }
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
     }
 
     .icon.success {
-      background: #22c55e;
+      background: linear-gradient(135deg, var(--success-500), var(--success-600));
+      box-shadow: none;
     }
 
     .icon.error {
-      background: #ef4444;
+      background: linear-gradient(135deg, var(--error-500), var(--error-600));
+      box-shadow: none;
     }
 
     .content {
       flex: 1;
+      min-width: 0;
     }
 
     .title {
-      color: white;
-      font-size: 16px;
+      color: var(--text-primary);
+      font-size: 1rem;
       font-weight: 600;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
 
     .message {
-      color: rgba(255, 255, 255, 0.7);
-      font-size: 13px;
+      color: var(--text-secondary);
+      font-size: 0.875rem;
     }
 
     .timer {
-      color: rgba(255, 255, 255, 0.4);
+      color: var(--text-muted);
       font-variant-numeric: tabular-nums;
-      margin-left: 6px;
+      font-family: var(--font-mono);
+      margin-left: var(--space-2);
+      font-size: 0.8125rem;
     }
 
     .close-btn {
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.08);
       border: none;
-      color: rgba(255, 255, 255, 0.5);
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
+      color: var(--text-tertiary);
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-md);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 18px;
       -webkit-app-region: no-drag;
-      transition: all 0.2s;
+      transition: all var(--transition-fast);
       flex-shrink: 0;
     }
 
     .close-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-      color: white;
+      background: rgba(255, 255, 255, 0.15);
+      color: var(--text-primary);
     }
 
     /* Progress Bar */
     .progress-container {
       display: none;
-      margin-top: 16px;
+      margin-top: var(--space-5);
     }
 
     .progress-container.visible {
@@ -157,14 +165,14 @@
     .progress-bar {
       height: 6px;
       background: rgba(255, 255, 255, 0.1);
-      border-radius: 3px;
+      border-radius: var(--radius-full);
       overflow: hidden;
     }
 
     .progress-fill {
       height: 100%;
-      background: linear-gradient(90deg, #f97316, #fb923c);
-      border-radius: 3px;
+      background: linear-gradient(90deg, var(--primary-500), var(--primary-400));
+      border-radius: var(--radius-full);
       transition: width 0.5s ease-out;
       width: 0%;
       position: relative;
@@ -178,17 +186,12 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: linear-gradient(
-        90deg,
-        transparent,
-        rgba(255, 255, 255, 0.3),
-        transparent
-      );
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
       animation: shimmer 1.5s infinite;
     }
 
     .progress-fill.complete {
-      background: linear-gradient(90deg, #22c55e, #4ade80);
+      background: linear-gradient(90deg, var(--success-500), var(--success-600));
     }
 
     .progress-fill.complete::after {
@@ -203,39 +206,42 @@
     .progress-steps {
       display: flex;
       justify-content: space-between;
-      margin-top: 10px;
-      font-size: 11px;
-      color: rgba(255, 255, 255, 0.5);
+      margin-top: var(--space-3);
+      font-size: 0.6875rem;
+      color: var(--text-muted);
     }
 
     .progress-step {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: var(--space-1);
+      transition: color var(--transition-fast);
     }
 
     .progress-step.active {
-      color: #f97316;
+      color: var(--primary-500);
     }
 
     .progress-step.done {
-      color: #22c55e;
+      color: var(--success-500);
     }
 
     .step-dot {
       width: 8px;
       height: 8px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.3);
+      border-radius: var(--radius-full);
+      background: rgba(255, 255, 255, 0.2);
+      transition: all var(--transition-fast);
     }
 
     .progress-step.active .step-dot {
-      background: #f97316;
+      background: var(--primary-500);
+      box-shadow: none;
       animation: dotPulse 1s ease-in-out infinite;
     }
 
     .progress-step.done .step-dot {
-      background: #22c55e;
+      background: var(--success-500);
     }
 
     @keyframes dotPulse {
@@ -247,8 +253,8 @@
     .actions {
       display: none;
       flex-direction: column;
-      margin-top: 18px;
-      gap: 12px;
+      margin-top: var(--space-5);
+      gap: var(--space-3);
     }
 
     .actions.visible {
@@ -256,25 +262,28 @@
     }
 
     .action-btn {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: white;
-      padding: 16px 18px;
-      border-radius: 12px;
-      font-size: 14px;
+      width: 100%;
+      box-sizing: border-box;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      color: var(--text-primary);
+      padding: var(--space-4) var(--space-5);
+      border-radius: var(--radius-lg);
+      font-size: 0.875rem;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all var(--transition-normal);
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: var(--space-4);
       -webkit-app-region: no-drag;
       text-align: left;
     }
 
     .action-btn:hover {
-      background: rgba(255, 255, 255, 0.15);
-      border-color: rgba(255, 255, 255, 0.25);
+      background: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
       transform: translateY(-2px);
+      box-shadow: none;
     }
 
     .action-btn:active {
@@ -282,9 +291,9 @@
     }
 
     .action-btn .btn-icon {
-      width: 46px;
-      height: 46px;
-      border-radius: 10px;
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-md);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -293,56 +302,108 @@
     }
 
     .action-btn.summary .btn-icon {
-      background: linear-gradient(135deg, #f97316, #ea580c);
+      background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+      box-shadow: none;
     }
 
     .action-btn.full .btn-icon {
-      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      background: linear-gradient(135deg, var(--info-500), var(--info-600));
+      box-shadow: none;
     }
 
     .action-btn .btn-text {
       flex: 1;
+      min-width: 0;
     }
 
     .action-btn .btn-title {
       font-weight: 600;
-      font-size: 15px;
-      margin-bottom: 3px;
+      font-size: 0.9375rem;
+      margin-bottom: 2px;
     }
 
     .action-btn .btn-desc {
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.6);
+      font-size: 0.75rem;
+      color: var(--text-tertiary);
     }
 
     .action-btn .btn-status {
       font-size: 20px;
       opacity: 0;
-      transition: opacity 0.2s;
+      transition: all var(--transition-fast);
+      color: var(--success-500);
     }
 
     .action-btn.copied .btn-status {
       opacity: 1;
+      transform: scale(1.1);
     }
 
     .action-btn.copied {
-      background: rgba(34, 197, 94, 0.2);
-      border-color: rgba(34, 197, 94, 0.4);
+      background: rgba(34, 197, 94, 0.1);
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+
+    /* Light theme overrides */
+    [data-theme="light"] .container::before {
+      background: linear-gradient(90deg, transparent, rgba(249, 115, 22, 0.2), transparent);
+    }
+
+    [data-theme="light"] .close-btn {
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    [data-theme="light"] .close-btn:hover {
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+    [data-theme="light"] .progress-bar {
+      background: #e5e7eb;
+    }
+
+    [data-theme="light"] .step-dot {
+      background: #d1d5db;
+    }
+
+    [data-theme="light"] .action-btn {
+      background: #ffffff;
+      border-color: #e5e7eb;
+    }
+
+    [data-theme="light"] .action-btn:hover {
+      background: #f9fafb;
+      border-color: #fdba74;
+    }
+
+    [data-theme="light"] .action-btn.copied {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
     }
   </style>
 </head>
 <body>
+  <script>
+    // Load theme immediately to prevent flash
+    const { ipcRenderer: themeRenderer } = require('electron');
+    themeRenderer.invoke('get-theme').then(theme => {
+      document.documentElement.setAttribute('data-theme', theme || 'dark');
+    });
+  </script>
   <div class="container">
     <div class="drag-handle"></div>
     <div class="header">
-      <div id="icon" class="icon recording">
-        <span id="iconEmoji">🔴</span>
+      <div id="icon" class="icon processing">
+        <span id="iconEmoji">⚡</span>
       </div>
       <div class="content">
-        <div id="title" class="title">Aufnahme läuft...</div>
-        <div id="message" class="message">Drücken Sie F9 zum Stoppen <span id="timer" class="timer"></span></div>
+        <div id="title" class="title">Verarbeitung...</div>
+        <div id="message" class="message">Upload 0%</div>
       </div>
-      <button id="closeBtn" class="close-btn">✕</button>
+      <button id="closeBtn" class="close-btn">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 1l12 12M13 1L1 13"/>
+        </svg>
+      </button>
     </div>
 
     <div id="progressContainer" class="progress-container">
@@ -515,13 +576,17 @@
           break;
         case 'processing':
           stopTimer();
-          iconEmoji.textContent = '';
+          iconEmoji.textContent = '⚡';
           message.textContent = data.message;
           progressContainer.classList.add('visible');
           actions.classList.remove('visible');
           // Set progress based on step (4 steps total)
           if (data.step === 1) {
-            setProgress(1, 15);   // Upload: 15%
+            // Upload step: use actual upload progress if available (0-15%)
+            const uploadPercent = data.uploadProgress !== undefined
+              ? Math.round(data.uploadProgress * 0.15)  // Scale 0-100% to 0-15%
+              : 15;
+            setProgress(1, uploadPercent);
           } else if (data.step === 2) {
             setProgress(2, 40);   // Transkription: 40%
           } else if (data.step === 3) {
