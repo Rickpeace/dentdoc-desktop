@@ -2469,7 +2469,8 @@ autoUpdater.on('update-downloaded', (info) => {
     cancelId: 1
   }).then((result) => {
     if (result.response === 0) {
-      autoUpdater.quitAndInstall();
+      // Force quit all windows and install
+      autoUpdater.quitAndInstall(false, true);
     }
   });
 });
