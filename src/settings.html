@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DentDoc Einstellungen</title>
   <link rel="stylesheet" href="styles/design-system.css">
+  <link rel="stylesheet" href="../node_modules/driver.js/dist/driver.css">
+  <link rel="stylesheet" href="styles/onboarding-tour.css">
   <style>
     .page-header {
       margin-bottom: var(--space-6);
@@ -319,8 +321,20 @@
   <div class="main-content">
     <div class="container">
       <div class="page-header">
-        <h1>Einstellungen</h1>
-        <p>Passen Sie DentDoc an Ihre Bedürfnisse an</p>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <h1>Einstellungen</h1>
+            <p>Passen Sie DentDoc an Ihre Bedürfnisse an</p>
+          </div>
+          <button id="startTourBtn" class="tour-restart-btn" title="Geführte Tour starten">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Tour starten
+          </button>
+        </div>
       </div>
 
     <div class="hint-banner">
@@ -336,7 +350,7 @@
     </div>
 
     <!-- Microphone Section -->
-    <div class="section">
+    <div id="section-mic" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -345,6 +359,7 @@
           <line x1="8" y1="23" x2="16" y2="23"/>
         </svg>
         Mikrofon
+        <span class="help-icon">?<span class="tooltip">Wählen Sie hier Ihr Mikrofon aus und testen Sie die Aufnahmequalität. Ein gutes Mikrofon ist wichtig für präzise Transkriptionen.</span></span>
       </h2>
 
       <label for="micSelect">Mikrofon auswählen</label>
@@ -368,13 +383,14 @@
     </div>
 
     <!-- Shortcut Section -->
-    <div class="section">
+    <div id="section-shortcut" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="2" y="4" width="20" height="16" rx="2"/>
           <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h8M6 16h.01M18 16h.01"/>
         </svg>
         Tastenkombination
+        <span class="help-icon">?<span class="tooltip">Drücken Sie F9 (oder Ihre gewählte Taste), um eine Aufnahme zu starten oder zu stoppen. Sie können die Taste hier ändern.</span></span>
       </h2>
 
       <label>Aufnahme starten/stoppen</label>
@@ -389,13 +405,14 @@
     </div>
 
     <!-- Transcript Export Section -->
-    <div class="section">
+    <div id="section-export" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
           <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
         </svg>
         Transkript-Export
+        <span class="help-icon">?<span class="tooltip">Aktivieren Sie diese Option, um alle Transkriptionen automatisch als Textdateien zu speichern.</span></span>
       </h2>
 
       <label class="checkbox-label">
@@ -415,13 +432,14 @@
     </div>
 
     <!-- Recordings Section -->
-    <div class="section">
+    <div id="section-recordings" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/>
           <circle cx="12" cy="12" r="3"/>
         </svg>
         Aufnahmen
+        <span class="help-icon">?<span class="tooltip">Optional können Sie die Audio-Aufnahmen dauerhaft speichern für Qualitätskontrolle oder spätere Referenz.</span></span>
       </h2>
 
       <label class="checkbox-label">
@@ -439,13 +457,14 @@
     </div>
 
     <!-- Voice Profiles Section -->
-    <div class="section">
+    <div id="section-profiles" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
           <circle cx="12" cy="7" r="4"/>
         </svg>
         Stimmprofile
+        <span class="help-icon">?<span class="tooltip">Mit Stimmprofilen erkennt DentDoc verschiedene Sprecher automatisch. So wird klar, wer was gesagt hat.</span></span>
       </h2>
 
       <label for="profilesPath">Speicherort für Stimmprofile</label>
@@ -458,7 +477,7 @@
     </div>
 
     <!-- Bausteine Section -->
-    <div class="section">
+    <div id="section-bausteine" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="3" width="7" height="7"/>
@@ -467,6 +486,7 @@
           <rect x="3" y="14" width="7" height="7"/>
         </svg>
         Bausteine
+        <span class="help-icon">?<span class="tooltip">Bausteine sind vordefinierte Textvorlagen, die automatisch in Ihre Dokumentation eingefügt werden können.</span></span>
       </h2>
 
       <label for="bausteinePath">Speicherort für Bausteine-Datei</label>
@@ -479,13 +499,14 @@
     </div>
 
     <!-- Documentation Mode Section -->
-    <div class="section">
+    <div id="section-docmode" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
         </svg>
         Dokumentations-Modus
+        <span class="help-icon">?<span class="tooltip">Single Prompt: Schnelle Dokumentation. Agent-Kette: Erkennt Behandlungstypen und fügt passende Bausteine automatisch ein.</span></span>
       </h2>
 
       <label for="docModeSelect">Modus auswählen</label>
@@ -500,13 +521,14 @@
     </div>
 
     <!-- Appearance Section -->
-    <div class="section">
+    <div id="section-appearance" class="section">
       <h2>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="5"/>
           <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
         </svg>
         Erscheinungsbild
+        <span class="help-icon">?<span class="tooltip">Wählen Sie zwischen hellem und dunklem Design - ganz nach Ihrem Geschmack.</span></span>
       </h2>
 
       <label for="themeSelect">Design</label>
@@ -525,6 +547,7 @@
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
         Verhalten
+        <span class="help-icon">?<span class="tooltip">Stellen Sie ein, ob das Status-Fenster nach erfolgreicher Transkription automatisch geschlossen werden soll.</span></span>
       </h2>
 
       <label class="checkbox-label">
@@ -543,6 +566,7 @@
           <circle cx="11" cy="11" r="2"/>
         </svg>
         Debug & Fehlerprotokoll
+        <span class="help-icon">?<span class="tooltip">Bei Problemen können Sie das Debug-Protokoll öffnen und an den Support senden.</span></span>
       </h2>
 
       <p class="helper-text" style="margin-top: 0; margin-bottom: var(--space-4);">
@@ -1048,6 +1072,165 @@
 
     // Initialize
     loadSettings();
+
+    // Onboarding Tour
+    const { driver } = require('driver.js');
+    const startTourBtn = document.getElementById('startTourBtn');
+
+    function createTour() {
+      return driver({
+        showProgress: true,
+        progressText: 'Schritt {{current}} von {{total}}',
+        nextBtnText: 'Weiter',
+        prevBtnText: 'Zurück',
+        doneBtnText: 'Fertig',
+        showButtons: ['next', 'previous', 'close'],
+        animate: true,
+        allowClose: true,
+        overlayClickNext: false,
+        disableActiveInteraction: true,
+        stagePadding: 10,
+        stageRadius: 12,
+        popoverClass: 'dentdoc-tour',
+        steps: [
+          {
+            popover: {
+              title: 'Willkommen bei DentDoc!',
+              description: 'Diese kurze Tour zeigt Ihnen die wichtigsten Funktionen. Sie können die Tour jederzeit beenden oder später erneut starten.',
+              side: 'center',
+              align: 'center'
+            }
+          },
+          {
+            element: '#section-mic',
+            popover: {
+              title: 'Mikrofon-Einstellungen',
+              description: 'Wählen Sie hier Ihr Mikrofon aus und testen Sie die Aufnahmequalität. Ein gutes Mikrofon ist wichtig für präzise Transkriptionen.',
+              side: 'bottom',
+              align: 'start'
+            }
+          },
+          {
+            element: '#section-shortcut',
+            popover: {
+              title: 'Tastenkombination',
+              description: 'Drücken Sie F9 (oder Ihre gewählte Taste), um eine Aufnahme zu starten oder zu stoppen. Sie können die Taste hier ändern.',
+              side: 'bottom',
+              align: 'start'
+            }
+          },
+          {
+            element: '#section-export',
+            popover: {
+              title: 'Transkript-Export',
+              description: 'Aktivieren Sie diese Option, um alle Transkriptionen automatisch als Textdateien zu speichern.',
+              side: 'bottom',
+              align: 'start'
+            }
+          },
+          {
+            element: '#section-recordings',
+            popover: {
+              title: 'Aufnahmen speichern',
+              description: 'Optional können Sie die Audio-Aufnahmen dauerhaft speichern für Qualitätskontrolle oder spätere Referenz.',
+              side: 'bottom',
+              align: 'start'
+            }
+          },
+          {
+            element: '#section-profiles',
+            popover: {
+              title: 'Stimmprofile',
+              description: 'Mit Stimmprofilen erkennt DentDoc verschiedene Sprecher automatisch. So wird klar, wer was gesagt hat.',
+              side: 'top',
+              align: 'start'
+            }
+          },
+          {
+            element: '#section-bausteine',
+            popover: {
+              title: 'Bausteine',
+              description: 'Bausteine sind vordefinierte Textvorlagen, die automatisch in Ihre Dokumentation eingefügt werden können.',
+              side: 'top',
+              align: 'start'
+            }
+          },
+          {
+            element: '#section-docmode',
+            popover: {
+              title: 'Dokumentations-Modus',
+              description: 'Single Prompt: Schnelle Dokumentation. Agent-Kette: Erkennt Behandlungstypen und fügt passende Bausteine automatisch ein.',
+              side: 'top',
+              align: 'start'
+            }
+          },
+          {
+            element: '#section-appearance',
+            popover: {
+              title: 'Erscheinungsbild',
+              description: 'Wählen Sie zwischen hellem und dunklem Design - ganz nach Ihrem Geschmack.',
+              side: 'top',
+              align: 'start'
+            }
+          },
+          {
+            element: '#saveBtn',
+            popover: {
+              title: 'Einstellungen speichern',
+              description: 'Vergessen Sie nicht, Ihre Änderungen zu speichern! Klicken Sie auf "Speichern", wenn Sie fertig sind.',
+              side: 'top',
+              align: 'end'
+            }
+          },
+          {
+            popover: {
+              title: 'Sie sind startklar!',
+              description: 'Drücken Sie F9, um Ihre erste Aufnahme zu starten. Das Status-Fenster zeigt Ihnen den Fortschritt an. Viel Erfolg!',
+              side: 'center',
+              align: 'center'
+            }
+          }
+        ],
+        onDestroyed: () => {
+          ipcRenderer.invoke('mark-tour-completed', 'settings');
+        }
+      });
+    }
+
+    // Start tour button click handler
+    startTourBtn.addEventListener('click', () => {
+      const tourDriver = createTour();
+      tourDriver.drive();
+    });
+
+    // Check if this is first run and start tour automatically
+    async function checkFirstRun() {
+      const isFirstRun = await ipcRenderer.invoke('check-first-run', 'settings');
+      if (isFirstRun) {
+        // Wait a bit for the page to fully render
+        setTimeout(() => {
+          const tourDriver = createTour();
+          tourDriver.drive();
+        }, 800);
+      }
+    }
+
+    checkFirstRun();
+
+    // Listen for show-settings-tab event (from error overlay)
+    ipcRenderer.on('show-settings-tab', (event, tab) => {
+      if (tab === 'microphone') {
+        const micSection = document.getElementById('section-mic');
+        if (micSection) {
+          micSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          micSection.style.transition = 'background-color 0.3s ease';
+          micSection.style.backgroundColor = 'rgba(var(--accent-rgb), 0.1)';
+          setTimeout(() => {
+            micSection.style.backgroundColor = '';
+          }, 2000);
+        }
+      }
+    });
 
     // Window controls
     document.getElementById('minimizeBtn').addEventListener('click', () => {

@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DentDoc Login</title>
   <link rel="stylesheet" href="styles/design-system.css">
+  <link rel="stylesheet" href="../node_modules/driver.js/dist/driver.css">
+  <link rel="stylesheet" href="styles/onboarding-tour.css">
   <style>
     .content {
       flex: 1;
@@ -52,22 +54,34 @@
       z-index: 1;
     }
 
-    .logo-icon {
-      width: 72px;
-      height: 72px;
-      background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
-      border-radius: var(--radius-xl);
+    .logo-inline {
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 0 auto var(--space-4);
-      font-size: 32px;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      gap: var(--space-3);
+      margin-bottom: var(--space-2);
+    }
+
+    .logo-inline svg {
+      flex-shrink: 0;
     }
 
     .logo h1 {
-      font-size: 2rem;
-      margin-bottom: var(--space-2);
+      font-family: 'Manrope', var(--font-sans);
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #111827;
+      margin: 0;
+      line-height: 1;
+      background: none;
+      -webkit-background-clip: unset;
+      -webkit-text-fill-color: #111827;
+      background-clip: unset;
+    }
+
+    [data-theme="dark"] .logo h1 {
+      color: var(--text-primary);
+      -webkit-text-fill-color: var(--text-primary);
     }
 
     .logo p {
@@ -250,13 +264,12 @@
     <div class="login-container">
       <div class="login-card">
         <div class="logo">
-          <div class="logo-icon">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="white">
-              <path d="M12 2C9.24 2 7 4.24 7 7v3H5c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-8c0-1.1-.9-2-2-2h-2V7c0-2.76-2.24-5-5-5zm0 2c1.66 0 3 1.34 3 3v3H9V7c0-1.66 1.34-3 3-3zm-1 10h2v4h-2v-4z"/>
+          <div class="logo-inline">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
             </svg>
+            <h1>DentDoc</h1>
           </div>
-          <h1>DentDoc</h1>
-          <p>Desktop App anmelden</p>
         </div>
 
         <div class="form-content">
@@ -370,6 +383,85 @@
         submitBtn.disabled = false;
         loadingDiv.classList.remove('show');
         resizeWindowToFit();
+      }
+    });
+
+    // Onboarding Tour for Login
+    const { driver } = require('driver.js');
+
+    function createLoginTour() {
+      return driver({
+        showProgress: true,
+        progressText: 'Schritt {{current}} von {{total}}',
+        nextBtnText: 'Weiter',
+        prevBtnText: 'Zurück',
+        doneBtnText: 'Los geht\'s!',
+        showButtons: ['next', 'previous', 'close'],
+        animate: true,
+        allowClose: true,
+        overlayClickNext: false,
+        disableActiveInteraction: true,
+        stagePadding: 10,
+        stageRadius: 12,
+        popoverClass: 'dentdoc-tour',
+        steps: [
+          {
+            element: '.logo',
+            popover: {
+              title: 'Willkommen bei DentDoc!',
+              description: 'Schön, dass Sie hier sind! DentDoc ist Ihre Desktop-App für automatische Dokumentation in der Zahnarztpraxis.',
+              side: 'bottom',
+              align: 'center'
+            }
+          },
+          {
+            element: '#loginForm',
+            popover: {
+              title: 'Anmeldung mit Website-Konto',
+              description: 'Verwenden Sie hier <strong>dieselben Anmeldedaten</strong> wie auf der DentDoc-Website. Haben Sie noch kein Konto? Registrieren Sie sich zuerst auf dentdoc.app',
+              side: 'top',
+              align: 'center'
+            }
+          },
+          {
+            element: '.info',
+            popover: {
+              title: 'Noch kein Konto?',
+              description: 'Klicken Sie hier, um sich auf der Website zu registrieren. Nach der Registrierung können Sie sich mit denselben Daten hier anmelden.',
+              side: 'top',
+              align: 'center'
+            }
+          }
+        ],
+        onDestroyed: () => {
+          ipcRenderer.invoke('mark-tour-completed', 'login');
+        }
+      });
+    }
+
+    // Check if this is first run and start tour automatically
+    async function checkFirstRunLogin() {
+      console.log('Checking first run for login tour...');
+      const isFirstRun = await ipcRenderer.invoke('check-first-run', 'login');
+      console.log('Is first run:', isFirstRun);
+      if (isFirstRun) {
+        setTimeout(() => {
+          console.log('Starting login tour...');
+          const tourDriver = createLoginTour();
+          tourDriver.drive();
+        }, 600);
+      }
+    }
+
+    checkFirstRunLogin();
+
+    // Zum Testen: Tour manuell starten mit Tastenkombination Strg+T
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 't') {
+        e.preventDefault();
+        console.log('Manual tour start...');
+        const tourDriver = createLoginTour();
+        tourDriver.drive();
       }
     });
   </script>

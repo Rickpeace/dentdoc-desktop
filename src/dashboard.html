@@ -1,0 +1,1529 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DentDoc</title>
+  <link rel="stylesheet" href="styles/design-system.css">
+  <link rel="stylesheet" href="styles/dashboard.css">
+  <link rel="stylesheet" href="styles/setup-wizard.css">
+  <link rel="stylesheet" href="../node_modules/driver.js/dist/driver.css">
+  <link rel="stylesheet" href="styles/onboarding-tour.css">
+</head>
+<body>
+  <script>
+    // Load theme immediately to prevent flash
+    const { ipcRenderer: themeRenderer } = require('electron');
+    themeRenderer.invoke('get-theme').then(theme => {
+      document.documentElement.setAttribute('data-theme', theme || 'dark');
+    });
+  </script>
+
+  <!-- Custom Titlebar -->
+  <div class="titlebar">
+    <div class="titlebar-title">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+      </svg>
+      <span>DentDoc</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="minimizeBtn" title="Minimieren">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <rect y="5" width="12" height="2" rx="1"/>
+        </svg>
+      </button>
+      <button class="titlebar-btn close" id="closeBtn" title="Schließen">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <path d="M1.5 1.5l9 9m0-9l-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <div class="logo-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+            </svg>
+          </div>
+          <span class="logo-name">DentDoc</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-view="home" id="nav-home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          <span>Übersicht</span>
+        </a>
+        <a href="#" class="nav-item" data-view="settings" id="nav-settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <span>Einstellungen</span>
+        </a>
+        <a href="#" class="nav-item" data-view="profiles" id="nav-profiles">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span>Stimmprofile</span>
+        </a>
+        <a href="#" class="nav-item" data-view="bausteine" id="nav-bausteine">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="14" y="14" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+          </svg>
+          <span>Bausteine</span>
+        </a>
+        <a href="#" class="nav-item" data-view="subscription" id="nav-subscription">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+            <line x1="1" y1="10" x2="23" y2="10"/>
+          </svg>
+          <span>Abonnement</span>
+        </a>
+        <a href="#" class="nav-item" data-view="feedback" id="nav-feedback">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Feedback</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="subscription-status" id="subscriptionStatus">
+          <div class="subscription-indicator"></div>
+          <span class="subscription-label">Laden...</span>
+        </div>
+        <div class="shortcut-hint">
+          <kbd id="shortcutKey">F9</kbd>
+          <span>zum Aufnehmen</span>
+        </div>
+        <div class="sidebar-links">
+          <a href="#" class="sidebar-link" id="linkWebsite">Website</a>
+          <span class="sidebar-link-divider">·</span>
+          <a href="#" class="sidebar-link" id="linkDatenschutz">Datenschutz</a>
+          <span class="sidebar-link-divider">·</span>
+          <a href="#" class="sidebar-link" id="linkImpressum">Impressum</a>
+        </div>
+        <div class="sidebar-wizard-restart">
+          <a href="#" class="sidebar-link wizard-restart-link" id="restartWizardBtn" title="Einrichtungsassistent neu starten (Strg+T)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+              <path d="M21 3v5h-5"/>
+            </svg>
+            Einrichtung wiederholen
+          </a>
+        </div>
+        <div class="sidebar-version">
+          <span class="version-text" id="appVersion">Version lädt...</span>
+          <a href="#" class="sidebar-link update-check-link" id="checkUpdateBtn" title="Nach Updates suchen">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Updates prüfen
+          </a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content" id="mainContent">
+      <!-- Home View -->
+      <div class="view active" id="view-home">
+        <div class="view-header">
+          <h1>Willkommen bei DentDoc</h1>
+          <p>Ihre intelligente Dokumentationslösung für die Zahnarztpraxis</p>
+        </div>
+
+        <div class="quick-actions">
+          <div class="quick-action-card" id="startRecordingCard">
+            <div class="quick-action-icon recording">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </div>
+            <div class="quick-action-content">
+              <h3>Aufnahme starten</h3>
+              <p>Drücken Sie <kbd id="homeShortcutKey">F9</kbd> oder klicken Sie hier</p>
+            </div>
+            <div class="quick-action-arrow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+          </div>
+
+          <div class="stats-grid stats-grid-3">
+            <div class="stat-card">
+              <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <span class="stat-value" id="todayRecordings">0</span>
+                <span class="stat-label">Aufnahmen heute</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <span class="stat-value" id="profileCount">0</span>
+                <span class="stat-label">Stimmprofile</span>
+              </div>
+            </div>
+            <div class="stat-card stat-card-clickable" id="deviceStatCard">
+              <div class="stat-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <span class="stat-value" id="deviceUsage">-/-</span>
+                <span class="stat-label">Aktive Geräte</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Last Documentation Section -->
+        <div class="last-doc-section" id="lastDocSection" style="display: none;">
+          <h2>Letzte Dokumentation</h2>
+          <div class="last-doc-card" id="lastDocCard">
+            <div class="last-doc-header">
+              <div class="last-doc-time">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+                <span id="lastDocTime">--</span>
+              </div>
+              <div class="last-doc-actions">
+                <button class="btn btn-secondary btn-sm" id="copyLastDocBtn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  Kopieren
+                </button>
+                <button class="btn btn-ghost btn-sm" id="showLastDocBtn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                  Anzeigen
+                </button>
+              </div>
+            </div>
+            <div class="last-doc-preview" id="lastDocPreview">
+              <!-- Vorschau wird dynamisch eingefügt -->
+            </div>
+          </div>
+        </div>
+
+        <div class="info-section">
+          <h2>So funktioniert's</h2>
+          <div class="steps-grid">
+            <div class="step-card">
+              <div class="step-number">1</div>
+              <h4>Aufnahme starten</h4>
+              <p>Drücken Sie F9 oder klicken Sie auf den Aufnahme-Button</p>
+            </div>
+            <div class="step-card">
+              <div class="step-number">2</div>
+              <h4>Sprechen</h4>
+              <p>Diktieren Sie Ihre Behandlungsdokumentation</p>
+            </div>
+            <div class="step-card">
+              <div class="step-number">3</div>
+              <h4>Fertig</h4>
+              <p>Die Dokumentation wird automatisch erstellt und in die Zwischenablage kopiert</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings View -->
+      <div class="view" id="view-settings">
+        <div class="view-header settings-header">
+          <div class="header-content">
+            <h1>Einstellungen</h1>
+            <p>Passen Sie DentDoc an Ihre Bedürfnisse an</p>
+          </div>
+          <button id="settingsStartTourBtn" class="tour-restart-btn" title="Geführte Tour starten">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Tour starten
+          </button>
+        </div>
+
+        <div class="settings-content">
+          <div class="hint-banner">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 16v-4M12 8h.01"/>
+            </svg>
+            <span>Änderungen werden erst nach Klick auf "Speichern" übernommen.</span>
+          </div>
+
+          <div id="settingsSaveConfirmation" class="save-confirmation">✓ Gespeichert</div>
+
+          <!-- Microphone Section -->
+          <div class="settings-section" id="settings-section-mic">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+              <h3>Mikrofon</h3>
+            </div>
+            <label for="settingsMicSelect">Mikrofon auswählen</label>
+            <select id="settingsMicSelect">
+              <option value="">Lade Mikrofone...</option>
+            </select>
+            <div class="mic-test">
+              <button id="settingsTestMicBtn" class="btn btn-secondary">Test starten</button>
+              <div class="mic-level">
+                <div id="settingsMicLevelBar" class="mic-level-bar"></div>
+              </div>
+            </div>
+            <div id="settingsMicStatus" class="status-message"></div>
+            <button id="settingsOpenSoundBtn" class="btn btn-secondary w-full mt-4">Windows Sound-Einstellungen öffnen</button>
+          </div>
+
+          <!-- Shortcut Section -->
+          <div class="settings-section" id="settings-section-shortcut">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="4" width="20" height="16" rx="2"/>
+                <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h8M6 16h.01M18 16h.01"/>
+              </svg>
+              <h3>Tastenkombination</h3>
+            </div>
+            <label>Aufnahme starten/stoppen</label>
+            <p class="helper-text">Aktuelle Tastenkombination: <strong id="settingsCurrentShortcut">F9</strong></p>
+            <div class="shortcut-input-row">
+              <div id="settingsShortcutDisplay" class="shortcut-display">F9</div>
+              <button id="settingsRecordShortcutBtn" class="btn btn-secondary">Ändern</button>
+            </div>
+            <div id="settingsShortcutStatus" class="status-message"></div>
+          </div>
+
+          <!-- Transcript Export Section -->
+          <div class="settings-section" id="settings-section-export">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+              </svg>
+              <h3>Transkript-Export</h3>
+            </div>
+            <label class="checkbox-label">
+              <input type="checkbox" id="settingsAutoExportCheckbox">
+              <span>Transkripte speichern</span>
+            </label>
+            <div id="settingsExportPathSection">
+              <label for="settingsTranscriptPath">Speicherort</label>
+              <div class="path-input-row">
+                <input type="text" id="settingsTranscriptPath" readonly>
+                <button id="settingsBrowseTranscriptBtn" class="btn btn-secondary">Ändern</button>
+                <button id="settingsOpenTranscriptFolderBtn" class="btn btn-ghost">Öffnen</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recordings Section -->
+          <div class="settings-section" id="settings-section-recordings">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <h3>Aufnahmen</h3>
+            </div>
+            <label class="checkbox-label">
+              <input type="checkbox" id="settingsKeepAudioCheckbox">
+              <span>Aufnahmen speichern</span>
+            </label>
+            <label for="settingsRecordingsPath">Speicherort</label>
+            <div class="path-input-row">
+              <input type="text" id="settingsRecordingsPath" readonly>
+              <button id="settingsBrowseRecordingsBtn" class="btn btn-secondary">Ändern</button>
+              <button id="settingsOpenRecordingsFolderBtn" class="btn btn-ghost">Öffnen</button>
+            </div>
+          </div>
+
+          <!-- Voice Profiles Path Section -->
+          <div class="settings-section" id="settings-section-profiles-path">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <h3>Stimmprofile Speicherort</h3>
+            </div>
+            <label for="settingsProfilesPath">Speicherort für Stimmprofile</label>
+            <div class="path-input-row">
+              <input type="text" id="settingsProfilesPath" readonly>
+              <button id="settingsBrowseProfilesBtn" class="btn btn-secondary">Ändern</button>
+              <button id="settingsOpenProfilesFolderBtn" class="btn btn-ghost">Öffnen</button>
+            </div>
+            <p class="helper-text warning">Für mehrere Arbeitsplätze: Wählen Sie einen Netzwerkordner</p>
+          </div>
+
+          <!-- Bausteine Path Section -->
+          <div class="settings-section" id="settings-section-bausteine-path">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"/>
+                <rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/>
+              </svg>
+              <h3>Bausteine Speicherort</h3>
+            </div>
+            <label for="settingsBausteinePath">Speicherort für Bausteine-Datei</label>
+            <div class="path-input-row">
+              <input type="text" id="settingsBausteinePath" readonly>
+              <button id="settingsBrowseBausteineBtn" class="btn btn-secondary">Ändern</button>
+              <button id="settingsOpenBausteineFolderBtn" class="btn btn-ghost">Öffnen</button>
+            </div>
+            <p class="helper-text warning">Für mehrere Arbeitsplätze: Wählen Sie einen Netzwerkordner</p>
+          </div>
+
+          <!-- Documentation Mode Section -->
+          <div class="settings-section" id="settings-section-docmode">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+              <h3>Dokumentations-Modus</h3>
+            </div>
+            <label for="settingsDocModeSelect">Modus auswählen</label>
+            <select id="settingsDocModeSelect">
+              <option value="single">Single Prompt (Standard)</option>
+              <option value="agent-chain">Agent-Kette mit Bausteinen</option>
+            </select>
+            <p class="helper-text">
+              <strong>Single Prompt:</strong> Ein KI-Aufruf für die gesamte Dokumentation.<br>
+              <strong>Agent-Kette:</strong> Erkennt Behandlungskategorien und fügt automatisch Standard-Aufklärungstexte hinzu.
+            </p>
+          </div>
+
+          <!-- Appearance Section -->
+          <div class="settings-section" id="settings-section-appearance">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"/>
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+              <h3>Erscheinungsbild</h3>
+            </div>
+            <label for="settingsThemeSelect">Design</label>
+            <select id="settingsThemeSelect">
+              <option value="dark">Dunkel</option>
+              <option value="light">Hell</option>
+            </select>
+          </div>
+
+          <!-- Behavior Section -->
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              <h3>Verhalten</h3>
+            </div>
+            <label class="checkbox-label">
+              <input type="checkbox" id="settingsAutoCloseCheckbox">
+              <span>Status-Fenster automatisch schließen nach erfolgreicher Transkription</span>
+            </label>
+          </div>
+
+          <!-- Debug Section -->
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+                <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+                <path d="M2 2l7.586 7.586"/>
+                <circle cx="11" cy="11" r="2"/>
+              </svg>
+              <h3>Debug & Fehlerprotokoll</h3>
+            </div>
+            <p class="helper-text" style="margin-top: 0;">Bei Problemen können Sie das Debug-Protokoll an den Support senden.</p>
+            <div class="debug-buttons">
+              <button id="settingsOpenLogBtn" class="btn btn-secondary">Protokoll öffnen</button>
+              <button id="settingsCopyLogPathBtn" class="btn btn-secondary">Pfad kopieren</button>
+            </div>
+            <div id="settingsLogStatus" class="status-message"></div>
+          </div>
+
+          <!-- Settings Buttons -->
+          <div class="settings-buttons">
+            <button id="settingsCancelBtn" class="btn btn-secondary">Abbrechen</button>
+            <button id="settingsSaveBtn" class="btn btn-primary">Speichern</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profiles View -->
+      <div class="view" id="view-profiles">
+        <div class="view-header profiles-header">
+          <h1>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+            Stimmprofile
+          </h1>
+          <p>Erstellen und verwalten Sie Stimmprofile für die automatische Sprechererkennung</p>
+        </div>
+
+        <div class="profiles-content">
+          <!-- Storage Path Section -->
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <h3>Speicherort</h3>
+            </div>
+            <div class="path-input-row">
+              <input type="text" id="profilesPathInput" readonly placeholder="Standard-Speicherort">
+              <button type="button" id="profilesOpenFolderBtn" class="btn btn-secondary">Öffnen</button>
+              <button type="button" id="profilesBrowseBtn" class="btn btn-secondary">Ändern</button>
+            </div>
+            <p class="helper-text warning">Für mehrere Arbeitsplätze: Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\profiles)</p>
+          </div>
+
+          <!-- Saved Profiles Section -->
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+              <h3>Gespeicherte Profile</h3>
+            </div>
+            <div id="profilesContainer">
+              <div class="empty-state-small">Keine Stimmprofile vorhanden</div>
+            </div>
+          </div>
+
+          <!-- New Profile Section -->
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="16"/>
+                <line x1="8" y1="12" x2="16" y2="12"/>
+              </svg>
+              <h3>Neues Profil erstellen</h3>
+            </div>
+
+            <div class="info-box" style="margin-bottom: var(--space-5);">
+              Sprechen Sie für 30 Sekunden, damit das System Ihre Stimme lernen kann.
+            </div>
+
+            <form id="profilesEnrollForm">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="profilesSpeakerRole">Rolle</label>
+                  <select id="profilesSpeakerRole" required>
+                    <option value="">Bitte auswählen...</option>
+                    <option value="Arzt">Arzt</option>
+                    <option value="ZFA">ZFA</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="profilesSpeakerName">Name des Sprechers</label>
+                  <input type="text" id="profilesSpeakerName" placeholder="z.B. Dr. Notle" required>
+                </div>
+              </div>
+
+              <div class="read-text-section" id="profilesReadTextSection">
+                <div class="read-text-box">
+                  <div class="read-text-label">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                    </svg>
+                    Beispieltext zum Vorlesen (optional)
+                  </div>
+                  <div class="read-text-content" id="profilesReadTextContent">
+                    Der Patient kommt heute zur Kontrolle in die Praxis. Bei der Untersuchung zeigt sich ein unauffälliger Befund im Bereich der Frontzähne. Die Mundhygiene ist gut, das Zahnfleisch zeigt keine Entzündungszeichen. Im Seitenzahnbereich rechts oben finden wir eine kleine kariöse Läsion am Zahn 16 distal. Diese sollte zeitnah versorgt werden. Der Zahnstein wurde heute entfernt und eine professionelle Zahnreinigung durchgeführt. Wir empfehlen dem Patienten, die Zahnzwischenräume täglich mit Interdentalbürsten zu reinigen. Der nächste Kontrolltermin wird für das kommende Halbjahr vereinbart. Der Patient wurde über alle Befunde aufgeklärt und hat keine weiteren Fragen.
+                  </div>
+                  <div class="read-text-hint">Tipp: Sie können diesen Text vorlesen oder frei sprechen - wichtig ist nur, dass Sie 30 Sekunden lang sprechen.</div>
+                </div>
+
+                <div class="progress-bar-container" id="profilesProgressBarContainer">
+                  <div class="progress-bar" id="profilesProgressBar"></div>
+                </div>
+
+                <div class="audio-indicator" id="profilesAudioIndicator">
+                  <div class="audio-indicator-dot"></div>
+                  <span class="audio-indicator-label">Mikrofon:</span>
+                  <div class="audio-level-bar-container">
+                    <div class="audio-level-bar" id="profilesAudioLevelBar"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="profilesStatusMessage"></div>
+
+              <div class="button-row">
+                <button type="submit" class="btn btn-primary btn-lg" id="profilesEnrollBtn">
+                  <span id="profilesBtnText">Aufnahme starten (30 Sekunden)</span>
+                </button>
+                <button type="button" class="btn btn-danger btn-lg" id="profilesCancelBtn" style="display: none;">Abbrechen</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bausteine View -->
+      <div class="view" id="view-bausteine">
+        <div class="view-header bausteine-header">
+          <h1>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"/>
+              <rect x="14" y="3" width="7" height="7"/>
+              <rect x="14" y="14" width="7" height="7"/>
+              <rect x="3" y="14" width="7" height="7"/>
+            </svg>
+            Dokumentations-Bausteine
+          </h1>
+          <p>Standard-Aufklärungstexte für die Agent-Kette Dokumentation</p>
+        </div>
+
+        <div class="bausteine-content">
+          <div class="path-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span id="bausteinePathDisplay">Wird geladen...</span>
+            <button class="btn btn-ghost btn-sm" id="bausteineChangePathBtn">Ändern</button>
+            <button class="btn btn-ghost btn-sm" id="bausteineOpenFolderBtn">Öffnen</button>
+          </div>
+
+          <div class="info-box" style="margin-bottom: var(--space-5);">
+            <strong>So funktionieren Bausteine:</strong> Wenn die Agent-Kette eine Behandlungskategorie erkennt, wird der entsprechende Aufklärungstext automatisch eingefügt. Die Erkennungshinweise helfen der KI, Ihre praxiseigenen Begriffe den richtigen Kategorien zuzuordnen.
+            <br><br>
+            <strong>Netzwerk-Tipp:</strong> Speichern Sie die Datei auf einem Netzlaufwerk, damit alle Arbeitsplätze dieselben Bausteine verwenden.
+          </div>
+
+          <div class="bausteine-toolbar">
+            <button class="btn btn-primary" id="bausteineAddCategoryBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                <line x1="12" y1="11" x2="12" y2="17"/>
+                <line x1="9" y1="14" x2="15" y2="14"/>
+              </svg>
+              Neue Kategorie
+            </button>
+            <div class="bausteine-toolbar-right">
+              <button class="btn btn-secondary" id="bausteineExportBtn">Exportieren</button>
+              <button class="btn btn-secondary" id="bausteineImportBtn">Importieren</button>
+              <button class="btn btn-danger" id="bausteineResetAllBtn">Alle zurücksetzen</button>
+            </div>
+          </div>
+
+          <div class="categories-container" id="bausteineCategoriesContainer">
+            <!-- Wird dynamisch gefüllt -->
+          </div>
+
+          <div class="bausteine-status-bar">
+            <span class="status-message" id="bausteineStatusMessage">Bereit</span>
+            <button class="btn btn-primary btn-sm" id="bausteineSaveBtn" disabled>Speichern</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bausteine Modals -->
+      <div class="modal-overlay" id="bausteineExportModal">
+        <div class="modal">
+          <h2>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Bausteine exportieren
+          </h2>
+          <textarea id="bausteineExportData" readonly></textarea>
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="bausteineCopyExportBtn">In Zwischenablage</button>
+            <button class="btn btn-secondary" id="bausteineCloseExportModal">Schließen</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="bausteineImportModal">
+        <div class="modal">
+          <h2>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Bausteine importieren
+          </h2>
+          <textarea id="bausteineImportData" placeholder="JSON hier einfügen..."></textarea>
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="bausteineDoImportBtn">Importieren</button>
+            <button class="btn btn-secondary" id="bausteineCloseImportModal">Abbrechen</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="bausteineNewCategoryModal">
+        <div class="modal">
+          <h2>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            Neue Kategorie
+          </h2>
+          <input type="text" id="bausteineNewCategoryName" placeholder="Name der Kategorie...">
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="bausteineCreateCategoryBtn">Erstellen</button>
+            <button class="btn btn-secondary" id="bausteineCloseCategoryModal">Abbrechen</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="bausteineNewBausteinModal">
+        <div class="modal">
+          <h2>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <line x1="12" y1="8" x2="12" y2="16"/>
+              <line x1="8" y1="12" x2="16" y2="12"/>
+            </svg>
+            Neuer Baustein
+          </h2>
+          <input type="text" id="bausteineNewBausteinName" placeholder="Name des Bausteins...">
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="bausteineCreateBausteinBtn">Erstellen</button>
+            <button class="btn btn-secondary" id="bausteineCloseBausteinModal">Abbrechen</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Unsaved Changes Modal -->
+      <div class="modal-overlay" id="bausteineUnsavedModal">
+        <div class="modal">
+          <h2>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary-500)" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Ungespeicherte Änderungen
+          </h2>
+          <p style="color: var(--text-secondary); margin-bottom: var(--space-5);">
+            Sie haben ungespeicherte Änderungen. Möchten Sie diese vor dem Verlassen speichern?
+          </p>
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="bausteineSaveAndContinue">Speichern</button>
+            <button class="btn btn-danger" id="bausteineDiscardChanges">Verwerfen</button>
+            <button class="btn btn-secondary" id="bausteineCloseUnsavedModal">Abbrechen</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feedback View -->
+      <div class="view" id="view-feedback">
+        <div class="feedback-container">
+          <div class="feedback-card">
+            <div class="form-content" id="feedbackFormContent">
+              <div class="feedback-header">
+                <div class="feedback-header-icon">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+                    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+                  </svg>
+                </div>
+                <h1>Feedback</h1>
+                <p>Ihr Feedback hilft uns DentDoc zu verbessern</p>
+              </div>
+
+              <div id="feedbackErrorMessage" class="feedback-error-message"></div>
+
+              <form id="feedbackForm">
+                <div class="form-group">
+                  <label for="feedbackCategory">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                    Kategorie
+                  </label>
+                  <select id="feedbackCategory" required>
+                    <option value="">Bitte wählen...</option>
+                    <option value="bug">Fehlermeldung / Bug</option>
+                    <option value="feature">Feature-Wunsch</option>
+                    <option value="usability">Bedienung / Usability</option>
+                    <option value="documentation">Dokumentationsqualität</option>
+                    <option value="performance">Geschwindigkeit / Performance</option>
+                    <option value="other">Sonstiges</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="feedbackMessage">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    Ihre Nachricht
+                  </label>
+                  <textarea id="feedbackMessage" placeholder="Beschreiben Sie Ihr Anliegen möglichst detailliert..." required></textarea>
+                </div>
+
+                <div class="feedback-buttons">
+                  <button type="button" class="btn btn-secondary" id="feedbackCancelBtn">Zurücksetzen</button>
+                  <button type="submit" class="btn btn-primary" id="feedbackSubmitBtn">Absenden</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="feedback-success-message" id="feedbackSuccessMessage">
+              <div class="feedback-success-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="white">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
+              </div>
+              <div class="feedback-success-title">Vielen Dank!</div>
+              <p class="feedback-success-text">Ihr Feedback wurde erfolgreich übermittelt.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Subscription View -->
+      <div class="view" id="view-subscription">
+        <div class="view-header">
+          <h1>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+              <line x1="1" y1="10" x2="23" y2="10"/>
+            </svg>
+            Abonnement
+          </h1>
+          <p>Verwalten Sie Ihr DentDoc Abonnement</p>
+        </div>
+
+        <div class="subscription-content">
+          <!-- Current Plan Card -->
+          <div class="subscription-plan-card" id="subscriptionPlanCard">
+            <div class="plan-header">
+              <div class="plan-status" id="subscriptionPlanStatus">
+                <div class="plan-status-indicator"></div>
+                <span class="plan-status-label">Laden...</span>
+              </div>
+              <div class="plan-name" id="subscriptionPlanName">-</div>
+            </div>
+            <div class="plan-details plan-details-single">
+              <div class="plan-detail-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <div class="plan-detail-content">
+                  <span class="plan-detail-label">Geräte</span>
+                  <span class="plan-detail-value" id="subscriptionDevices">-/-</span>
+                </div>
+              </div>
+            </div>
+            <div class="plan-actions">
+              <button class="btn btn-primary" id="subscriptionManageBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                Abonnement verwalten
+              </button>
+            </div>
+          </div>
+
+          <!-- Active Devices Section -->
+          <div class="settings-section">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+              <h3>Aktive Geräte</h3>
+            </div>
+            <p class="helper-text" style="margin-top: 0; margin-bottom: var(--space-4);">
+              Hier sehen Sie alle Geräte, die mit Ihrem Konto verbunden sind.
+            </p>
+            <div class="devices-list" id="devicesList">
+              <div class="devices-loading">Lade Geräte...</div>
+            </div>
+          </div>
+
+          <!-- Info Box -->
+          <div class="info-box">
+            <strong>Hinweis:</strong> Wenn Sie ein Gerät entfernen möchten oder Ihr Abonnement ändern wollen,
+            klicken Sie auf "Abonnement verwalten" um zur Website zu gelangen.
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Setup Wizard Overlay -->
+  <div class="setup-wizard-overlay" id="setupWizardOverlay">
+    <!-- Wizard Header -->
+    <div class="wizard-header">
+      <div class="wizard-header-left">
+        <div class="wizard-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+          </svg>
+          <span>DentDoc</span>
+        </div>
+        <span class="wizard-title">Einrichtungsassistent</span>
+      </div>
+      <div class="wizard-progress">
+        <span class="wizard-progress-text" id="wizardProgressText">Schritt 1 von 8</span>
+        <div class="wizard-progress-bar">
+          <div class="wizard-progress-fill" id="wizardProgressFill"></div>
+        </div>
+      </div>
+      <button type="button" class="wizard-close-btn" id="wizardCloseBtn" title="Schließen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Wizard Content -->
+    <div class="wizard-content">
+      <!-- Step 0: Welcome -->
+      <div class="wizard-step active" data-step="0">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+              <line x1="9" y1="9" x2="9.01" y2="9"/>
+              <line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
+          </div>
+          <h2>Willkommen bei DentDoc!</h2>
+          <p>Ihr intelligenter Assistent für zahnärztliche Dokumentation. Wir richten jetzt gemeinsam die wichtigsten Einstellungen ein, damit Sie sofort loslegen können.</p>
+        </div>
+
+        <div class="wizard-welcome-features">
+          <div class="wizard-feature">
+            <div class="wizard-feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              </svg>
+            </div>
+            <h4>Sprechen</h4>
+            <p>Diktieren Sie Ihre Behandlung</p>
+          </div>
+          <div class="wizard-feature">
+            <div class="wizard-feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+            </div>
+            <h4>KI verarbeitet</h4>
+            <p>Automatische Dokumentation</p>
+          </div>
+          <div class="wizard-feature">
+            <div class="wizard-feature-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <path d="M14 2v6h6"/>
+                <path d="M16 13H8M16 17H8"/>
+              </svg>
+            </div>
+            <h4>Fertig</h4>
+            <p>Text in der Zwischenablage</p>
+          </div>
+        </div>
+
+        <!-- Skip Setup Option -->
+        <div style="margin-top: var(--space-6); text-align: center;">
+          <button type="button" class="wizard-skip-setup-btn" id="wizardSkipSetupBtn" style="
+            background: transparent;
+            border: 1px solid var(--border-default);
+            color: var(--text-secondary);
+            padding: 10px 20px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+          ">
+            Einrichtung überspringen
+          </button>
+          <p style="font-size: 0.8125rem; color: var(--text-tertiary); margin-top: var(--space-2);">
+            Alle Einstellungen können jederzeit im Dashboard geändert werden.
+          </p>
+        </div>
+      </div>
+
+      <!-- Step 1: Microphone -->
+      <div class="wizard-step" data-step="1">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+          <h2>Mikrofon einrichten</h2>
+          <p>Wählen Sie das Mikrofon aus, das Sie für Ihre Aufnahmen verwenden möchten. Ein gutes Mikrofon verbessert die Transkriptionsqualität erheblich.</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-form-group">
+            <label for="wizardMicSelect">Mikrofon auswählen</label>
+            <select id="wizardMicSelect">
+              <option value="">Lade Mikrofone...</option>
+            </select>
+          </div>
+
+          <div class="wizard-mic-test">
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardMicTestBtn">Mikrofon testen</button>
+            <div class="wizard-mic-level">
+              <div class="wizard-mic-level-bar" id="wizardMicLevelBar"></div>
+            </div>
+          </div>
+          <div class="wizard-mic-status" id="wizardMicStatus">Klicken Sie auf "Mikrofon testen" und sprechen Sie</div>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>Tipp:</strong> Verwenden Sie ein Headset oder externes Mikrofon für die beste Audioqualität. Laptop-Mikrofone funktionieren, aber Hintergrundgeräusche können die Erkennung beeinträchtigen.</p>
+        </div>
+      </div>
+
+      <!-- Step 2: Shortcut -->
+      <div class="wizard-step" data-step="2">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="4" width="20" height="16" rx="2"/>
+              <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h8M6 16h.01M18 16h.01"/>
+            </svg>
+          </div>
+          <h2>Tastenkürzel festlegen</h2>
+          <p>Mit einem Tastenkürzel starten und stoppen Sie Ihre Aufnahmen schnell und einfach - auch wenn DentDoc im Hintergrund läuft.</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-shortcut-display" id="wizardShortcutDisplay">
+            <span class="wizard-shortcut-key" id="wizardShortcutKey">F9</span>
+          </div>
+          <div style="text-align: center;">
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardChangeShortcutBtn">Ändern</button>
+          </div>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>So funktioniert's:</strong> Drücken Sie die Taste einmal zum Starten der Aufnahme, und nochmal zum Beenden. Die Dokumentation wird automatisch erstellt und in die Zwischenablage kopiert.</p>
+        </div>
+      </div>
+
+      <!-- Step 3: AI Mode -->
+      <div class="wizard-step" data-step="3">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+          </div>
+          <h2>KI-Modus wählen</h2>
+          <p>DentDoc bietet zwei verschiedene Modi für die Dokumentationserstellung. Wählen Sie den Modus, der am besten zu Ihrer Arbeitsweise passt.</p>
+        </div>
+
+        <div class="wizard-options">
+          <div class="wizard-option selected" data-mode="single">
+            <div class="wizard-option-radio"></div>
+            <div class="wizard-option-content">
+              <div class="wizard-option-header">
+                <span class="wizard-option-title">Single Prompt</span>
+                <span class="wizard-option-badge">Empfohlen</span>
+              </div>
+              <p class="wizard-option-desc">Die KI erstellt Ihre Dokumentation in einem Schritt. Funktioniert sofort ohne weitere Konfiguration - ideal für den Einstieg und die meisten Anwendungsfälle.</p>
+            </div>
+          </div>
+
+          <div class="wizard-option" data-mode="agent-chain">
+            <div class="wizard-option-radio"></div>
+            <div class="wizard-option-content">
+              <div class="wizard-option-header">
+                <span class="wizard-option-title">Agent-Kette mit Bausteinen</span>
+              </div>
+              <p class="wizard-option-desc">Erweiterte Kontrolle: Die KI erkennt Behandlungskategorien und fügt automatisch vordefinierte Aufklärungstexte (Bausteine) hinzu. Für erfahrene Nutzer, die standardisierte Textbausteine verwenden möchten.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>Was sind Bausteine?</strong> Bausteine sind vordefinierte Textvorlagen für häufige Behandlungen (z.B. Aufklärungstexte für Extraktionen, Füllungen, etc.). Sie können diese später unter "Bausteine" anpassen.</p>
+        </div>
+      </div>
+
+      <!-- Step 4: Transcripts -->
+      <div class="wizard-step" data-step="4">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+            </svg>
+          </div>
+          <h2>Transkripte speichern</h2>
+          <p>Möchten Sie die Rohtranskription Ihrer Aufnahmen automatisch als Textdatei speichern? Dies ist nützlich für Qualitätskontrolle oder als Backup.</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-toggle active" id="wizardTranscriptToggle">
+            <div class="wizard-toggle-content">
+              <h4>Transkripte speichern</h4>
+              <p>Speichert jede Rohtranskription als .txt-Datei</p>
+            </div>
+            <div class="wizard-toggle-switch"></div>
+          </div>
+
+          <div id="wizardTranscriptPathSection" style="margin-top: var(--space-4);">
+            <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Speicherort</label>
+            <div class="wizard-path-input">
+              <input type="text" id="wizardTranscriptPath" readonly placeholder="Wird geladen...">
+              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBrowseTranscriptBtn">Ändern</button>
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-tertiary); margin-top: var(--space-2);">
+              <strong>Mehrere Arbeitsplätze?</strong> Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\transkripte)
+            </p>
+          </div>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>Hinweis:</strong> Die fertige Dokumentation wird immer automatisch in die Zwischenablage kopiert. Das Speichern von Transkripten ist zusätzlich und optional.</p>
+        </div>
+      </div>
+
+      <!-- Step 5: Audio Recordings -->
+      <div class="wizard-step" data-step="5">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </div>
+          <h2>Audioaufnahmen speichern</h2>
+          <p>Standardmäßig werden Audioaufnahmen nach der Verarbeitung gelöscht. Sie können die Originalaufnahmen auch dauerhaft speichern.</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-toggle" id="wizardAudioToggle">
+            <div class="wizard-toggle-content">
+              <h4>Audioaufnahmen speichern</h4>
+              <p>Behält die Original-Audiodateien nach der Verarbeitung</p>
+            </div>
+            <div class="wizard-toggle-switch"></div>
+          </div>
+
+          <div id="wizardAudioPathSection" style="margin-top: var(--space-4); display: none;">
+            <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Speicherort</label>
+            <div class="wizard-path-input">
+              <input type="text" id="wizardAudioPath" readonly placeholder="Wird geladen...">
+              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBrowseAudioBtn">Ändern</button>
+            </div>
+            <p style="font-size: 0.8125rem; color: var(--text-tertiary); margin-top: var(--space-2);">
+              <strong>Mehrere Arbeitsplätze?</strong> Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\aufnahmen)
+            </p>
+          </div>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>Datenschutz:</strong> Audioaufnahmen können sensible Patientendaten enthalten. Aktivieren Sie diese Option nur, wenn Sie einen sicheren Speicherort haben und die Aufnahmen wirklich benötigen.</p>
+        </div>
+      </div>
+
+      <!-- Step 6: Voice Profiles -->
+      <div class="wizard-step" data-step="6">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div style="display: flex; align-items: center; gap: var(--space-2); justify-content: center;">
+            <h2 style="margin: 0;">Stimmprofile einrichten</h2>
+            <span style="background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 12px;">Empfohlen</span>
+          </div>
+          <p>Mit Stimmprofilen erkennt DentDoc automatisch verschiedene Sprecher (z.B. Arzt und ZFA) und ordnet deren Aussagen korrekt zu.</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <h3>Speicherort für Stimmprofile</h3>
+          </div>
+          <div class="wizard-path-input">
+            <input type="text" id="wizardProfilesPath" readonly placeholder="Wird geladen...">
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBrowseProfilesBtn">Ändern</button>
+          </div>
+          <p style="font-size: 0.8125rem; color: var(--text-tertiary); margin-top: var(--space-3);">
+            <strong>Mehrere Arbeitsplätze?</strong> Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\stimmprofile)
+          </p>
+        </div>
+
+        <!-- Voice Profile Creation Section -->
+        <div class="wizard-card" style="margin-top: var(--space-4); border: 2px solid var(--primary-500); position: relative;">
+          <div style="position: absolute; top: -10px; right: 16px; background: var(--primary-500); color: white; font-size: 0.75rem; font-weight: 600; padding: 2px 10px; border-radius: 10px;">Jetzt einrichten</div>
+
+          <div class="wizard-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            </svg>
+            <h3>Stimmprofil erstellen</h3>
+          </div>
+
+          <!-- Instructions -->
+          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-4);">
+            <p style="font-size: 0.875rem; color: var(--text-primary); margin: 0 0 var(--space-2) 0; font-weight: 500;">So geht's:</p>
+            <ol style="font-size: 0.8125rem; color: var(--text-secondary); margin: 0; padding-left: var(--space-4);">
+              <li style="margin-bottom: 4px;">Wählen Sie Ihre Rolle (Arzt oder ZFA) und geben Sie Ihren Namen ein</li>
+              <li style="margin-bottom: 4px;">Klicken Sie auf "Aufnahme starten" und lesen Sie den Beispieltext vor</li>
+              <li>Nach 30 Sekunden ist Ihr Stimmprofil erstellt</li>
+            </ol>
+          </div>
+
+          <!-- Existing Profiles Display -->
+          <div id="wizardExistingProfiles" style="margin-bottom: var(--space-4); display: none;">
+            <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Bereits erstellt:</label>
+            <div id="wizardProfilesList" style="display: flex; flex-wrap: wrap; gap: var(--space-2);"></div>
+          </div>
+
+          <div class="wizard-profile-form" id="wizardProfileForm">
+            <!-- Form fields with border -->
+            <div style="border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-4); background: var(--bg-secondary);">
+              <div style="display: flex; gap: var(--space-3);">
+                <div style="flex: 1;">
+                  <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Rolle</label>
+                  <select id="wizardProfileRole" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary);">
+                    <option value="">Bitte wählen...</option>
+                    <option value="Arzt">Arzt</option>
+                    <option value="ZFA">ZFA</option>
+                  </select>
+                </div>
+                <div style="flex: 1;">
+                  <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Name</label>
+                  <input type="text" id="wizardProfileName" placeholder="z.B. Dr. Müller" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary);">
+                </div>
+              </div>
+            </div>
+
+            <!-- Text to read -->
+            <div id="wizardProfileReadText" style="background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.05)); border: 1px solid rgba(249, 115, 22, 0.3); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: var(--space-4);">
+              <p style="font-size: 0.75rem; color: var(--primary-500); margin: 0 0 var(--space-2) 0; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Diesen Text vorlesen:</p>
+              <p style="font-size: 0.9375rem; color: var(--text-primary); margin: 0; line-height: 1.6; font-style: italic;">
+                "Heute habe ich Herrn Müller behandelt. Befund: Karies an Zahn 26, mesial. Die Kavität wurde mit einem Rosenbohrer präpariert und anschließend mit Komposit versorgt. Der Patient wurde über die Nachsorge informiert. Nächster Termin zur Kontrolle in sechs Monaten. Die Behandlung verlief komplikationslos."
+              </p>
+            </div>
+
+            <!-- Recording Progress -->
+            <div id="wizardProfileProgress" style="display: none; margin-bottom: var(--space-3);">
+              <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2);">
+                <div style="width: 10px; height: 10px; border-radius: 50%; background: #ef4444; animation: pulse 1s infinite;"></div>
+                <span id="wizardProfileProgressText" style="font-size: 0.875rem; color: var(--text-secondary);">Aufnahme läuft... 0s / 30s</span>
+              </div>
+              <div style="height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
+                <div id="wizardProfileProgressBar" style="height: 100%; background: var(--primary-500); width: 0%; transition: width 0.3s;"></div>
+              </div>
+            </div>
+
+            <!-- Audio Level -->
+            <div id="wizardProfileAudioLevel" style="display: none; margin-bottom: var(--space-3);">
+              <label style="font-size: 0.75rem; color: var(--text-tertiary); display: block; margin-bottom: var(--space-1);">Mikrofon-Pegel:</label>
+              <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
+                <div id="wizardProfileLevelBar" style="height: 100%; background: #22c55e; width: 0%; transition: width 0.1s;"></div>
+              </div>
+            </div>
+
+            <!-- Status Message -->
+            <div id="wizardProfileStatus" style="margin-bottom: var(--space-3); font-size: 0.875rem;"></div>
+
+            <div style="display: flex; gap: var(--space-2);">
+              <button type="button" class="wizard-btn wizard-btn-primary" id="wizardProfileRecordBtn" style="flex: 1;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px; margin-right: 6px;">
+                  <circle cx="12" cy="12" r="10"/>
+                  <circle cx="12" cy="12" r="3" fill="currentColor"/>
+                </svg>
+                Aufnahme starten (30 Sek.)
+              </button>
+              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardProfileCancelBtn" style="display: none;">
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>Tipp:</strong> Sprechen Sie natürlich, so wie Sie es bei einer echten Dokumentation tun würden - nicht mit "Vorlesestimme". Weitere Profile können Sie jederzeit unter "Stimmprofile" hinzufügen.</p>
+        </div>
+      </div>
+
+      <!-- Step 7: Dashboard & Tray Info -->
+      <div class="wizard-step" data-step="7">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <line x1="3" y1="9" x2="21" y2="9"/>
+              <line x1="9" y1="21" x2="9" y2="9"/>
+            </svg>
+          </div>
+          <h2>Das Dashboard</h2>
+          <p>Das Dashboard ist Ihre Steuerzentrale - aber Sie müssen es nicht dauerhaft geöffnet haben.</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            </svg>
+            <h3>So funktioniert's</h3>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: var(--space-4);">
+            <div style="display: flex; align-items: flex-start; gap: var(--space-3);">
+              <div style="width: 32px; height: 32px; background: var(--primary-500); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width: 16px; height: 16px;">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+              </div>
+              <div>
+                <strong style="color: var(--text-primary);">Tray-Icon in der Taskleiste</strong>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 4px;">
+                  Unten rechts in der Windows-Taskleiste finden Sie das DentDoc-Symbol. Das Programm läuft immer im Hintergrund.
+                </p>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: flex-start; gap: var(--space-3);">
+              <div style="width: 32px; height: 32px; background: var(--bg-tertiary); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                  <circle cx="12" cy="12" r="1"/>
+                </svg>
+              </div>
+              <div>
+                <strong style="color: var(--text-primary);">Linksklick</strong>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 4px;">
+                  Öffnet das Dashboard, falls Sie Einstellungen ändern oder Ihre Aufnahmen ansehen möchten.
+                </p>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: flex-start; gap: var(--space-3);">
+              <div style="width: 32px; height: 32px; background: var(--bg-tertiary); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                  <circle cx="12" cy="5" r="1"/>
+                  <circle cx="12" cy="12" r="1"/>
+                  <circle cx="12" cy="19" r="1"/>
+                </svg>
+              </div>
+              <div>
+                <strong style="color: var(--text-primary);">Rechtsklick</strong>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 4px;">
+                  Zeigt ein Schnellmenü mit häufig genutzten Funktionen.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-info" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <p style="color: var(--text-primary);"><strong>Automatischer Start:</strong> DentDoc startet automatisch mit Windows. Sie müssen sich nicht erneut einloggen - einfach Ihr Tastenkürzel drücken und los geht's!</p>
+        </div>
+      </div>
+
+      <!-- Step 8: Complete -->
+      <div class="wizard-step" data-step="8">
+        <div class="wizard-step-header">
+          <div class="wizard-completion-animation">
+            <div class="wizard-checkmark">
+              <div class="wizard-checkmark-circle">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+          <h2>Alles bereit!</h2>
+          <p>Ihre Einrichtung ist abgeschlossen. Hier eine Zusammenfassung Ihrer Einstellungen:</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-summary">
+            <div class="wizard-summary-item">
+              <span class="wizard-summary-label">Mikrofon</span>
+              <span class="wizard-summary-value" id="summaryMic">Standard</span>
+            </div>
+            <div class="wizard-summary-item">
+              <span class="wizard-summary-label">Tastenkürzel</span>
+              <span class="wizard-summary-value" id="summaryShortcut">F9</span>
+            </div>
+            <div class="wizard-summary-item">
+              <span class="wizard-summary-label">KI-Modus</span>
+              <span class="wizard-summary-value" id="summaryMode">Single Prompt</span>
+            </div>
+            <div class="wizard-summary-item">
+              <span class="wizard-summary-label">Transkripte speichern</span>
+              <span class="wizard-summary-value" id="summaryTranscripts">Aktiviert</span>
+            </div>
+            <div class="wizard-summary-item">
+              <span class="wizard-summary-label">Audio behalten</span>
+              <span class="wizard-summary-value" id="summaryAudio">Deaktiviert</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>Nächster Schritt:</strong> Drücken Sie <kbd id="wizardFinalShortcut" style="background: var(--glass-bg); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono);">F9</kbd>, um Ihre erste Aufnahme zu starten!</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wizard Footer -->
+    <div class="wizard-footer">
+      <div class="wizard-footer-left">
+        <div class="wizard-dots">
+          <div class="wizard-dot active"></div>
+          <div class="wizard-dot"></div>
+          <div class="wizard-dot"></div>
+          <div class="wizard-dot"></div>
+          <div class="wizard-dot"></div>
+          <div class="wizard-dot"></div>
+          <div class="wizard-dot"></div>
+          <div class="wizard-dot"></div>
+          <div class="wizard-dot"></div>
+        </div>
+      </div>
+      <div class="wizard-footer-right">
+        <button type="button" class="wizard-skip-btn" id="wizardSkipBtn" style="display: none;">Überspringen</button>
+        <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBackBtn" style="display: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          Zurück
+        </button>
+        <button type="button" class="wizard-btn wizard-btn-primary" id="wizardStartBtn">
+          Einrichtung starten
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+        <button type="button" class="wizard-btn wizard-btn-primary" id="wizardNextBtn" style="display: none;">
+          Weiter
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+        <button type="button" class="wizard-btn wizard-btn-success" id="wizardFinishBtn" style="display: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Los geht's!
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="scripts/dashboard.js"></script>
+  <script src="scripts/setup-wizard.js"></script>
+</body>
+</html>

@@ -51,22 +51,34 @@
       z-index: 1;
     }
 
-    .header-icon {
-      width: 56px;
-      height: 56px;
-      background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
-      border-radius: var(--radius-lg);
+    .header-inline {
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 0 auto var(--space-3);
-      font-size: 24px;
-      box-shadow: none;
+      gap: var(--space-3);
+      margin-bottom: var(--space-2);
     }
 
     .header h1 {
+      font-family: 'Manrope', var(--font-sans);
       font-size: 1.5rem;
-      margin-bottom: var(--space-1);
+      font-weight: 700;
+      color: #111827;
+      margin: 0;
+      line-height: 1;
+      background: none;
+      -webkit-background-clip: unset;
+      -webkit-text-fill-color: #111827;
+      background-clip: unset;
+    }
+
+    .header-inline svg {
+      flex-shrink: 0;
+    }
+
+    [data-theme="dark"] .header h1 {
+      color: var(--text-primary);
+      -webkit-text-fill-color: var(--text-primary);
     }
 
     .header p {
@@ -256,13 +268,13 @@
     <div class="feedback-card">
       <div class="form-content" id="formContent">
         <div class="header">
-          <div class="header-icon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+          <div class="header-inline">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
             </svg>
+            <h1>DentDoc</h1>
           </div>
-          <h1>Feedback</h1>
-          <p>Ihr Feedback hilft uns DentDoc zu verbessern</p>
+          <p>Feedback</p>
         </div>
 
         <div id="errorMessage" class="error-message"></div>

@@ -122,6 +122,21 @@
       font-size: 0.875rem;
     }
 
+    .settings-link {
+      display: block;
+      margin-top: 8px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: opacity 0.15s ease;
+    }
+
+    .settings-link:hover {
+      opacity: 0.8;
+      text-decoration: underline;
+    }
+
     .timer {
       color: var(--text-muted);
       font-variant-numeric: tabular-nums;
@@ -611,9 +626,17 @@
         case 'error':
           stopTimer();
           iconEmoji.textContent = '❌';
-          message.textContent = data.message;
+          message.innerHTML = data.message;
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
+          // Add click handler for settings link if present
+          const settingsLink = message.querySelector('.settings-link');
+          if (settingsLink) {
+            settingsLink.addEventListener('click', (e) => {
+              e.preventDefault();
+              ipcRenderer.send('open-microphone-settings');
+            });
+          }
           break;
       }
     });

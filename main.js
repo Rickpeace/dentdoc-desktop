@@ -39,15 +39,16 @@ try {
 }
 
 const store = new Store();
+
 let tray = null;
 let loginWindow = null;
+let dashboardWindow = null;
 let settingsWindow = null;
 let voiceProfilesWindow = null;
 let bausteineWindow = null;
 let statusOverlay = null;
 let statusOverlayReady = false;
 let pendingStatusUpdate = null;
-let feedbackWindow = null;
 let isRecording = false;
 let isProcessing = false;
 let isEnrolling = false;
@@ -73,9 +74,111 @@ app.setLoginItemSettings({
   path: app.getPath('exe')
 });
 
-function openDashboard(path = '') {
+function openWebDashboard(path = '') {
   const baseUrl = apiClient.getBaseUrl().replace(/\/$/, '');
   shell.openExternal(baseUrl + '/dashboard' + path);
+}
+
+function openLocalDashboard() {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.show();
+    dashboardWindow.focus();
+    return;
+  }
+
+  createDashboardWindow();
+}
+
+function createDashboardWindow() {
+  dashboardWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    },
+    icon: path.join(__dirname, 'assets', 'icon.png'),
+    resizable: true,
+    title: 'DentDoc',
+    frame: false,
+    hasShadow: false,
+    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b',
+    show: false
+  });
+
+  dashboardWindow.loadFile('src/dashboard.html');
+
+  // Create a hidden menu with keyboard accelerators
+  const dashboardMenu = Menu.buildFromTemplate([
+    {
+      label: 'Bearbeiten',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'Ansicht',
+      submenu: [
+        {
+          label: 'Einrichtungsassistent',
+          accelerator: 'CmdOrCtrl+T',
+          click: () => {
+            if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+              dashboardWindow.webContents.send('open-setup-wizard');
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Entwicklertools',
+          accelerator: 'F12',
+          click: () => {
+            if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+              dashboardWindow.webContents.openDevTools();
+            }
+          }
+        },
+        {
+          label: 'Entwicklertools (Alt)',
+          accelerator: 'CmdOrCtrl+Shift+I',
+          click: () => {
+            if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+              dashboardWindow.webContents.openDevTools();
+            }
+          }
+        },
+        { role: 'reload', accelerator: 'CmdOrCtrl+R' }
+      ]
+    }
+  ]);
+  dashboardWindow.setMenu(dashboardMenu);
+  dashboardWindow.setMenuBarVisibility(false);
+
+  dashboardWindow.once('ready-to-show', () => {
+    dashboardWindow.show();
+  });
+
+  // Minimize to tray instead of closing
+  dashboardWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      dashboardWindow.hide();
+    }
+  });
+
+  dashboardWindow.on('closed', () => {
+    dashboardWindow = null;
+  });
+
+  return dashboardWindow;
 }
 
 function openSettings() {
@@ -168,48 +271,6 @@ function openBausteine() {
 
   bausteineWindow.on('closed', () => {
     bausteineWindow = null;
-  });
-}
-
-function openFeedback() {
-  if (feedbackWindow && !feedbackWindow.isDestroyed()) {
-    feedbackWindow.focus();
-    return;
-  }
-
-  feedbackWindow = new BrowserWindow({
-    width: 480,
-    height: 600,
-    show: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
-    resizable: false,
-    title: 'DentDoc Feedback',
-    frame: false,
-    hasShadow: false,
-    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
-  });
-
-  feedbackWindow.loadFile('src/feedback.html');
-  feedbackWindow.setMenu(null);
-
-  // Dynamisch an Inhalt anpassen
-  feedbackWindow.webContents.on('did-finish-load', () => {
-    feedbackWindow.webContents.executeJavaScript(`
-      document.body.offsetHeight
-    `).then(height => {
-      const width = 480;
-      feedbackWindow.setSize(width, Math.min(height + 5, 800));
-      feedbackWindow.center();
-      feedbackWindow.show();
-    });
-  });
-
-  feedbackWindow.on('closed', () => {
-    feedbackWindow = null;
   });
 }
 
@@ -430,20 +491,14 @@ function createTray() {
     tray.popUpContextMenu(menu);
   });
 
-  // Left-click also opens the menu (same as right-click)
-  tray.on('click', async () => {
+  // Left-click: Open dashboard window (or login if not authenticated)
+  tray.on('click', () => {
     const token = store.get('authToken');
-    const now = Date.now();
-
-    // Refresh user data if logged in and cooldown has passed
-    if (token && (now - lastRefreshTime) > REFRESH_COOLDOWN) {
-      lastRefreshTime = now;
-      await refreshUserData();
+    if (token) {
+      openLocalDashboard();
+    } else {
+      createLoginWindow();
     }
-
-    // Build and show menu with current data
-    const menu = buildTrayMenu();
-    tray.popUpContextMenu(menu);
   });
 }
 
@@ -513,13 +568,13 @@ function buildTrayMenu() {
     {
       label: statusLabel,
       enabled: trialExpired ? true : false,
-      click: trialExpired ? () => openDashboard('/subscription') : undefined,
+      click: trialExpired ? () => openWebDashboard('/subscription') : undefined,
     },
     // If trial expired or no subscription, show upgrade link
     ...(trialExpired || (!hasActiveSubscription && !isRealTrial) ? [{
       label: '🛒 JETZT ABO KAUFEN →',
       click: () => {
-        openDashboard('/subscription');
+        openWebDashboard('/subscription');
       }
     }] : []),
     { type: 'separator' },
@@ -550,33 +605,9 @@ function buildTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Dashboard öffnen',
+      label: 'App öffnen',
       click: () => {
-        openDashboard();
-      }
-    },
-    {
-      label: 'Stimmprofile verwalten',
-      click: () => {
-        openVoiceProfiles();
-      }
-    },
-    {
-      label: 'Bausteine verwalten',
-      click: () => {
-        openBausteine();
-      }
-    },
-    {
-      label: 'Einstellungen',
-      click: () => {
-        openSettings();
-      }
-    },
-    {
-      label: 'Feedback',
-      click: () => {
-        openFeedback();
+        openLocalDashboard();
       }
     },
     { type: 'separator' },
@@ -594,24 +625,30 @@ function buildTrayMenu() {
         store.delete('user');
 
         // Close all open windows
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.destroy();
+        }
         if (settingsWindow && !settingsWindow.isDestroyed()) {
           settingsWindow.close();
         }
         if (bausteineWindow && !bausteineWindow.isDestroyed()) {
           bausteineWindow.close();
         }
-        if (feedbackWindow && !feedbackWindow.isDestroyed()) {
-          feedbackWindow.close();
-        }
         if (voiceProfilesWindow && !voiceProfilesWindow.isDestroyed()) {
           voiceProfilesWindow.close();
         }
 
         showNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet');
+
+        // Show login window after logout
+        createLoginWindow();
       }
     },
     { type: 'separator' },
-    { label: 'Beenden', click: () => app.quit() },
+    { label: 'Beenden', click: () => {
+      app.isQuitting = true;
+      app.quit();
+    }},
     { type: 'separator' },
     { label: `v${app.getVersion()}`, enabled: false }
   ]);
@@ -805,6 +842,7 @@ async function processAudioFile(audioFilePath) {
     // Store for "show last result"
     lastDocumentation = documentation;
     lastTranscript = finalTranscript;
+    store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
     clipboard.writeText(documentation);
@@ -823,6 +861,17 @@ async function processAudioFile(audioFilePath) {
 
     isProcessing = false;
     updateTrayMenu();
+
+    // Increment today's recording count
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStr = todayStart.toISOString().split('T')[0];
+    const todayRecordings = store.get('todayRecordings', { date: null, count: 0 });
+    if (todayRecordings.date === todayStr) {
+      store.set('todayRecordings', { date: todayStr, count: todayRecordings.count + 1 });
+    } else {
+      store.set('todayRecordings', { date: todayStr, count: 1 });
+    }
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -848,6 +897,11 @@ async function processAudioFile(audioFilePath) {
       console.error('Failed to update user info:', e);
     }
 
+    // Notify dashboard to refresh stats
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('recording-completed');
+    }
+
   } catch (error) {
     console.error('Audio file processing error:', error);
     debugLog('Audio file processing error: ' + error.message);
@@ -868,15 +922,15 @@ async function processAudioFile(audioFilePath) {
       errorTitle = 'Testphase beendet';
       errorMessage = error.message.substring('TRIAL_EXPIRED:'.length);
       // Open dashboard for subscription
-      setTimeout(() => openDashboard(), 2000);
+      setTimeout(() => openWebDashboard(), 2000);
     } else if (error.message.startsWith('SUBSCRIPTION_INACTIVE:')) {
       errorTitle = 'Abonnement inaktiv';
       errorMessage = error.message.substring('SUBSCRIPTION_INACTIVE:'.length);
       // Open dashboard for subscription
-      setTimeout(() => openDashboard(), 2000);
+      setTimeout(() => openWebDashboard(), 2000);
     } else if (error.message.includes('Keine Sprache erkannt')) {
       errorTitle = 'Keine Sprache erkannt';
-      errorMessage = 'Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.';
+      errorMessage = 'Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.<br><a href="#" class="settings-link" data-action="open-microphone-settings">Mikrofon-Einstellungen überprüfen →</a>';
     } else if (error.message.includes('zu kurz') || error.message.includes('leer')) {
       errorTitle = 'Aufnahme zu kurz';
       errorMessage = 'Bitte sprechen Sie mindestens 2-3 Sekunden.';
@@ -929,7 +983,7 @@ async function startRecording() {
   if (isTrialUser && minutesRemaining <= 0 && !hasActiveSubscription) {
     showNotification('Testphase beendet', 'Ihre kostenlosen Testminuten sind aufgebraucht. Bitte abonnieren Sie DentDoc Pro.');
     updateStatusOverlay('Testphase beendet', 'Bitte abonnieren Sie DentDoc Pro um fortzufahren.', 'error');
-    setTimeout(() => openDashboard('/subscription'), 2000);
+    setTimeout(() => openWebDashboard('/subscription'), 2000);
     return;
   }
 
@@ -1236,12 +1290,16 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     transcript: extra.transcript || null
   };
 
-  // If overlay is ready, send immediately; otherwise queue for when it's ready
-  if (statusOverlayReady) {
+  // Store the data to send
+  pendingStatusUpdate = statusData;
+
+  // If overlay is ready, send immediately
+  if (statusOverlayReady && overlay.webContents && !overlay.webContents.isDestroyed()) {
     overlay.webContents.send('update-status', statusData);
-  } else {
-    pendingStatusUpdate = statusData;
+    pendingStatusUpdate = null;
   }
+  // Otherwise the did-finish-load handler will send it
+
   overlay.show();
   overlay.setAlwaysOnTop(true, 'screen-saver'); // Stelle sicher, dass es im Vordergrund bleibt
   overlay.focus(); // Bringe es in den Fokus
@@ -1296,6 +1354,17 @@ ipcMain.on('close-status-overlay', () => {
   hideStatusOverlay();
 });
 
+// IPC handler for opening microphone settings from error overlay
+ipcMain.on('open-microphone-settings', () => {
+  hideStatusOverlay();
+  openSettings();
+  setTimeout(() => {
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      settingsWindow.webContents.send('show-settings-tab', 'microphone');
+    }
+  }, 500);
+});
+
 // IPC handler for cancelling recording (X button during recording)
 ipcMain.on('cancel-recording', async () => {
   if (isRecording) {
@@ -1340,6 +1409,288 @@ ipcMain.handle('set-theme', (event, theme) => {
   return true;
 });
 
+// Dashboard statistics handlers
+ipcMain.handle('get-dashboard-stats', () => {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  // Get today's recordings count from store
+  const todayRecordings = store.get('todayRecordings', { date: null, count: 0 });
+  const todayStr = todayStart.toISOString().split('T')[0];
+
+  // Reset count if it's a new day
+  const count = todayRecordings.date === todayStr ? todayRecordings.count : 0;
+
+  // Get profile count
+  const profiles = voiceProfiles.getAllProfiles();
+  const profileCount = profiles.length;
+
+  // Get bausteine count
+  const bausteine = bausteineManager.getAllBausteine();
+  const bausteineCount = bausteine.length;
+
+  return {
+    todayRecordings: count,
+    profileCount,
+    bausteineCount
+  };
+});
+
+ipcMain.handle('increment-recording-count', () => {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStr = todayStart.toISOString().split('T')[0];
+
+  const todayRecordings = store.get('todayRecordings', { date: null, count: 0 });
+
+  // Reset count if it's a new day, otherwise increment
+  if (todayRecordings.date === todayStr) {
+    store.set('todayRecordings', { date: todayStr, count: todayRecordings.count + 1 });
+  } else {
+    store.set('todayRecordings', { date: todayStr, count: 1 });
+  }
+
+  return true;
+});
+
+// Get user info for dashboard
+ipcMain.handle('get-user', () => {
+  return store.get('user', null);
+});
+
+// Get subscription status for dashboard sidebar (same logic as tray menu)
+ipcMain.handle('get-subscription-status', () => {
+  const user = store.get('user');
+  const token = store.get('authToken');
+
+  if (!token || !user) {
+    return { label: 'Nicht angemeldet', type: 'error' };
+  }
+
+  // Check subscription/trial status (matching web app and tray menu logic)
+  const hasActiveSubscription = user?.subscriptionStatus === 'active';
+  const isCanceled = user?.subscriptionStatus === 'canceled';
+  const minutesRemaining = user?.minutesRemaining || 0;
+
+  // Distinguish between true trial users and ex-subscribers
+  const wasSubscriber = isCanceled || (user?.planTier === 'free_trial' && user?.stripeCustomerId);
+  const isRealTrial = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining > 0;
+  const trialExpired = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
+
+  let label;
+  let type; // 'success', 'warning', 'error', 'trial'
+
+  if (hasActiveSubscription) {
+    label = `DentDoc Pro (${user?.maxDevices || 1} PC${(user?.maxDevices || 1) !== 1 ? 's' : ''})`;
+    type = 'success';
+  } else if (isRealTrial) {
+    label = `Testphase: ${minutesRemaining} Min`;
+    type = 'trial';
+  } else if (wasSubscriber) {
+    label = 'KEIN AKTIVES ABO';
+    type = 'error';
+  } else if (trialExpired) {
+    label = 'TESTPHASE BEENDET';
+    type = 'error';
+  } else {
+    label = 'Kein aktives Abo';
+    type = 'warning';
+  }
+
+  return { label, type };
+});
+
+// Get subscription details with device info for dashboard
+ipcMain.handle('get-subscription-details', async () => {
+  const user = store.get('user');
+  const token = store.get('authToken');
+  const currentDeviceId = store.get('deviceId');
+
+  if (!token || !user) {
+    return {
+      status: { type: 'error', label: 'Nicht angemeldet' },
+      planName: '-',
+      expiresAt: null,
+      activeDevices: 0,
+      maxDevices: 0,
+      currentDeviceId: null,
+      devices: []
+    };
+  }
+
+  // Determine subscription status (same logic as get-subscription-status)
+  const hasActiveSubscription = user?.subscriptionStatus === 'active';
+  const isCanceled = user?.subscriptionStatus === 'canceled';
+  const minutesRemaining = user?.minutesRemaining || 0;
+  const wasSubscriber = isCanceled || (user?.planTier === 'free_trial' && user?.stripeCustomerId);
+  const isRealTrial = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining > 0;
+  const trialExpired = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
+
+  let statusType, statusLabel;
+  if (hasActiveSubscription) {
+    statusLabel = 'Aktiv';
+    statusType = 'success';
+  } else if (isRealTrial) {
+    statusLabel = `Testphase: ${minutesRemaining} Min`;
+    statusType = 'trial';
+  } else if (wasSubscriber) {
+    statusLabel = 'Kein aktives Abo';
+    statusType = 'error';
+  } else if (trialExpired) {
+    statusLabel = 'Testphase beendet';
+    statusType = 'error';
+  } else {
+    statusLabel = 'Kein aktives Abo';
+    statusType = 'warning';
+  }
+
+  // Fetch device sessions and subscription info from backend API
+  let devices = [];
+  let activeDevices = 0;
+  let maxDevices = user?.maxDevices || 1;
+  let monthlyAmount = null;
+  let currentPeriodEnd = user?.currentPeriodEnd || null;
+
+  try {
+    const axios = require('axios');
+    const API_BASE_URL = apiClient.getBaseUrl();
+
+    // Fetch device sessions
+    const sessionsResponse = await axios.get(`${API_BASE_URL}api/device/sessions`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Cookie': `session=${token}`
+      }
+    });
+
+    if (sessionsResponse.data) {
+      activeDevices = sessionsResponse.data.activeCount || 0;
+      maxDevices = sessionsResponse.data.maxDevices || user?.maxDevices || 1;
+      devices = (sessionsResponse.data.sessions || []).map(session => ({
+        id: session.deviceId,
+        name: session.deviceName || 'Unbenanntes Gerät',
+        lastSeenAt: session.lastHeartbeatAt
+      }));
+    }
+
+  } catch (error) {
+    console.error('Error fetching subscription data:', error.message);
+    // Fall back to user data
+    activeDevices = 1; // At least this device
+  }
+
+  // Determine plan name (include device count for active subscriptions)
+  let planName = 'Kein Plan';
+  if (hasActiveSubscription) {
+    const basePlanName = user?.planName || 'DentDoc Pro';
+    const deviceCount = maxDevices || user?.maxDevices || 1;
+    planName = `${basePlanName} (${deviceCount} PC${deviceCount !== 1 ? 's' : ''})`;
+  } else if (isRealTrial) {
+    planName = 'Testphase';
+  }
+
+  return {
+    status: { type: statusType, label: statusLabel },
+    planName,
+    expiresAt: currentPeriodEnd,
+    activeDevices,
+    maxDevices,
+    currentDeviceId,
+    devices,
+    monthlyAmount
+  };
+});
+
+// Get last documentation for dashboard
+ipcMain.handle('get-last-documentation', () => {
+  if (!lastDocumentation) {
+    return null;
+  }
+  return {
+    documentation: lastDocumentation,
+    transcript: lastTranscript,
+    timestamp: store.get('lastDocumentationTime', null)
+  };
+});
+
+// Show last result (opens status overlay)
+ipcMain.handle('show-last-result', () => {
+  showLastResult();
+  return true;
+});
+
+// Get base URL for external links
+ipcMain.handle('get-base-url', () => {
+  return apiClient.getBaseUrl().replace(/\/$/, '');
+});
+
+// Open external URL
+ipcMain.handle('open-external-url', (event, url) => {
+  shell.openExternal(url);
+  return true;
+});
+
+// Get current shortcut for dashboard display
+ipcMain.handle('get-shortcut', () => {
+  return store.get('shortcut', 'F9');
+});
+
+// Recording control from dashboard
+ipcMain.handle('toggle-recording', async () => {
+  if (isRecording) {
+    await stopRecording();
+    return { recording: false };
+  } else {
+    await startRecording();
+    return { recording: true };
+  }
+});
+
+ipcMain.handle('get-recording-state', () => {
+  return { isRecording, isProcessing };
+});
+
+// Open legacy windows from dashboard
+ipcMain.on('open-settings-window', () => {
+  openSettings();
+});
+
+ipcMain.on('open-voice-profiles-window', () => {
+  openVoiceProfiles();
+});
+
+ipcMain.on('open-bausteine-window', () => {
+  openBausteine();
+});
+
+// Onboarding tour handlers (supports multiple tours: 'login', 'settings', etc.)
+ipcMain.handle('check-first-run', (event, tourId = 'general') => {
+  const tourKey = `tourCompleted_${tourId}`;
+  const tourCompleted = store.get(tourKey, false);
+  return !tourCompleted;
+});
+
+ipcMain.handle('mark-tour-completed', (event, tourId = 'general') => {
+  const tourKey = `tourCompleted_${tourId}`;
+  store.set(tourKey, true);
+  return true;
+});
+
+ipcMain.handle('reset-tour', (event, tourId = 'general') => {
+  const tourKey = `tourCompleted_${tourId}`;
+  store.set(tourKey, false);
+  return true;
+});
+
+ipcMain.handle('reset-all-tours', () => {
+  store.delete('tourCompleted_login');
+  store.delete('tourCompleted_settings');
+  store.delete('tourCompleted_general');
+  store.delete('tourCompleted_setup-wizard');
+  store.delete('tourCompleted_dashboard');
+  return true;
+});
+
 ipcMain.handle('copy-to-clipboard', (event, text) => {
   clipboard.writeText(text);
   return true;
@@ -1370,6 +1721,13 @@ ipcMain.on('minimize-window', (event) => {
 ipcMain.on('close-window', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (window) window.close();
+});
+
+// Minimize dashboard to tray (hide instead of minimize)
+ipcMain.on('minimize-to-tray', () => {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.hide();
+  }
 });
 
 // Start heartbeat to keep device session active
@@ -1465,6 +1823,9 @@ ipcMain.handle('login', async (event, email, password) => {
       loginWindow.close();
     }
 
+    // Open the dashboard after successful login
+    openLocalDashboard();
+
     // Check trial/subscription status and show appropriate notification
     const user = response.user;
     const isTrialUser = user?.planTier === 'free_trial';
@@ -1481,21 +1842,21 @@ ipcMain.handle('login', async (event, email, password) => {
       showNotification(
         '⚠️ Kein aktives Abo',
         'Ihr Abonnement ist nicht mehr aktiv. Klicken Sie hier um es zu reaktivieren.',
-        () => openDashboard('/subscription')
+        () => openWebDashboard('/subscription')
       );
     } else if (trialExpired) {
       // True trial expired - show notification (no auto-redirect)
       showNotification(
         '⚠️ Testphase beendet',
         'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier um ein Abo abzuschließen.',
-        () => openDashboard('/subscription')
+        () => openWebDashboard('/subscription')
       );
     } else if (isTrialUser && !wasSubscriber && minutesRemaining > 0 && minutesRemaining <= 10) {
       // Trial running low
       showNotification(
         'Testphase endet bald',
         `Nur noch ${minutesRemaining} Minuten übrig. Jetzt Abo kaufen!`,
-        () => openDashboard('/subscription')
+        () => openWebDashboard('/subscription')
       );
     } else if (hasActiveSubscription) {
       // Pro user
@@ -2046,6 +2407,15 @@ ipcMain.handle('enable-global-shortcut', () => {
   return { success: true };
 });
 
+// Open DevTools for debugging
+ipcMain.handle('open-devtools', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    win.webContents.openDevTools();
+  }
+  return { success: true };
+});
+
 // Show unsaved changes dialog
 ipcMain.handle('show-unsaved-changes-dialog', async () => {
   const result = await dialog.showMessageBox(settingsWindow, {
@@ -2071,6 +2441,9 @@ ipcMain.handle('show-unsaved-changes-dialog', async () => {
 
 // Load autoUpdater after app is ready
 const { autoUpdater } = require('electron-updater');
+
+// Allow update checks in dev mode
+autoUpdater.forceDevUpdateConfig = true;
 
 autoUpdater.on('update-available', (info) => {
   console.log('Update available:', info.version);
@@ -2110,8 +2483,45 @@ autoUpdater.on('checking-for-update', () => {
   console.log('Checking for updates...');
 });
 
+// Track manual update check to show user feedback
+let isManualUpdateCheck = false;
+
 autoUpdater.on('update-not-available', () => {
   console.log('No updates available');
+  if (isManualUpdateCheck) {
+    isManualUpdateCheck = false;
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Keine Updates verfügbar',
+      message: 'Sie verwenden bereits die neueste Version von DentDoc.',
+      buttons: ['OK']
+    });
+  }
+});
+
+// IPC handler for manual update check
+ipcMain.handle('check-for-updates', async () => {
+  try {
+    // Configure GitHub feed URL if not already set
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner: 'Rickpeace',
+      repo: 'dentdoc-desktop'
+    });
+
+    isManualUpdateCheck = true;
+    await autoUpdater.checkForUpdates();
+    return { status: 'checking', message: 'Suche nach Updates...' };
+  } catch (error) {
+    isManualUpdateCheck = false;
+    console.error('Manual update check error:', error);
+    return { status: 'error', message: error.message };
+  }
+});
+
+// IPC handler to get app version
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
 });
 
 app.whenReady().then(() => {
@@ -2182,7 +2592,7 @@ app.whenReady().then(() => {
           showNotification(
             '⚠️ Kein aktives Abo',
             'Ihr Abonnement ist nicht mehr aktiv. Klicken Sie hier um es zu reaktivieren.',
-            () => openDashboard('/subscription')
+            () => openWebDashboard('/subscription')
           );
         }, 2000);
       } else if (trialExpired) {
@@ -2191,7 +2601,7 @@ app.whenReady().then(() => {
           showNotification(
             '⚠️ Testphase beendet',
             'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier um ein Abo abzuschließen.',
-            () => openDashboard('/subscription')
+            () => openWebDashboard('/subscription')
           );
         }, 2000);
       } else if (isTrialUser && !wasSubscriber && minutesRemaining > 0 && minutesRemaining <= 10) {
@@ -2200,7 +2610,7 @@ app.whenReady().then(() => {
           showNotification(
             'Testphase endet bald',
             `Nur noch ${minutesRemaining} Minuten übrig. Jetzt Abo kaufen!`,
-            () => openDashboard('/subscription')
+            () => openWebDashboard('/subscription')
           );
         }, 2000);
       }

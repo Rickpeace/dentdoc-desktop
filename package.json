@@ -19,6 +19,7 @@
   "dependencies": {
     "axios": "^1.6.2",
     "dotenv": "^16.3.1",
+    "driver.js": "^1.4.0",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.7.3",
     "ffmpeg-static": "^5.3.0",
@@ -52,7 +53,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "DentDoc-Setup.${ext}"
     },
     "publish": {
       "provider": "github",
