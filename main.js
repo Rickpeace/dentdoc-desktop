@@ -2103,6 +2103,7 @@ autoUpdater.on('update-downloaded', (info) => {
 
 autoUpdater.on('error', (error) => {
   console.error('Auto-update error:', error);
+  dialog.showErrorBox('Auto-Update Fehler', error.message || String(error));
 });
 
 autoUpdater.on('checking-for-update', () => {
@@ -2131,13 +2132,11 @@ app.whenReady().then(() => {
   if (!app.isPackaged) {
     console.log('Development mode - skipping auto-update check');
   } else {
-    // Configure GitHub token for private repo access
+    // Configure GitHub for public repo
     autoUpdater.setFeedURL({
       provider: 'github',
       owner: 'Rickpeace',
-      repo: 'dentdoc-desktop',
-      private: true,
-      token: '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'
+      repo: 'dentdoc-desktop'
     });
 
     autoUpdater.checkForUpdatesAndNotify();
