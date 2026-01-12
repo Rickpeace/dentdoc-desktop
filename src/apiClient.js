@@ -341,6 +341,61 @@ async function getDocumentation(transcriptionId, token) {
 }
 
 /**
+ * Generate documentation using V1.1 (experimental)
+ * @param {number} transcriptionId - Transcription ID
+ * @param {string} token - Auth token
+ * @returns {Promise<{documentation: string, transcript: string|null}>}
+ */
+async function getDocumentationV1_1(transcriptionId, token) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-v1.1`,
+      {},
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+
+    if (!response.data.documentation) {
+      throw new Error('NO_DOCUMENTATION');
+    }
+
+    return {
+      documentation: response.data.documentation,
+      transcript: response.data.transcript || null
+    };
+  } catch (error) {
+    console.error('Documentation V1.1 error:', error.response?.data || error.message);
+
+    const serverError = error.response?.data?.error;
+
+    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
+      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+    }
+
+    if (serverError?.includes('processing') || serverError?.includes('pending')) {
+      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
+    }
+
+    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
+      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
+    }
+
+    if (serverError) {
+      throw new Error(`Fehler: ${serverError}`);
+    }
+
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
+    }
+
+    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
+  }
+}
+
+/**
  * Generate documentation using Agent-Chain (V2) with Bausteine
  * @param {number} transcriptionId - Transcription ID
  * @param {string} token - Auth token
@@ -371,6 +426,69 @@ async function getDocumentationV2(transcriptionId, token, bausteine) {
     };
   } catch (error) {
     console.error('Documentation V2 error:', error.response?.data || error.message);
+
+    const serverError = error.response?.data?.error;
+
+    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
+      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+    }
+
+    if (serverError?.includes('processing') || serverError?.includes('pending')) {
+      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
+    }
+
+    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
+      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
+    }
+
+    if (serverError) {
+      throw new Error(`Fehler: ${serverError}`);
+    }
+
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
+    }
+
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
+    }
+
+    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
+  }
+}
+
+/**
+ * Generate documentation using V1.2 Hybrid (1 API call, 60% cost savings)
+ * @param {number} transcriptionId - Transcription ID
+ * @param {string} token - Auth token
+ * @param {boolean} runVerifier - Optional: Force verifier check
+ * @returns {Promise<{documentation: string, transcript: string|null, meta: object|null}>}
+ */
+async function getDocumentationV1_2(transcriptionId, token, runVerifier = false) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-v1.2`,
+      { runVerifier },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 120000 // 2 minutes (faster than V1.1)
+      }
+    );
+
+    if (!response.data.documentation) {
+      throw new Error('NO_DOCUMENTATION');
+    }
+
+    return {
+      documentation: response.data.documentation,
+      transcript: response.data.transcript || null,
+      meta: response.data.meta || null
+    };
+  } catch (error) {
+    console.error('Documentation V1.2 error:', error.response?.data || error.message);
 
     const serverError = error.response?.data?.error;
 
@@ -494,6 +612,123 @@ async function submitFeedback(token, category, message) {
   }
 }
 
+// =============================================================================
+// PRAXIS-EINSTELLUNGEN API (V1.2 Hybrid)
+// =============================================================================
+
+/**
+ * Get Praxis-Einstellungen (Textbausteine, Themen-Anpassungen, etc.)
+ * @param {string} token - Auth token
+ * @returns {Promise<{einstellungen: object, isDefault: boolean, availableThemen: string[]}>}
+ */
+async function getPraxisEinstellungen(token) {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}api/praxis/einstellungen`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Get Praxis-Einstellungen error:', error.response?.data || error.message);
+    throw new Error('Einstellungen konnten nicht geladen werden');
+  }
+}
+
+/**
+ * Update Praxis-Einstellungen (PATCH - partial update)
+ * @param {string} token - Auth token
+ * @param {object} updates - Fields to update
+ * @returns {Promise<{einstellungen: object, updatedAt: string}>}
+ */
+async function updatePraxisEinstellungen(token, updates) {
+  try {
+    const response = await axios.patch(
+      `${API_BASE_URL}api/praxis/einstellungen`,
+      updates,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Update Praxis-Einstellungen error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Einstellungen konnten nicht gespeichert werden');
+  }
+}
+
+/**
+ * Add a Textbaustein
+ * @param {string} token - Auth token
+ * @param {string} key - Baustein key (e.g. "aufklaerung_standard")
+ * @param {string} text - Baustein text
+ */
+async function addTextbaustein(token, key, text) {
+  return updatePraxisEinstellungen(token, {
+    addTextbaustein: { key, text }
+  });
+}
+
+/**
+ * Remove a Textbaustein
+ * @param {string} token - Auth token
+ * @param {string} key - Baustein key to remove
+ */
+async function removeTextbaustein(token, key) {
+  return updatePraxisEinstellungen(token, {
+    removeTextbaustein: key
+  });
+}
+
+/**
+ * Add/Update a Themen-Anpassung
+ * @param {string} token - Auth token
+ * @param {object} themenAnpassung - { thema, pflichtfelder, hinweistext }
+ */
+async function addThemenAnpassung(token, themenAnpassung) {
+  return updatePraxisEinstellungen(token, {
+    addThemenAnpassung: themenAnpassung
+  });
+}
+
+/**
+ * Remove a Themen-Anpassung
+ * @param {string} token - Auth token
+ * @param {string} thema - Thema to remove
+ */
+async function removeThemenAnpassung(token, thema) {
+  return updatePraxisEinstellungen(token, {
+    removeThema: thema
+  });
+}
+
+/**
+ * Reset Praxis-Einstellungen to defaults
+ * @param {string} token - Auth token
+ */
+async function resetPraxisEinstellungen(token) {
+  try {
+    const response = await axios.delete(
+      `${API_BASE_URL}api/praxis/einstellungen`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Reset Praxis-Einstellungen error:', error.response?.data || error.message);
+    throw new Error('Einstellungen konnten nicht zurückgesetzt werden');
+  }
+}
+
 module.exports = {
   login,
   logout,
@@ -501,6 +736,8 @@ module.exports = {
   getUser,
   uploadAudio,
   getDocumentation,
+  getDocumentationV1_1,
+  getDocumentationV1_2,
   getDocumentationV2,
   updateSpeakerMapping,
   getTranscription,
@@ -509,4 +746,12 @@ module.exports = {
   submitFeedback,
   getDeviceId,
   getDeviceInfo,
+  // Praxis-Einstellungen (V1.2)
+  getPraxisEinstellungen,
+  updatePraxisEinstellungen,
+  addTextbaustein,
+  removeTextbaustein,
+  addThemenAnpassung,
+  removeThemenAnpassung,
+  resetPraxisEinstellungen,
 };

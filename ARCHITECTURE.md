@@ -136,10 +136,7 @@ let lastTranscript = null;         // Cache des letzten Transkripts
 let heartbeatInterval = null;      // Session Keep-Alive Timer
 let statusOverlay = null;          // Floating Status-Fenster
 let loginWindow = null;            // Login-Dialog
-let settingsWindow = null;         // Einstellungen-Panel
-let voiceProfilesWindow = null;    // Stimmprofil-Manager
-let bausteineWindow = null;        // Bausteine-Editor
-let feedbackWindow = null;         // Feedback-Formular
+let dashboardWindow = null;        // Hauptfenster mit allen Views (Home, Settings, Profiles, Bausteine)
 let tray = null;                   // System-Tray Icon
 ```
 

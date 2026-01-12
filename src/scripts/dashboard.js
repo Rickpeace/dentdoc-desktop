@@ -54,6 +54,12 @@ async function loadViewContent(viewName) {
     case 'bausteine':
       loadBausteineView();
       break;
+    case 'textbausteine':
+      loadTextbausteineView();
+      break;
+    case 'themen':
+      loadThemenView();
+      break;
   }
 }
 
@@ -80,6 +86,19 @@ async function loadHomeStats() {
 ipcRenderer.on('recording-completed', async () => {
   console.log('Recording completed, refreshing dashboard...');
   await loadHomeStats();
+  await loadSubscriptionStatus(); // Refresh trial minutes in sidebar
+});
+
+// Listen for subscription status refresh (triggered from main.js on window focus)
+ipcRenderer.on('refresh-subscription-status', async () => {
+  console.log('Window focused, refreshing subscription status...');
+  await loadSubscriptionStatus();
+});
+
+// Listen for view switch requests from main process
+ipcRenderer.on('switch-view', (event, viewName) => {
+  console.log('Switching to view:', viewName);
+  switchView(viewName);
 });
 
 // ===== Last Documentation =====
@@ -168,6 +187,11 @@ async function initSidebarLinks() {
   document.getElementById('linkImpressum').addEventListener('click', async (e) => {
     e.preventDefault();
     await ipcRenderer.invoke('open-external-url', baseUrl + '/impressum');
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await ipcRenderer.invoke('logout');
   });
 }
 
@@ -615,10 +639,15 @@ document.getElementById('settingsOpenSoundBtn').addEventListener('click', async 
 });
 
 document.getElementById('settingsBrowseTranscriptBtn').addEventListener('click', async () => {
+  console.log('Browse transcript folder clicked');
   const result = await ipcRenderer.invoke('select-folder');
+  console.log('select-folder result:', result);
   if (result) {
     document.getElementById('settingsTranscriptPath').value = result;
+    console.log('Set transcriptPath input to:', result);
     settingsCheckForChanges();
+  } else {
+    console.log('No folder selected or dialog cancelled');
   }
 });
 
@@ -1900,7 +1929,7 @@ function renderDevicesList(devices) {
   const container = document.getElementById('devicesList');
 
   if (!devices || devices.length === 0) {
-    container.innerHTML = '<div class="devices-empty">Keine Geräte registriert</div>';
+    container.innerHTML = '<div class="devices-empty">Keine Arbeitsplätze registriert</div>';
     return;
   }
 
@@ -1961,6 +1990,12 @@ async function loadViewContent(viewName) {
     case 'bausteine':
       loadBausteineView();
       break;
+    case 'textbausteine':
+      loadTextbausteineView();
+      break;
+    case 'themen':
+      loadThemenView();
+      break;
     case 'subscription':
       loadSubscriptionView();
       break;
@@ -1998,3 +2033,570 @@ async function loadHomeStatsWithDevices() {
 
 // Override loadHomeStats
 loadHomeStats = loadHomeStatsWithDevices;
+
+// =============================================================================
+// TEXTBAUSTEINE V1.2 VIEW
+// =============================================================================
+
+let textbausteineData = {};
+let textbausteineEditingKey = null;
+
+async function loadTextbausteineView() {
+  const statusEl = document.getElementById('textbausteineStatus');
+  const listEl = document.getElementById('textbausteineList');
+  const emptyEl = document.getElementById('textbausteineEmpty');
+
+  // Show loading
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lade Einstellungen vom Server...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+    if (!token) {
+      statusEl.innerHTML = '<span class="status-indicator error"></span><span>Nicht angemeldet</span>';
+      return;
+    }
+
+    const response = await ipcRenderer.invoke('api-get-praxis-einstellungen', token);
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    textbausteineData = response.einstellungen?.textbausteine || {};
+
+    const isDefault = response.isDefault;
+    const count = Object.keys(textbausteineData).length;
+
+    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Textbausteine geladen${isDefault ? ' (Standard)' : ''}</span>`;
+
+    renderTextbausteine();
+  } catch (error) {
+    console.error('Error loading Textbausteine:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler beim Laden: ${error.message}</span>`;
+  }
+}
+
+function renderTextbausteine() {
+  const listEl = document.getElementById('textbausteineList');
+  const emptyEl = document.getElementById('textbausteineEmpty');
+
+  const keys = Object.keys(textbausteineData);
+
+  if (keys.length === 0) {
+    emptyEl.style.display = 'flex';
+    // Clear any existing items
+    listEl.querySelectorAll('.textbausteine-item').forEach(el => el.remove());
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+
+  // Clear existing items
+  listEl.querySelectorAll('.textbausteine-item').forEach(el => el.remove());
+
+  // Add items
+  keys.sort().forEach(key => {
+    const text = textbausteineData[key];
+    const item = document.createElement('div');
+    item.className = 'textbausteine-item';
+    item.innerHTML = `
+      <div class="textbausteine-item-header">
+        <span class="textbausteine-item-key">${escapeHtml(key)}</span>
+        <div class="textbausteine-item-actions">
+          <button class="edit" data-key="${escapeHtml(key)}">Bearbeiten</button>
+          <button class="delete" data-key="${escapeHtml(key)}">Löschen</button>
+        </div>
+      </div>
+      <div class="textbausteine-item-content">${escapeHtml(text)}</div>
+    `;
+    listEl.appendChild(item);
+  });
+
+  // Add event listeners
+  listEl.querySelectorAll('.textbausteine-item-actions .edit').forEach(btn => {
+    btn.addEventListener('click', () => openTextbausteineModal(btn.dataset.key));
+  });
+
+  listEl.querySelectorAll('.textbausteine-item-actions .delete').forEach(btn => {
+    btn.addEventListener('click', () => deleteTextbaustein(btn.dataset.key));
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function openTextbausteineModal(key = null) {
+  const modal = document.getElementById('textbausteineModal');
+  const titleEl = document.getElementById('textbausteineModalTitle');
+  const keyInput = document.getElementById('textbausteineKey');
+  const textInput = document.getElementById('textbausteineText');
+
+  textbausteineEditingKey = key;
+
+  if (key) {
+    titleEl.textContent = 'Textbaustein bearbeiten';
+    keyInput.value = key;
+    keyInput.disabled = true;
+    textInput.value = textbausteineData[key] || '';
+  } else {
+    titleEl.textContent = 'Neuer Textbaustein';
+    keyInput.value = '';
+    keyInput.disabled = false;
+    textInput.value = '';
+  }
+
+  modal.classList.add('active');
+  if (!key) {
+    keyInput.focus();
+  } else {
+    textInput.focus();
+  }
+}
+
+function closeTextbausteineModal() {
+  const modal = document.getElementById('textbausteineModal');
+  modal.classList.remove('active');
+  textbausteineEditingKey = null;
+}
+
+async function saveTextbaustein() {
+  const keyInput = document.getElementById('textbausteineKey');
+  const textInput = document.getElementById('textbausteineText');
+  const statusEl = document.getElementById('textbausteineStatus');
+
+  const key = keyInput.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  const text = textInput.value.trim();
+
+  if (!key) {
+    alert('Bitte geben Sie einen Schlüssel ein.');
+    return;
+  }
+
+  if (!text) {
+    alert('Bitte geben Sie einen Text ein.');
+    return;
+  }
+
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Speichere...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+    const response = await ipcRenderer.invoke('api-add-textbaustein', token, key, text);
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    textbausteineData = response.einstellungen?.textbausteine || {};
+    renderTextbausteine();
+    closeTextbausteineModal();
+
+    const count = Object.keys(textbausteineData).length;
+    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Textbausteine - Gespeichert!</span>`;
+  } catch (error) {
+    console.error('Error saving Textbaustein:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
+  }
+}
+
+async function deleteTextbaustein(key) {
+  if (!confirm(`Textbaustein "${key}" wirklich löschen?`)) {
+    return;
+  }
+
+  const statusEl = document.getElementById('textbausteineStatus');
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lösche...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+    const response = await ipcRenderer.invoke('api-remove-textbaustein', token, key);
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    textbausteineData = response.einstellungen?.textbausteine || {};
+    renderTextbausteine();
+
+    const count = Object.keys(textbausteineData).length;
+    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Textbausteine - Gelöscht!</span>`;
+  } catch (error) {
+    console.error('Error deleting Textbaustein:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
+  }
+}
+
+async function resetTextbausteine() {
+  if (!confirm('Alle Textbausteine auf Standard zurücksetzen? Dies kann nicht rückgängig gemacht werden.')) {
+    return;
+  }
+
+  const statusEl = document.getElementById('textbausteineStatus');
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Setze zurück...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+    const response = await ipcRenderer.invoke('api-reset-praxis-einstellungen', token);
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    textbausteineData = response.einstellungen?.textbausteine || {};
+    renderTextbausteine();
+
+    statusEl.innerHTML = '<span class="status-indicator"></span><span>Auf Standard zurückgesetzt</span>';
+  } catch (error) {
+    console.error('Error resetting:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
+  }
+}
+
+// Textbausteine Event Listeners
+document.getElementById('textbausteineAddBtn')?.addEventListener('click', () => openTextbausteineModal());
+document.getElementById('textbausteineAddFirstBtn')?.addEventListener('click', () => openTextbausteineModal());
+document.getElementById('textbausteineRefreshBtn')?.addEventListener('click', loadTextbausteineView);
+document.getElementById('textbausteineResetBtn')?.addEventListener('click', resetTextbausteine);
+document.getElementById('textbausteineSaveBtn')?.addEventListener('click', saveTextbaustein);
+document.getElementById('textbausteineCloseModal')?.addEventListener('click', closeTextbausteineModal);
+
+// Close modal on overlay click
+document.getElementById('textbausteineModal')?.addEventListener('click', (e) => {
+  if (e.target.classList.contains('modal-overlay')) {
+    closeTextbausteineModal();
+  }
+});
+
+// Close modal on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('textbausteineModal');
+    if (modal?.classList.contains('active')) {
+      closeTextbausteineModal();
+    }
+    const themenModal = document.getElementById('themenModal');
+    if (themenModal?.classList.contains('active')) {
+      closeThemenModal();
+    }
+  }
+});
+
+// =============================================================================
+// THEMEN-ANPASSUNGEN V1.2
+// =============================================================================
+
+// =============================================================================
+// THEMEN VIEW V2 (Vollständig dynamisch)
+// =============================================================================
+
+// Themen-Daten (neues Format mit themen-Array)
+let themenData = [];
+let defaultThemen = [];
+let editingThemaName = null; // Name des aktuell bearbeiteten Themas (null = neues Thema)
+
+async function loadThemenView() {
+  const statusEl = document.getElementById('themenStatus');
+  const listEl = document.getElementById('themenList');
+  const emptyEl = document.getElementById('themenEmpty');
+  const countEl = document.getElementById('themenCount');
+
+  // Show loading
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lade Einstellungen vom Server...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+    if (!token) {
+      statusEl.innerHTML = '<span class="status-indicator error"></span><span>Nicht angemeldet</span>';
+      return;
+    }
+
+    const response = await ipcRenderer.invoke('api-get-praxis-einstellungen', token);
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    // Neues Format: themen-Array
+    themenData = response.einstellungen?.themen || [];
+    defaultThemen = response.defaultThemen || [];
+
+    const isDefault = response.isDefault;
+    const count = themenData.length;
+
+    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Themen aktiv${isDefault ? ' (Standard)' : ''}</span>`;
+    countEl.textContent = `${count} Themen`;
+
+    renderThemen();
+  } catch (error) {
+    console.error('Error loading Themen:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler beim Laden: ${error.message}</span>`;
+  }
+}
+
+function renderThemen() {
+  const listEl = document.getElementById('themenList');
+  const emptyEl = document.getElementById('themenEmpty');
+
+  // Clear existing items
+  listEl.querySelectorAll('.themen-item').forEach(el => el.remove());
+
+  if (themenData.length === 0) {
+    emptyEl.style.display = 'block';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+
+  // Render all themen
+  themenData.forEach(thema => {
+    const hasPflichtfelder = thema.pflichtfelder && thema.pflichtfelder.length > 0;
+    const hasHinweis = !!thema.hinweistext;
+    const hasAntiSplit = thema.antiSplit && thema.antiSplit.length > 0;
+
+    const item = document.createElement('div');
+    item.className = 'themen-item' + (hasPflichtfelder ? ' has-anpassung' : '');
+
+    let contentHtml = '';
+
+    // Pflichtfelder
+    if (hasPflichtfelder) {
+      const pflichtfelderHtml = thema.pflichtfelder
+        .map(pf => `<span class="pflichtfeld">${escapeHtml(pf)}</span>`)
+        .join('');
+      contentHtml += `<div class="themen-item-pflichtfelder">${pflichtfelderHtml}</div>`;
+    }
+
+    // Hinweistext
+    if (hasHinweis) {
+      contentHtml += `<div class="themen-item-hinweis">${escapeHtml(thema.hinweistext)}</div>`;
+    }
+
+    // Anti-Split
+    if (hasAntiSplit) {
+      contentHtml += `<div class="themen-item-antisplit">Anti-Split: ${thema.antiSplit.map(s => escapeHtml(s)).join(', ')}</div>`;
+    }
+
+    if (!contentHtml) {
+      contentHtml = '<div class="themen-item-no-config">Keine Pflichtfelder konfiguriert</div>';
+    }
+
+    item.innerHTML = `
+      <div class="themen-item-header">
+        <span class="themen-item-name">
+          ${escapeHtml(thema.name)}
+          ${hasPflichtfelder ? '<span class="badge">Konfiguriert</span>' : ''}
+        </span>
+        <div class="themen-item-actions">
+          <button class="edit" data-thema="${escapeHtml(thema.name)}">Bearbeiten</button>
+          <button class="delete" data-thema="${escapeHtml(thema.name)}">Löschen</button>
+        </div>
+      </div>
+      <div class="themen-item-content">${contentHtml}</div>
+    `;
+    listEl.appendChild(item);
+  });
+
+  // Add event listeners
+  listEl.querySelectorAll('.themen-item-actions .edit').forEach(btn => {
+    btn.addEventListener('click', () => openThemenModal(btn.dataset.thema));
+  });
+
+  listEl.querySelectorAll('.themen-item-actions .delete').forEach(btn => {
+    btn.addEventListener('click', () => deleteThema(btn.dataset.thema));
+  });
+}
+
+function openThemenModal(themaName = null) {
+  const modal = document.getElementById('themenModal');
+  const titleEl = document.getElementById('themenModalTitle');
+  const themaNameInput = document.getElementById('themenModalThemaName');
+  const pflichtfelderInput = document.getElementById('themenPflichtfelder');
+  const hinweistextInput = document.getElementById('themenHinweistext');
+  const antiSplitInput = document.getElementById('themenAntiSplit');
+
+  editingThemaName = themaName;
+
+  if (themaName) {
+    // Bearbeiten
+    const thema = themenData.find(t => t.name === themaName);
+    titleEl.textContent = 'Thema bearbeiten';
+    themaNameInput.value = thema?.name || '';
+    themaNameInput.disabled = true; // Name kann nicht geändert werden beim Bearbeiten
+    pflichtfelderInput.value = (thema?.pflichtfelder || []).join(', ');
+    hinweistextInput.value = thema?.hinweistext || '';
+    antiSplitInput.value = (thema?.antiSplit || []).join(', ');
+  } else {
+    // Neues Thema
+    titleEl.textContent = 'Neues Thema hinzufügen';
+    themaNameInput.value = '';
+    themaNameInput.disabled = false;
+    pflichtfelderInput.value = '';
+    hinweistextInput.value = '';
+    antiSplitInput.value = '';
+  }
+
+  modal.classList.add('active');
+  if (themaName) {
+    pflichtfelderInput.focus();
+  } else {
+    themaNameInput.focus();
+  }
+}
+
+function closeThemenModal() {
+  const modal = document.getElementById('themenModal');
+  modal.classList.remove('active');
+  editingThemaName = null;
+}
+
+async function saveThema() {
+  const themaNameInput = document.getElementById('themenModalThemaName');
+  const pflichtfelderInput = document.getElementById('themenPflichtfelder');
+  const hinweistextInput = document.getElementById('themenHinweistext');
+  const antiSplitInput = document.getElementById('themenAntiSplit');
+  const statusEl = document.getElementById('themenStatus');
+
+  const name = themaNameInput.value.trim();
+  const pflichtfelderRaw = pflichtfelderInput.value.trim();
+  const hinweistext = hinweistextInput.value.trim();
+  const antiSplitRaw = antiSplitInput.value.trim();
+
+  if (!name) {
+    alert('Bitte geben Sie einen Namen für das Thema ein.');
+    return;
+  }
+
+  // Check for duplicate name when creating new
+  if (!editingThemaName && themenData.some(t => t.name === name)) {
+    alert('Ein Thema mit diesem Namen existiert bereits.');
+    return;
+  }
+
+  // Parse arrays
+  const pflichtfelder = pflichtfelderRaw
+    .split(',')
+    .map(f => f.trim())
+    .filter(f => f.length > 0);
+
+  const antiSplit = antiSplitRaw
+    .split(',')
+    .map(f => f.trim())
+    .filter(f => f.length > 0);
+
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Speichere...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+
+    // Build thema object
+    const thema = {
+      name,
+      pflichtfelder,
+      hinweistext: hinweistext || undefined,
+      antiSplit: antiSplit.length > 0 ? antiSplit : undefined
+    };
+
+    const response = await ipcRenderer.invoke('api-update-praxis-einstellungen', token, {
+      addThema: thema
+    });
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    themenData = response.einstellungen?.themen || [];
+    renderThemen();
+    closeThemenModal();
+
+    const count = themenData.length;
+    document.getElementById('themenCount').textContent = `${count} Themen`;
+    statusEl.innerHTML = `<span class="status-indicator"></span><span>Gespeichert!</span>`;
+  } catch (error) {
+    console.error('Error saving Thema:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
+  }
+}
+
+async function deleteThema(themaName) {
+  if (!confirm(`Thema "${themaName}" wirklich löschen?`)) {
+    return;
+  }
+
+  const statusEl = document.getElementById('themenStatus');
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lösche...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+    const response = await ipcRenderer.invoke('api-update-praxis-einstellungen', token, {
+      removeThema: themaName
+    });
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    themenData = response.einstellungen?.themen || [];
+    renderThemen();
+
+    const count = themenData.length;
+    document.getElementById('themenCount').textContent = `${count} Themen`;
+    statusEl.innerHTML = `<span class="status-indicator"></span><span>Gelöscht!</span>`;
+  } catch (error) {
+    console.error('Error deleting Thema:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
+  }
+}
+
+async function resetThemen() {
+  if (!confirm('Alle Themen auf Standard zurücksetzen? Dies kann nicht rückgängig gemacht werden.')) {
+    return;
+  }
+
+  const statusEl = document.getElementById('themenStatus');
+  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Setze zurück...</span>';
+
+  try {
+    const token = await ipcRenderer.invoke('get-token');
+    const response = await ipcRenderer.invoke('api-reset-praxis-einstellungen', token);
+
+    if (response.error) {
+      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
+      return;
+    }
+
+    themenData = response.einstellungen?.themen || [];
+    renderThemen();
+
+    const count = themenData.length;
+    document.getElementById('themenCount').textContent = `${count} Themen`;
+    statusEl.innerHTML = '<span class="status-indicator"></span><span>Auf Standard zurückgesetzt</span>';
+  } catch (error) {
+    console.error('Error resetting:', error);
+    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
+  }
+}
+
+// Themen Event Listeners
+document.getElementById('themenRefreshBtn')?.addEventListener('click', loadThemenView);
+document.getElementById('themenResetBtn')?.addEventListener('click', resetThemen);
+document.getElementById('themenAddBtn')?.addEventListener('click', () => openThemenModal(null));
+document.getElementById('themenSaveBtn')?.addEventListener('click', saveThema);
+document.getElementById('themenCloseModal')?.addEventListener('click', closeThemenModal);
+
+// Close modal on overlay click
+document.getElementById('themenModal')?.addEventListener('click', (e) => {
+  if (e.target.classList.contains('modal-overlay')) {
+    closeThemenModal();
+  }
+});
+

@@ -488,19 +488,19 @@ input[type="checkbox"] {
 }
 
 .status-error {
-  background: rgba(239, 68, 68, 0.1);
+  background: transparent;
   color: var(--error-500);
   border-color: rgba(239, 68, 68, 0.3);
 }
 
 .status-warning {
-  background: rgba(249, 115, 22, 0.1);
+  background: transparent;
   color: var(--primary-500);
   border-color: rgba(249, 115, 22, 0.3);
 }
 
 .status-info {
-  background: rgba(59, 130, 246, 0.1);
+  background: transparent;
   color: var(--info-500);
   border-color: rgba(59, 130, 246, 0.3);
 }

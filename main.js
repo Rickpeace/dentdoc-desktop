@@ -43,9 +43,6 @@ const store = new Store();
 let tray = null;
 let loginWindow = null;
 let dashboardWindow = null;
-let settingsWindow = null;
-let voiceProfilesWindow = null;
-let bausteineWindow = null;
 let statusOverlay = null;
 let statusOverlayReady = false;
 let pendingStatusUpdate = null;
@@ -178,101 +175,26 @@ function createDashboardWindow() {
     dashboardWindow = null;
   });
 
+  // Refresh subscription status when window gains focus (for multi-PC sync)
+  let lastDashboardRefreshTime = 0;
+  const DASHBOARD_REFRESH_COOLDOWN = 10000; // Only refresh every 10 seconds max
+
+  dashboardWindow.on('focus', async () => {
+    const token = store.get('authToken');
+    const now = Date.now();
+
+    if (token && (now - lastDashboardRefreshTime) > DASHBOARD_REFRESH_COOLDOWN) {
+      lastDashboardRefreshTime = now;
+      await refreshUserData();
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        dashboardWindow.webContents.send('refresh-subscription-status');
+      }
+    }
+  });
+
   return dashboardWindow;
 }
 
-function openSettings() {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.focus();
-    return;
-  }
-
-  settingsWindow = new BrowserWindow({
-    width: 1300,
-    height: 720,
-    minWidth: 800,
-    minHeight: 500,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
-    resizable: true,
-    title: 'DentDoc Einstellungen',
-    frame: false,
-    hasShadow: false,
-    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
-  });
-
-  settingsWindow.loadFile('src/settings.html');
-  settingsWindow.setMenu(null);
-
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
-  });
-}
-
-function openVoiceProfiles() {
-  if (voiceProfilesWindow && !voiceProfilesWindow.isDestroyed()) {
-    voiceProfilesWindow.focus();
-    return;
-  }
-
-  voiceProfilesWindow = new BrowserWindow({
-    width: 1300,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
-    resizable: true,
-    title: 'DentDoc Stimmprofile',
-    frame: false,
-    hasShadow: false,
-    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
-  });
-
-  voiceProfilesWindow.loadFile('src/voice-profiles.html');
-  voiceProfilesWindow.setMenu(null);
-
-  voiceProfilesWindow.on('closed', () => {
-    voiceProfilesWindow = null;
-  });
-}
-
-function openBausteine() {
-  if (bausteineWindow && !bausteineWindow.isDestroyed()) {
-    bausteineWindow.focus();
-    return;
-  }
-
-  bausteineWindow = new BrowserWindow({
-    width: 1300,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
-    resizable: true,
-    title: 'DentDoc Bausteine',
-    frame: false,
-    hasShadow: false,
-    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
-  });
-
-  bausteineWindow.loadFile('src/bausteine/bausteine.html');
-  bausteineWindow.setMenu(null);
-
-  bausteineWindow.on('closed', () => {
-    bausteineWindow = null;
-  });
-}
 
 function registerShortcut(shortcut) {
   // Unregister old shortcut
@@ -550,7 +472,7 @@ function buildTrayMenu() {
   // Build status label for trial/subscription (matching web app)
   let statusLabel;
   if (hasActiveSubscription) {
-    statusLabel = `✓ DentDoc Pro (${user?.maxDevices || 1} PC${(user?.maxDevices || 1) !== 1 ? 's' : ''})`;
+    statusLabel = `✓ DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`;
   } else if (isRealTrial) {
     statusLabel = `Testphase: ${minutesRemaining} Min übrig`;
   } else if (wasSubscriber) {
@@ -624,21 +546,12 @@ function buildTrayMenu() {
         store.delete('authToken');
         store.delete('user');
 
-        // Close all open windows
+        // Close dashboard window
         if (dashboardWindow && !dashboardWindow.isDestroyed()) {
           dashboardWindow.destroy();
         }
-        if (settingsWindow && !settingsWindow.isDestroyed()) {
-          settingsWindow.close();
-        }
-        if (bausteineWindow && !bausteineWindow.isDestroyed()) {
-          bausteineWindow.close();
-        }
-        if (voiceProfilesWindow && !voiceProfilesWindow.isDestroyed()) {
-          voiceProfilesWindow.close();
-        }
 
-        showNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet');
+        showCustomNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet', 'info');
 
         // Show login window after logout
         createLoginWindow();
@@ -830,6 +743,14 @@ async function processAudioFile(audioFilePath) {
       updateStatusOverlay('Dokumentation wird erstellt...', 'Agent-Kette analysiert Kategorien...', 'processing', { step: 4 });
       const bausteine = bausteineManager.getAllBausteine();
       result = await apiClient.getDocumentationV2(transcriptionId, token, bausteine);
+    } else if (docMode === 'hybrid-v1.2') {
+      // Hybrid V1.2: 1 API call, 60% cost savings
+      updateStatusOverlay('Dokumentation wird erstellt...', 'Hybrid-KI generiert Zusammenfassung...', 'processing', { step: 4 });
+      result = await apiClient.getDocumentationV1_2(transcriptionId, token);
+    } else if (docMode === 'single-v1.1') {
+      // Single Prompt V1.1: Use experimental endpoint
+      updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung (V1.1)...', 'processing', { step: 4 });
+      result = await apiClient.getDocumentationV1_1(transcriptionId, token);
     } else {
       // Single Prompt: Use standard endpoint
       updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
@@ -981,9 +902,7 @@ async function startRecording() {
   console.log('Recording check - planTier:', user?.planTier, 'subscriptionStatus:', user?.subscriptionStatus, 'minutesRemaining:', minutesRemaining);
 
   if (isTrialUser && minutesRemaining <= 0 && !hasActiveSubscription) {
-    showNotification('Testphase beendet', 'Ihre kostenlosen Testminuten sind aufgebraucht. Bitte abonnieren Sie DentDoc Pro.');
     updateStatusOverlay('Testphase beendet', 'Bitte abonnieren Sie DentDoc Pro um fortzufahren.', 'error');
-    setTimeout(() => openWebDashboard('/subscription'), 2000);
     return;
   }
 
@@ -1060,6 +979,75 @@ function showNotification(title, body, onClick = null) {
 
   notification.show();
 }
+
+// Custom notification popup window (styled like status overlay)
+let notificationPopupWindow = null;
+let notificationClickCallback = null;
+
+function showCustomNotification(title, body, type = 'warning', onClick = null) {
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workArea;
+
+  // Close existing popup if any
+  if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
+    notificationPopupWindow.close();
+  }
+
+  notificationClickCallback = onClick;
+
+  notificationPopupWindow = new BrowserWindow({
+    width: 380,
+    height: 160,
+    x: workArea.x + workArea.width - 400,
+    y: workArea.y + workArea.height - 180,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+
+  notificationPopupWindow.loadFile('src/notification-popup.html');
+
+  notificationPopupWindow.webContents.on('did-finish-load', () => {
+    // Check if window still exists (could be closed rapidly)
+    if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
+      notificationPopupWindow.webContents.send('show-notification', {
+        title,
+        body,
+        type,
+        hasClickAction: !!onClick
+      });
+    }
+  });
+
+  notificationPopupWindow.on('closed', () => {
+    notificationPopupWindow = null;
+    notificationClickCallback = null;
+  });
+}
+
+// IPC handlers for notification popup
+ipcMain.on('close-notification-popup', () => {
+  if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
+    notificationPopupWindow.close();
+  }
+});
+
+ipcMain.on('notification-popup-clicked', () => {
+  if (notificationClickCallback) {
+    notificationClickCallback();
+  }
+  if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
+    notificationPopupWindow.close();
+  }
+});
 
 function getValidOverlayPosition() {
   const { screen } = require('electron');
@@ -1357,10 +1345,10 @@ ipcMain.on('close-status-overlay', () => {
 // IPC handler for opening microphone settings from error overlay
 ipcMain.on('open-microphone-settings', () => {
   hideStatusOverlay();
-  openSettings();
+  openLocalDashboard();
   setTimeout(() => {
-    if (settingsWindow && !settingsWindow.isDestroyed()) {
-      settingsWindow.webContents.send('show-settings-tab', 'microphone');
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('switch-view', 'settings');
     }
   }, 500);
 });
@@ -1481,7 +1469,7 @@ ipcMain.handle('get-subscription-status', () => {
   let type; // 'success', 'warning', 'error', 'trial'
 
   if (hasActiveSubscription) {
-    label = `DentDoc Pro (${user?.maxDevices || 1} PC${(user?.maxDevices || 1) !== 1 ? 's' : ''})`;
+    label = `DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`;
     type = 'success';
   } else if (isRealTrial) {
     label = `Testphase: ${minutesRemaining} Min`;
@@ -1580,11 +1568,11 @@ ipcMain.handle('get-subscription-details', async () => {
   }
 
   // Determine plan name (include device count for active subscriptions)
-  let planName = 'Kein Plan';
+  let planName = 'Kein aktives Abonnement';
   if (hasActiveSubscription) {
     const basePlanName = user?.planName || 'DentDoc Pro';
     const deviceCount = maxDevices || user?.maxDevices || 1;
-    planName = `${basePlanName} (${deviceCount} PC${deviceCount !== 1 ? 's' : ''})`;
+    planName = `${basePlanName} (${deviceCount} Arbeitsplatz${deviceCount !== 1 ? 'e' : ''})`;
   } else if (isRealTrial) {
     planName = 'Testphase';
   }
@@ -1648,19 +1636,6 @@ ipcMain.handle('toggle-recording', async () => {
 
 ipcMain.handle('get-recording-state', () => {
   return { isRecording, isProcessing };
-});
-
-// Open legacy windows from dashboard
-ipcMain.on('open-settings-window', () => {
-  openSettings();
-});
-
-ipcMain.on('open-voice-profiles-window', () => {
-  openVoiceProfiles();
-});
-
-ipcMain.on('open-bausteine-window', () => {
-  openBausteine();
 });
 
 // Onboarding tour handlers (supports multiple tours: 'login', 'settings', etc.)
@@ -1839,31 +1814,34 @@ ipcMain.handle('login', async (event, email, password) => {
 
     if (wasSubscriber && !hasActiveSubscription) {
       // Ex-subscriber - show "no active subscription" notification (no auto-redirect)
-      showNotification(
-        '⚠️ Kein aktives Abo',
+      showCustomNotification(
+        'Kein aktives Abo',
         'Ihr Abonnement ist nicht mehr aktiv. Klicken Sie hier um es zu reaktivieren.',
+        'error',
         () => openWebDashboard('/subscription')
       );
     } else if (trialExpired) {
       // True trial expired - show notification (no auto-redirect)
-      showNotification(
-        '⚠️ Testphase beendet',
-        'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier um ein Abo abzuschließen.',
+      showCustomNotification(
+        'Testphase beendet',
+        'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier für ein Abo.',
+        'error',
         () => openWebDashboard('/subscription')
       );
     } else if (isTrialUser && !wasSubscriber && minutesRemaining > 0 && minutesRemaining <= 10) {
       // Trial running low
-      showNotification(
+      showCustomNotification(
         'Testphase endet bald',
         `Nur noch ${minutesRemaining} Minuten übrig. Jetzt Abo kaufen!`,
+        'warning',
         () => openWebDashboard('/subscription')
       );
     } else if (hasActiveSubscription) {
       // Pro user
-      showNotification('Angemeldet', `Willkommen! DentDoc Pro (${user?.maxDevices || 1} PC${(user?.maxDevices || 1) !== 1 ? 's' : ''})`);
+      showCustomNotification('Angemeldet', `Willkommen! DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`, 'success');
     } else {
       // Normal welcome
-      showNotification('Angemeldet', `Willkommen ${response.user.email}!`);
+      showCustomNotification('Angemeldet', `Willkommen ${response.user.email}!`, 'success');
     }
 
     return { success: true };
@@ -1877,7 +1855,30 @@ ipcMain.handle('login', async (event, email, password) => {
   }
 });
 
-// IPC Handlers for settings window
+// IPC Handler for logout
+ipcMain.handle('logout', async () => {
+  const token = store.get('authToken');
+  // Stop heartbeat
+  stopHeartbeat();
+  // Logout from server (free device slot)
+  if (token) {
+    await apiClient.logout(token, store);
+  }
+  store.delete('authToken');
+  store.delete('user');
+
+  // Close dashboard window
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.destroy();
+  }
+
+  showCustomNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet', 'info');
+
+  // Show login window after logout
+  createLoginWindow();
+});
+
+// IPC Handlers for settings
 ipcMain.handle('get-settings', async () => {
   // Default paths in Documents folder
   const documentsPath = app.getPath('documents');
@@ -1885,12 +1886,20 @@ ipcMain.handle('get-settings', async () => {
   const defaultProfilesPath = path.join(documentsPath, 'DentDoc', 'Stimmprofile');
   const defaultRecordingsPath = path.join(app.getPath('temp'), 'dentdoc');
 
+  // Get stored paths - use null coalescing to preserve empty strings if intentionally set
+  const storedTranscriptPath = store.get('transcriptPath');
+  const storedProfilesPath = store.get('profilesPath');
+  const storedRecordingsPath = store.get('recordingsPath');
+
+  console.log('get-settings - stored transcriptPath:', storedTranscriptPath);
+  console.log('get-settings - stored profilesPath:', storedProfilesPath);
+
   return {
     shortcut: store.get('shortcut') || 'F9',
     microphoneId: store.get('microphoneId') || null,
-    transcriptPath: store.get('transcriptPath') || defaultTranscriptPath,
-    profilesPath: store.get('profilesPath') || defaultProfilesPath,
-    recordingsPath: store.get('recordingsPath') || defaultRecordingsPath,
+    transcriptPath: storedTranscriptPath !== undefined && storedTranscriptPath !== '' ? storedTranscriptPath : defaultTranscriptPath,
+    profilesPath: storedProfilesPath !== undefined && storedProfilesPath !== '' ? storedProfilesPath : defaultProfilesPath,
+    recordingsPath: storedRecordingsPath !== undefined && storedRecordingsPath !== '' ? storedRecordingsPath : defaultRecordingsPath,
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', false),
@@ -1900,6 +1909,8 @@ ipcMain.handle('get-settings', async () => {
 });
 
 ipcMain.handle('save-settings', async (event, settings) => {
+  console.log('save-settings called with:', JSON.stringify(settings, null, 2));
+
   // Save microphone
   if (settings.microphoneId) {
     store.set('microphoneId', settings.microphoneId);
@@ -1907,6 +1918,7 @@ ipcMain.handle('save-settings', async (event, settings) => {
 
   // Save transcript path
   if (settings.transcriptPath !== undefined) {
+    console.log('Saving transcriptPath:', settings.transcriptPath);
     store.set('transcriptPath', settings.transcriptPath);
   }
 
@@ -2014,6 +2026,81 @@ ipcMain.handle('get-debug-log-path', async () => {
   return DEBUG_LOG;
 });
 
+// =============================================================================
+// PRAXIS-EINSTELLUNGEN API (V1.2 Textbausteine)
+// =============================================================================
+
+ipcMain.handle('get-token', () => {
+  return store.get('authToken');
+});
+
+ipcMain.handle('api-get-praxis-einstellungen', async (event, token) => {
+  console.log('[Praxis-Einstellungen] GET called, token:', token ? 'present' : 'missing');
+  try {
+    const result = await apiClient.getPraxisEinstellungen(token);
+    console.log('[Praxis-Einstellungen] GET result:', JSON.stringify(result).substring(0, 200));
+    return result;
+  } catch (error) {
+    console.error('[Praxis-Einstellungen] GET error:', error.message);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('api-add-textbaustein', async (event, token, key, text) => {
+  try {
+    const result = await apiClient.addTextbaustein(token, key, text);
+    return result;
+  } catch (error) {
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('api-remove-textbaustein', async (event, token, key) => {
+  try {
+    const result = await apiClient.removeTextbaustein(token, key);
+    return result;
+  } catch (error) {
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('api-reset-praxis-einstellungen', async (event, token) => {
+  try {
+    const result = await apiClient.resetPraxisEinstellungen(token);
+    return result;
+  } catch (error) {
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('api-add-themen-anpassung', async (event, token, themenAnpassung) => {
+  try {
+    const result = await apiClient.addThemenAnpassung(token, themenAnpassung);
+    return result;
+  } catch (error) {
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('api-remove-themen-anpassung', async (event, token, thema) => {
+  try {
+    const result = await apiClient.removeThemenAnpassung(token, thema);
+    return result;
+  } catch (error) {
+    return { error: error.message };
+  }
+});
+
+// Generic update for Praxis-Einstellungen (new V2 format)
+ipcMain.handle('api-update-praxis-einstellungen', async (event, token, updates) => {
+  try {
+    const result = await apiClient.updatePraxisEinstellungen(token, updates);
+    return result;
+  } catch (error) {
+    return { error: error.message };
+  }
+});
+
 ipcMain.handle('open-temp-folder', async () => {
   const tempDir = path.join(app.getPath('temp'), 'dentdoc');
 
@@ -2029,7 +2116,34 @@ ipcMain.handle('open-temp-folder', async () => {
 // Folder selection dialog
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog({
-    properties: ['openDirectory', 'createDirectory']
+    properties: ['openDirectory']
+  });
+
+  console.log('select-folder dialog result:', JSON.stringify(result));
+
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+    console.log('select-folder: Dialog cancelled or no path selected');
+    return null;
+  }
+
+  const selectedPath = result.filePaths[0];
+  console.log('select-folder: Selected path:', selectedPath);
+
+  // Validate that the path is not empty
+  if (!selectedPath || selectedPath.trim() === '') {
+    console.log('select-folder: Empty path returned');
+    return null;
+  }
+
+  return selectedPath;
+});
+
+// File selection dialog
+ipcMain.handle('select-file-dialog', async (event, options = {}) => {
+  const result = await dialog.showOpenDialog({
+    title: options.title || 'Datei wählen',
+    filters: options.filters || [{ name: 'All Files', extensions: ['*'] }],
+    properties: ['openFile']
   });
 
   if (result.canceled) {
@@ -2147,8 +2261,7 @@ ipcMain.handle('show-bausteine-path-dialog', async (event, targetPath) => {
     return { action: 'use_defaults' };
   }
 
-  const window = settingsWindow || bausteineWindow;
-  const result = await dialog.showMessageBox(window, {
+  const result = await dialog.showMessageBox(dashboardWindow, {
     type: 'question',
     buttons,
     defaultId: 0,
@@ -2228,7 +2341,7 @@ ipcMain.handle('reset-all-bausteine', async () => {
 });
 
 ipcMain.handle('confirm-reset-baustein', async (event, bausteinName) => {
-  const result = await dialog.showMessageBox(bausteineWindow, {
+  const result = await dialog.showMessageBox(dashboardWindow, {
     type: 'question',
     buttons: ['Zurücksetzen', 'Abbrechen'],
     defaultId: 1,
@@ -2240,7 +2353,7 @@ ipcMain.handle('confirm-reset-baustein', async (event, bausteinName) => {
 });
 
 ipcMain.handle('confirm-reset-all-bausteine', async () => {
-  const result = await dialog.showMessageBox(bausteineWindow, {
+  const result = await dialog.showMessageBox(dashboardWindow, {
     type: 'warning',
     buttons: ['Alle zurücksetzen', 'Abbrechen'],
     defaultId: 1,
@@ -2253,7 +2366,7 @@ ipcMain.handle('confirm-reset-all-bausteine', async () => {
 });
 
 ipcMain.handle('confirm-delete-category', async (event, categoryName) => {
-  const result = await dialog.showMessageBox(bausteineWindow, {
+  const result = await dialog.showMessageBox(dashboardWindow, {
     type: 'warning',
     buttons: ['Löschen', 'Abbrechen'],
     defaultId: 1,
@@ -2266,7 +2379,7 @@ ipcMain.handle('confirm-delete-category', async (event, categoryName) => {
 });
 
 ipcMain.handle('confirm-delete-baustein', async (event, bausteinName) => {
-  const result = await dialog.showMessageBox(bausteineWindow, {
+  const result = await dialog.showMessageBox(dashboardWindow, {
     type: 'warning',
     buttons: ['Löschen', 'Abbrechen'],
     defaultId: 1,
@@ -2418,7 +2531,7 @@ ipcMain.handle('open-devtools', (event) => {
 
 // Show unsaved changes dialog
 ipcMain.handle('show-unsaved-changes-dialog', async () => {
-  const result = await dialog.showMessageBox(settingsWindow, {
+  const result = await dialog.showMessageBox(dashboardWindow, {
     type: 'question',
     buttons: ['Speichern', 'Verwerfen', 'Abbrechen'],
     defaultId: 0,
@@ -2590,27 +2703,30 @@ app.whenReady().then(() => {
       if (wasSubscriber && !hasActiveSubscription) {
         // Ex-subscriber - show "no active subscription" notification
         setTimeout(() => {
-          showNotification(
-            '⚠️ Kein aktives Abo',
+          showCustomNotification(
+            'Kein aktives Abo',
             'Ihr Abonnement ist nicht mehr aktiv. Klicken Sie hier um es zu reaktivieren.',
+            'error',
             () => openWebDashboard('/subscription')
           );
         }, 2000);
       } else if (trialExpired) {
         // True trial expired - show notification after a short delay
         setTimeout(() => {
-          showNotification(
-            '⚠️ Testphase beendet',
-            'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier um ein Abo abzuschließen.',
+          showCustomNotification(
+            'Testphase beendet',
+            'Ihre kostenlosen Testminuten sind aufgebraucht. Klicken Sie hier für ein Abo.',
+            'error',
             () => openWebDashboard('/subscription')
           );
         }, 2000);
       } else if (isTrialUser && !wasSubscriber && minutesRemaining > 0 && minutesRemaining <= 10) {
         // Trial running low
         setTimeout(() => {
-          showNotification(
+          showCustomNotification(
             'Testphase endet bald',
             `Nur noch ${minutesRemaining} Minuten übrig. Jetzt Abo kaufen!`,
+            'warning',
             () => openWebDashboard('/subscription')
           );
         }, 2000);
