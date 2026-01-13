@@ -1112,8 +1112,8 @@ function createStatusOverlay() {
   const position = getValidOverlayPosition();
 
   statusOverlay = new BrowserWindow({
-    width: 440,
-    height: 360,
+    width: 10,   // Start small, will be resized dynamically
+    height: 10,  // Start small, will be resized dynamically
     x: position.x,
     y: position.y,
     frame: false,
@@ -1288,6 +1288,8 @@ function updateStatusOverlay(title, message, type, extra = {}) {
   }
   // Otherwise the did-finish-load handler will send it
 
+  // Window will auto-resize via IPC from the renderer after content updates
+
   overlay.show();
   overlay.setAlwaysOnTop(true, 'screen-saver'); // Stelle sicher, dass es im Vordergrund bleibt
   overlay.focus(); // Bringe es in den Fokus
@@ -1340,6 +1342,20 @@ function showLastResult() {
 // IPC handler for closing status overlay
 ipcMain.on('close-status-overlay', () => {
   hideStatusOverlay();
+});
+
+// IPC handler for click-through on transparent areas
+ipcMain.on('set-ignore-mouse-events', (_event, ignore, options = {}) => {
+  if (statusOverlay && !statusOverlay.isDestroyed()) {
+    statusOverlay.setIgnoreMouseEvents(ignore, options);
+  }
+});
+
+// IPC handler for auto-resizing status overlay to fit content
+ipcMain.on('resize-status-overlay', (_event, width, height) => {
+  if (statusOverlay && !statusOverlay.isDestroyed()) {
+    statusOverlay.setSize(width, height);
+  }
 });
 
 // IPC handler for opening microphone settings from error overlay

@@ -48,4 +48,13 @@ BIN GRAD DABEI APP ZU TESTEN .... TRIAL ASUGLAUFEN POPUPS USW ...
 TODO .. BAUSTEINE UND PROMPTS CHEKCEN
 BEI MULTI AGEIN WENN KEINE NAHME STEHT IM TRANSKRIPT (NULL)
 ---
-einrichtung stimmprofuil updaten
+einrichtung stimmprofuil updaten ??? man sieht noch keine vorhanden nach ordenr wechsel....
+
+-------
+speicherlogik transktip und autio in einem ordern ......
+
+----
+
+vercel nur 5 mb !
+
+-----

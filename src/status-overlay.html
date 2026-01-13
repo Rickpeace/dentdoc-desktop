@@ -5,11 +5,20 @@
   <title>DentDoc Status</title>
   <link rel="stylesheet" href="styles/design-system.css">
   <style>
-    body {
+    html, body {
       background: transparent;
       overflow: hidden;
-      padding: 6px;
+      padding: 0;
+      margin: 0;
       min-height: auto;
+      min-width: auto;
+      height: auto !important;
+      width: auto !important;
+      display: block;
+    }
+
+    body {
+      padding: 2px;
     }
 
     body::before {
@@ -677,6 +686,25 @@
     // Listen for audio level updates
     ipcRenderer.on('audio-level', (event, level) => {
       updateAudioLevel(level);
+    });
+
+    // Auto-resize window to fit content
+    function resizeWindowToFit() {
+      const container = document.querySelector('.container');
+      // Get the actual rendered size including padding and border
+      const width = container.offsetWidth + 4; // + body padding (2px each side)
+      const height = container.offsetHeight + 4;
+      ipcRenderer.send('resize-status-overlay', width, height);
+    }
+
+    // Resize after status update (with small delay for DOM to update)
+    ipcRenderer.on('update-status', () => {
+      setTimeout(resizeWindowToFit, 50);
+    });
+
+    // Initial resize when loaded
+    window.addEventListener('load', () => {
+      setTimeout(resizeWindowToFit, 100);
     });
   </script>
 </body>

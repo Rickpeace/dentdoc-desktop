@@ -144,13 +144,19 @@ async function getUser(token) {
 
 /**
  * Upload audio file with progress tracking
- * Now returns immediately after upload - caller should poll getTranscriptionStatus() for real status
+ * NEW: Direct upload to AssemblyAI (bypasses Vercel 4.5MB limit)
+ *
+ * Flow:
+ * 1. Get upload URL from backend
+ * 2. Upload directly to AssemblyAI
+ * 3. Tell backend to start transcription
+ *
  * @param {string} audioFilePath - Path to audio file
  * @param {string} token - Auth token
  * @param {Function} onProgress - Progress callback: (progressInfo) => void
  *   progressInfo: { phase, percent, message }
- *     - phase: 'upload' | 'submitted'
- *     - percent: 0-100 for upload phase
+ *     - phase: 'prepare' | 'upload' | 'submit' | 'submitted'
+ *     - percent: 0-100
  *     - message: Human-readable status
  * @returns {Promise<number>} Transcription ID
  */
@@ -163,96 +169,76 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
     }
 
     const fileName = require('path').basename(audioFilePath);
-
-    // Read file as buffer for progress tracking
     const fileBuffer = fs.readFileSync(audioFilePath);
 
-    const formData = new FormData();
-    formData.append('file', fileBuffer, {
-      filename: fileName,
-      contentType: 'audio/webm'
-    });
+    // STEP 1: Get upload URL from backend
+    if (onProgress) {
+      onProgress({ phase: 'prepare', percent: 5, message: 'Vorbereiten...' });
+    }
 
-    // Get the form data as a buffer to track progress
-    const formBuffer = formData.getBuffer();
-    const formHeaders = formData.getHeaders();
-
-    // Create a custom upload with progress tracking
-    const response = await new Promise((resolve, reject) => {
-      const url = new URL(`${API_BASE_URL}api/transcriptions/upload`);
-      const isHttps = url.protocol === 'https:';
-      const httpModule = isHttps ? require('https') : require('http');
-
-      const options = {
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname,
-        method: 'POST',
+    const urlResponse = await axios.get(
+      `${API_BASE_URL}api/transcriptions/get-upload-url`,
+      {
         headers: {
-          ...formHeaders,
-          'Content-Length': formBuffer.length,
           'Authorization': `Bearer ${token}`,
           'Cookie': `session=${token}`
         },
-        timeout: 120000 // 2 minutes for upload
-      };
+        timeout: 30000
+      }
+    );
 
-      const req = httpModule.request(options, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          try {
-            const jsonData = JSON.parse(data);
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              if (onProgress) {
-                onProgress({ phase: 'submitted', percent: 100, message: 'Übermittelt an Server' });
-              }
-              resolve({ data: jsonData });
-            } else {
-              reject({ response: { data: jsonData, status: res.statusCode } });
-            }
-          } catch (e) {
-            reject(new Error(`Invalid response: ${data}`));
-          }
-        });
-      });
+    const { upload_url } = urlResponse.data;
 
-      req.on('error', reject);
+    if (!upload_url) {
+      throw new Error('No upload URL received from server');
+    }
 
-      req.on('timeout', () => {
-        req.destroy();
-        reject({ code: 'ECONNABORTED', message: 'timeout' });
-      });
+    // STEP 2: Upload directly to AssemblyAI (NO Vercel limit!)
+    if (onProgress) {
+      onProgress({ phase: 'upload', percent: 10, message: 'Upload läuft...' });
+    }
 
-      // Track upload progress by writing in chunks
-      const chunkSize = 16384; // 16KB chunks
-      let uploaded = 0;
-
-      const writeChunk = () => {
-        while (uploaded < formBuffer.length) {
-          const end = Math.min(uploaded + chunkSize, formBuffer.length);
-          const chunk = formBuffer.subarray(uploaded, end);
-          const canContinue = req.write(chunk);
-          uploaded = end;
-
-          const percent = Math.round((uploaded * 100) / formBuffer.length);
-          if (onProgress) {
-            onProgress({ phase: 'upload', percent, message: `Upload ${percent}%` });
-          }
-
-          if (!canContinue) {
-            req.once('drain', writeChunk);
-            return;
-          }
+    await axios.put(upload_url, fileBuffer, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': fileBuffer.length, // WICHTIG: Sonst hängt AssemblyAI
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 300000, // 5 minutes for large files
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          // Map upload progress to 10-90%
+          const percent = Math.round((progressEvent.loaded * 80) / progressEvent.total) + 10;
+          onProgress({ phase: 'upload', percent, message: `Upload ${percent}%` });
         }
-
-        req.end();
-      };
-
-      writeChunk();
+      }
     });
 
-    return response.data.id;
+    // STEP 3: Tell backend to start transcription
+    if (onProgress) {
+      onProgress({ phase: 'submit', percent: 92, message: 'Starte Transkription...' });
+    }
+
+    const startResponse = await axios.post(
+      `${API_BASE_URL}api/transcriptions/start`,
+      { upload_url, fileName },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Cookie': `session=${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    if (onProgress) {
+      onProgress({ phase: 'submitted', percent: 100, message: 'Übermittelt' });
+    }
+
+    return startResponse.data.id;
+
   } catch (error) {
     console.error('Upload error:', error.response?.data || error.message);
 
@@ -261,7 +247,7 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
     }
 
     if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      throw new Error('Die Aufnahme war zu lang oder leer. Bitte versuchen Sie es erneut.');
+      throw new Error('Upload-Timeout. Bitte versuchen Sie es erneut.');
     }
 
     const serverError = error.response?.data?.error;
