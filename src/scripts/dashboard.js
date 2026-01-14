@@ -409,7 +409,6 @@ async function loadSettingsView() {
   settingsSelectedMicId = settings.microphoneId || null;
   document.getElementById('settingsTranscriptPath').value = settings.transcriptPath || '';
   document.getElementById('settingsProfilesPath').value = settings.profilesPath || '';
-  document.getElementById('settingsRecordingsPath').value = settings.recordingsPath || '';
   document.getElementById('settingsAutoCloseCheckbox').checked = settings.autoClose || false;
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
   document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
@@ -428,7 +427,6 @@ async function loadSettingsView() {
     microphoneId: settingsSelectedMicId,
     transcriptPath: settings.transcriptPath || '',
     profilesPath: settings.profilesPath || '',
-    recordingsPath: settings.recordingsPath || '',
     bausteinePath: bausteinePathValue || '',
     autoClose: settings.autoClose || false,
     autoExport: settings.autoExport || false,
@@ -476,7 +474,6 @@ function settingsCheckForChanges() {
     microphoneId: document.getElementById('settingsMicSelect').value,
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
     profilesPath: document.getElementById('settingsProfilesPath').value,
-    recordingsPath: document.getElementById('settingsRecordingsPath').value,
     bausteinePath: document.getElementById('settingsBausteinePath').value,
     autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
@@ -673,23 +670,6 @@ document.getElementById('settingsOpenProfilesFolderBtn').addEventListener('click
   }
 });
 
-document.getElementById('settingsBrowseRecordingsBtn').addEventListener('click', async () => {
-  const result = await ipcRenderer.invoke('select-folder');
-  if (result) {
-    document.getElementById('settingsRecordingsPath').value = result;
-    settingsCheckForChanges();
-  }
-});
-
-document.getElementById('settingsOpenRecordingsFolderBtn').addEventListener('click', async () => {
-  const path = document.getElementById('settingsRecordingsPath').value;
-  if (path) {
-    await ipcRenderer.invoke('open-folder', path);
-  } else {
-    await ipcRenderer.invoke('open-temp-folder');
-  }
-});
-
 document.getElementById('settingsBrowseBausteineBtn').addEventListener('click', async () => {
   const result = await ipcRenderer.invoke('select-folder');
   if (!result) return;
@@ -760,7 +740,6 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
     microphoneId: document.getElementById('settingsMicSelect').value,
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
     profilesPath: document.getElementById('settingsProfilesPath').value,
-    recordingsPath: document.getElementById('settingsRecordingsPath').value,
     autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,

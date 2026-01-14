@@ -605,18 +605,19 @@
           progressContainer.classList.add('visible');
           actions.classList.remove('visible');
           // Set progress based on step (4 steps total)
+          // Each step gets 25% of the progress bar
           if (data.step === 1) {
-            // Upload step: use actual upload progress if available (0-15%)
+            // Upload step: 0-25% based on actual upload progress
             const uploadPercent = data.uploadProgress !== undefined
-              ? Math.round(data.uploadProgress * 0.15)  // Scale 0-100% to 0-15%
-              : 15;
+              ? Math.round(data.uploadProgress * 0.25)  // Scale 0-100% to 0-25%
+              : 0;
             setProgress(1, uploadPercent);
           } else if (data.step === 2) {
-            setProgress(2, 40);   // Transkription: 40%
+            setProgress(2, 50);   // Transkription: 25-50%
           } else if (data.step === 3) {
-            setProgress(3, 65);   // Sprecher: 65%
+            setProgress(3, 75);   // Sprecher: 50-75%
           } else if (data.step === 4) {
-            setProgress(4, 90);   // Dokumentation: 90%
+            setProgress(4, 90);   // Dokumentation: 75-100%
           }
           break;
         case 'success':

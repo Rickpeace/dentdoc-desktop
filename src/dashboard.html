@@ -353,18 +353,23 @@
             <div id="settingsShortcutStatus" class="status-message"></div>
           </div>
 
-          <!-- Transcript Export Section -->
+          <!-- Speichern Section (Transkripte & Audio) -->
           <div class="settings-section" id="settings-section-export">
             <div class="settings-section-header">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                <polyline points="17 21 17 13 7 13 7 21"/>
+                <polyline points="7 3 7 8 15 8"/>
               </svg>
-              <h3>Transkript-Export</h3>
+              <h3>Speichern</h3>
             </div>
             <label class="checkbox-label">
               <input type="checkbox" id="settingsAutoExportCheckbox">
-              <span>Transkripte speichern</span>
+              <span>Transkripte speichern (.txt)</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="settingsKeepAudioCheckbox">
+              <span>Audioaufnahmen speichern (.webm)</span>
             </label>
             <div id="settingsExportPathSection">
               <label for="settingsTranscriptPath">Speicherort</label>
@@ -373,27 +378,6 @@
                 <button id="settingsBrowseTranscriptBtn" class="btn btn-secondary">Ändern</button>
                 <button id="settingsOpenTranscriptFolderBtn" class="btn btn-ghost">Öffnen</button>
               </div>
-            </div>
-          </div>
-
-          <!-- Recordings Section -->
-          <div class="settings-section" id="settings-section-recordings">
-            <div class="settings-section-header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-              <h3>Aufnahmen</h3>
-            </div>
-            <label class="checkbox-label">
-              <input type="checkbox" id="settingsKeepAudioCheckbox">
-              <span>Aufnahmen speichern</span>
-            </label>
-            <label for="settingsRecordingsPath">Speicherort</label>
-            <div class="path-input-row">
-              <input type="text" id="settingsRecordingsPath" readonly>
-              <button id="settingsBrowseRecordingsBtn" class="btn btn-secondary">Ändern</button>
-              <button id="settingsOpenRecordingsFolderBtn" class="btn btn-ghost">Öffnen</button>
             </div>
           </div>
 
@@ -449,11 +433,13 @@
               <option value="single">Single Prompt (Standard)</option>
               <option value="single-v1.1">Single Prompt V1.1 (Experimental)</option>
               <option value="hybrid-v1.2">Hybrid V1.2 (Empfohlen)</option>
+              <option value="megaprompt">Megaprompt (7-Step Pipeline)</option>
               <option value="agent-chain">Agent-Kette mit Bausteinen</option>
             </select>
             <p class="helper-text">
               <strong>Single Prompt:</strong> Ein KI-Aufruf für die gesamte Dokumentation.<br>
               <strong>Hybrid V1.2:</strong> Optimiert - 60% schneller, erkennt automatisch Themen.<br>
+              <strong>Megaprompt:</strong> 7-Schritt-Pipeline mit 10 parallelen Extraktoren für maximale Genauigkeit.<br>
               <strong>Agent-Kette:</strong> Erkennt Behandlungskategorien und fügt automatisch Standard-Aufklärungstexte hinzu.
             </p>
           </div>
@@ -1341,8 +1327,16 @@
         <div class="wizard-card">
           <div class="wizard-toggle active" id="wizardTranscriptToggle">
             <div class="wizard-toggle-content">
-              <h4>Transkripte speichern</h4>
-              <p>Speichert jede Rohtranskription als .txt-Datei</p>
+              <h4>Transkripte speichern (.txt)</h4>
+              <p>Speichert jede Rohtranskription als Textdatei</p>
+            </div>
+            <div class="wizard-toggle-switch"></div>
+          </div>
+
+          <div class="wizard-toggle" id="wizardAudioToggle" style="margin-top: var(--space-3);">
+            <div class="wizard-toggle-content">
+              <h4>Audioaufnahmen speichern (.webm)</h4>
+              <p>Behält die Original-Audiodateien nach der Verarbeitung</p>
             </div>
             <div class="wizard-toggle-switch"></div>
           </div>
@@ -1364,55 +1358,12 @@
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 16v-4M12 8h.01"/>
           </svg>
-          <p><strong>Hinweis:</strong> Die fertige Dokumentation wird immer automatisch in die Zwischenablage kopiert. Das Speichern von Transkripten ist zusätzlich und optional.</p>
+          <p><strong>Hinweis:</strong> Die fertige Dokumentation wird immer automatisch in die Zwischenablage kopiert. Transkripte und Audio werden im selben Ordner mit identischem Dateinamen gespeichert.</p>
         </div>
       </div>
 
-      <!-- Step 5: Audio Recordings -->
+      <!-- Step 5: Voice Profiles -->
       <div class="wizard-step" data-step="5">
-        <div class="wizard-step-header">
-          <div class="wizard-step-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
-          </div>
-          <h2>Audioaufnahmen speichern</h2>
-          <p>Standardmäßig werden Audioaufnahmen nach der Verarbeitung gelöscht. Sie können die Originalaufnahmen auch dauerhaft speichern.</p>
-        </div>
-
-        <div class="wizard-card">
-          <div class="wizard-toggle" id="wizardAudioToggle">
-            <div class="wizard-toggle-content">
-              <h4>Audioaufnahmen speichern</h4>
-              <p>Behält die Original-Audiodateien nach der Verarbeitung</p>
-            </div>
-            <div class="wizard-toggle-switch"></div>
-          </div>
-
-          <div id="wizardAudioPathSection" style="margin-top: var(--space-4); display: none;">
-            <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Speicherort</label>
-            <div class="wizard-path-input">
-              <input type="text" id="wizardAudioPath" readonly placeholder="Wird geladen...">
-              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBrowseAudioBtn">Ändern</button>
-            </div>
-            <p style="font-size: 0.8125rem; color: var(--text-tertiary); margin-top: var(--space-2);">
-              <strong>Mehrere Arbeitsplätze?</strong> Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\aufnahmen)
-            </p>
-          </div>
-        </div>
-
-        <div class="wizard-info">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-          </svg>
-          <p><strong>Datenschutz:</strong> Audioaufnahmen können sensible Patientendaten enthalten. Aktivieren Sie diese Option nur, wenn Sie einen sicheren Speicherort haben und die Aufnahmen wirklich benötigen.</p>
-        </div>
-      </div>
-
-      <!-- Step 6: Voice Profiles -->
-      <div class="wizard-step" data-step="6">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1544,8 +1495,8 @@
         </div>
       </div>
 
-      <!-- Step 7: Dashboard & Tray Info -->
-      <div class="wizard-step" data-step="7">
+      <!-- Step 6: Dashboard & Tray Info -->
+      <div class="wizard-step" data-step="6">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1633,8 +1584,8 @@
 
       </div>
 
-      <!-- Step 8: Complete -->
-      <div class="wizard-step" data-step="8">
+      <!-- Step 7: Complete -->
+      <div class="wizard-step" data-step="7">
         <div class="wizard-step-header">
           <div class="wizard-completion-animation">
             <div class="wizard-checkmark">

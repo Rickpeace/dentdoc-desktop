@@ -50,6 +50,7 @@ let isRecording = false;
 let isProcessing = false;
 let isEnrolling = false;
 let currentRecordingPath = null;
+let savedAudioPathInBackup = null; // Path to audio saved in "Fehlgeschlagen" folder (deleted after successful save)
 let currentEnrollmentPath = null;
 let currentEnrollmentName = null;
 let currentEnrollmentRole = null;
@@ -271,14 +272,94 @@ function sanitizeFilename(name) {
 }
 
 /**
- * Save transcript and summary to text files (one per doctor)
+ * Saves audio file immediately after recording stops (before transcription).
+ * This ensures audio is preserved even if transcription fails.
+ * @param {string} tempAudioPath - Path to temporary audio file
+ * @returns {string|null} Path where audio was saved, or null if not saved
+ */
+function saveAudioImmediately(tempAudioPath) {
+  // Always save backup to "Fehlgeschlagen" folder, regardless of settings
+  // This ensures audio is preserved if transcription fails
+  console.log('saveAudioImmediately called - tempAudioPath:', tempAudioPath);
+
+  if (!tempAudioPath) {
+    console.log('Audio save skipped - tempAudioPath is null/undefined');
+    return null;
+  }
+
+  if (!fs.existsSync(tempAudioPath)) {
+    console.log('Audio save skipped - file does not exist:', tempAudioPath);
+    return null;
+  }
+
+  const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
+  const baseFolderPath = store.get('transcriptPath') || defaultTranscriptPath;
+  console.log('Audio will be saved to base folder:', baseFolderPath);
+
+  // Extract unique job ID from temp audio filename (e.g., "recording-1705312345678.webm" -> "1705312345678")
+  const tempFilename = path.basename(tempAudioPath, path.extname(tempAudioPath));
+  const jobId = tempFilename.replace('recording-', '');
+
+  // Create filename with date and time + job ID for uniqueness
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+
+  // Save to "Fehlgeschlagen" folder (backup in case transcription fails)
+  const tempFolder = path.join(baseFolderPath, 'Fehlgeschlagen');
+  if (!fs.existsSync(tempFolder)) {
+    fs.mkdirSync(tempFolder, { recursive: true });
+    console.log('Created folder:', tempFolder);
+  }
+
+  // Get file extension from source
+  const ext = path.extname(tempAudioPath) || '.webm';
+  const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}`;
+  const audioPath = path.join(tempFolder, `${baseFilename}${ext}`);
+
+  try {
+    fs.copyFileSync(tempAudioPath, audioPath);
+    console.log('Audio saved immediately to:', audioPath);
+    savedAudioPathInBackup = audioPath; // Store for later deletion
+    return audioPath;
+  } catch (error) {
+    console.error('Failed to save audio immediately:', error);
+    return null;
+  }
+}
+
+/**
+ * Saves transcript and/or audio to the user's configured folder.
+ * Files are organized by doctor name (from speaker recognition) in subfolders.
+ * Both files share the same base filename for easy association.
  * @param {string} baseFolderPath - Base folder to save the files
  * @param {string} summary - Documentation/summary text
  * @param {string} transcript - Full transcript text
  * @param {Object} speakerMapping - Speaker mapping object
+ * @param {Object} options - Save options
+ * @param {string} options.tempAudioPath - Path to temporary audio file
+ * @param {boolean} options.saveTranscript - Whether to save transcript
+ * @param {boolean} options.saveAudio - Whether to save audio
  */
-function saveTranscriptToFile(baseFolderPath, summary, transcript, speakerMapping = null) {
-  // Create filename with date and time
+function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
+  const { tempAudioPath = null, saveTranscript = true, saveAudio = false } = options;
+
+  // Nothing to save
+  if (!saveTranscript && !saveAudio) {
+    return;
+  }
+
+  // Extract unique job ID from temp audio filename (e.g., "recording-1705312345678.webm" -> "1705312345678")
+  let jobId = Date.now().toString(); // Fallback if no temp audio path
+  if (tempAudioPath) {
+    const tempFilename = path.basename(tempAudioPath, path.extname(tempAudioPath));
+    jobId = tempFilename.replace('recording-', '');
+  }
+
+  // Create filename with date and time + job ID for uniqueness
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -294,11 +375,11 @@ function saveTranscriptToFile(baseFolderPath, summary, transcript, speakerMappin
   aerzte.forEach(name => nameParts.push(sanitizeFilename(name)));
   zfa.forEach(name => nameParts.push(sanitizeFilename(name)));
 
-  // Create filename: YYYY-MM-DD_HH-MM_[Names].txt
+  // Create base filename: YYYY-MM-DD_HH-MM_JobID_[Names]
   let filenameSuffix = nameParts.length > 0 ? nameParts.join('_') : 'Unbekannt';
-  const filename = `${year}-${month}-${day}_${hours}-${minutes}_${filenameSuffix}.txt`;
+  const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}_${filenameSuffix}`;
 
-  // Create file content
+  // Create file content for transcript
   const content = `╔════════════════════════════════════════════════════════════════════╗
 ║                          DENTDOC TRANSKRIPT                        ║
 ╚════════════════════════════════════════════════════════════════════╝
@@ -338,17 +419,51 @@ ${transcript}
     targetFolders.push(path.join(baseFolderPath, 'Ohne Zuordnung'));
   }
 
-  // Save file to each target folder
+  // Save files to each target folder
   targetFolders.forEach(folderPath => {
     // Ensure folder exists
     if (!fs.existsSync(folderPath)) {
       fs.mkdirSync(folderPath, { recursive: true });
     }
 
-    const filePath = path.join(folderPath, filename);
-    fs.writeFileSync(filePath, content, 'utf8');
-    console.log('Transcript saved to:', filePath);
+    // Save transcript if enabled
+    if (saveTranscript) {
+      const transcriptPath = path.join(folderPath, `${baseFilename}.txt`);
+      fs.writeFileSync(transcriptPath, content, 'utf8');
+      console.log('Transcript saved to:', transcriptPath);
+    }
+
+    // Save audio if enabled and source exists
+    if (saveAudio) {
+      console.log('saveAudio is true, tempAudioPath:', tempAudioPath);
+      if (tempAudioPath) {
+        console.log('tempAudioPath exists check:', fs.existsSync(tempAudioPath));
+        if (fs.existsSync(tempAudioPath)) {
+          const audioPath = path.join(folderPath, `${baseFilename}.webm`);
+          fs.copyFileSync(tempAudioPath, audioPath);
+          console.log('Audio saved to:', audioPath);
+        } else {
+          console.log('Audio file does not exist at:', tempAudioPath);
+        }
+      } else {
+        console.log('tempAudioPath is null or undefined');
+      }
+    } else {
+      console.log('saveAudio is false, skipping audio save');
+    }
   });
+
+  // Delete backup audio from "Fehlgeschlagen" folder after successful transcription
+  // This happens regardless of saveAudio setting - backup is always cleaned up on success
+  if (savedAudioPathInBackup && fs.existsSync(savedAudioPathInBackup)) {
+    try {
+      fs.unlinkSync(savedAudioPathInBackup);
+      console.log('Deleted backup audio from Fehlgeschlagen folder:', savedAudioPathInBackup);
+      savedAudioPathInBackup = null;
+    } catch (err) {
+      console.error('Failed to delete backup audio:', err);
+    }
+  }
 }
 
 function createLoginWindow() {
@@ -606,6 +721,9 @@ async function selectAndTranscribeAudioFile() {
   console.log('Selected audio file:', audioFilePath);
   debugLog(`Selected audio file: ${audioFilePath}`);
 
+  // Set currentRecordingPath so audio can be saved if keepAudio is enabled
+  currentRecordingPath = audioFilePath;
+
   // Process the selected audio file
   await processAudioFile(audioFilePath);
 }
@@ -626,31 +744,24 @@ async function processAudioFile(audioFilePath) {
 
   try {
     // Upload audio with progress tracking
-    let showServerUpload = null;
     const onProgress = (progressInfo) => {
       if (progressInfo.phase === 'upload') {
-        // Show as 0-50% (first half of total upload)
-        const scaledPercent = Math.round(progressInfo.percent / 2);
+        // Direct 0-100% display - no more confusing scaling
         updateStatusOverlay(
           'Verarbeitung...',
-          `Audio wird gesendet... ${scaledPercent}%`,
+          `Audio wird hochgeladen... ${progressInfo.percent}%`,
           'processing',
-          { step: 1, uploadProgress: scaledPercent }
+          { step: 1, uploadProgress: progressInfo.percent }
         );
-
-        // When upload to our server hits 100%, show second phase
-        if (progressInfo.percent === 100 && !showServerUpload) {
-          showServerUpload = setTimeout(() => {
-            updateStatusOverlay(
-              'Verarbeitung...',
-              'Audio wird vorbereitet...',
-              'processing',
-              { step: 1, uploadProgress: 50 }
-            );
-          }, 300);
-        }
+      } else if (progressInfo.phase === 'submit') {
+        // Backend is starting transcription
+        updateStatusOverlay(
+          'Verarbeitung...',
+          'Transkription wird gestartet...',
+          'processing',
+          { step: 1, uploadProgress: 100 }
+        );
       } else if (progressInfo.phase === 'submitted') {
-        if (showServerUpload) clearTimeout(showServerUpload);
         updateStatusOverlay(
           'Verarbeitung...',
           'Audio übermittelt',
@@ -751,6 +862,10 @@ async function processAudioFile(audioFilePath) {
       // Single Prompt V1.1: Use experimental endpoint
       updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung (V1.1)...', 'processing', { step: 4 });
       result = await apiClient.getDocumentationV1_1(transcriptionId, token);
+    } else if (docMode === 'megaprompt') {
+      // Megaprompt: 7-Step Pipeline mit paralleler Extraktion
+      updateStatusOverlay('Dokumentation wird erstellt...', 'Megaprompt-Pipeline verarbeitet (7 Schritte)...', 'processing', { step: 4 });
+      result = await apiClient.getDocumentationMegaprompt(transcriptionId, token);
     } else {
       // Single Prompt: Use standard endpoint
       updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
@@ -768,15 +883,22 @@ async function processAudioFile(audioFilePath) {
     // Copy to clipboard
     clipboard.writeText(documentation);
 
-    // Auto-save transcript if enabled
+    // Auto-save transcript and/or audio if enabled
     const autoExport = store.get('autoExport', true);
+    const keepAudio = store.get('keepAudio', false);
+    console.log('Save settings - autoExport:', autoExport, 'keepAudio:', keepAudio);
+    console.log('currentRecordingPath:', currentRecordingPath);
     const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
     const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
-    if (autoExport && finalTranscript) {
+    if ((autoExport || keepAudio) && finalTranscript) {
       try {
-        saveTranscriptToFile(transcriptPath, documentation, finalTranscript, currentSpeakerMapping);
+        saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
+          tempAudioPath: currentRecordingPath,
+          saveTranscript: autoExport,
+          saveAudio: keepAudio
+        });
       } catch (error) {
-        console.error('Failed to save transcript file:', error);
+        console.error('Failed to save recording files:', error);
       }
     }
 
@@ -826,6 +948,23 @@ async function processAudioFile(audioFilePath) {
   } catch (error) {
     console.error('Audio file processing error:', error);
     debugLog('Audio file processing error: ' + error.message);
+
+    // Only delete temporary audio for "no speech detected" error
+    // For other errors, keep the audio as backup in "Fehlgeschlagen" folder
+    if (error.message && error.message.includes('Keine Sprache erkannt')) {
+      if (savedAudioPathInBackup && fs.existsSync(savedAudioPathInBackup)) {
+        try {
+          fs.unlinkSync(savedAudioPathInBackup);
+          console.log('Deleted backup audio from Fehlgeschlagen folder (no speech detected):', savedAudioPathInBackup);
+          savedAudioPathInBackup = null;
+        } catch (err) {
+          console.error('Failed to delete temporary audio:', err);
+        }
+      }
+    } else if (savedAudioPathInBackup) {
+      console.log('Keeping backup audio in Fehlgeschlagen folder:', savedAudioPathInBackup);
+      savedAudioPathInBackup = null; // Reset variable but keep file
+    }
 
     isProcessing = false;
     updateTrayMenu();
@@ -945,6 +1084,9 @@ async function stopRecording() {
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(iconPath);
+
+    // Save audio immediately (before transcription) so it's preserved if something fails
+    saveAudioImmediately(currentRecordingPath);
 
     // Process the recorded audio file (same as manual file upload)
     await processAudioFile(currentRecordingPath);
@@ -1900,12 +2042,10 @@ ipcMain.handle('get-settings', async () => {
   const documentsPath = app.getPath('documents');
   const defaultTranscriptPath = path.join(documentsPath, 'DentDoc', 'Transkripte');
   const defaultProfilesPath = path.join(documentsPath, 'DentDoc', 'Stimmprofile');
-  const defaultRecordingsPath = path.join(app.getPath('temp'), 'dentdoc');
 
   // Get stored paths - use null coalescing to preserve empty strings if intentionally set
   const storedTranscriptPath = store.get('transcriptPath');
   const storedProfilesPath = store.get('profilesPath');
-  const storedRecordingsPath = store.get('recordingsPath');
 
   console.log('get-settings - stored transcriptPath:', storedTranscriptPath);
   console.log('get-settings - stored profilesPath:', storedProfilesPath);
@@ -1915,7 +2055,6 @@ ipcMain.handle('get-settings', async () => {
     microphoneId: store.get('microphoneId') || null,
     transcriptPath: storedTranscriptPath !== undefined && storedTranscriptPath !== '' ? storedTranscriptPath : defaultTranscriptPath,
     profilesPath: storedProfilesPath !== undefined && storedProfilesPath !== '' ? storedProfilesPath : defaultProfilesPath,
-    recordingsPath: storedRecordingsPath !== undefined && storedRecordingsPath !== '' ? storedRecordingsPath : defaultRecordingsPath,
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', false),

@@ -9,7 +9,7 @@
 class SetupWizard {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 9; // 0-8
+    this.totalSteps = 8; // 0-7 (removed separate audio step)
     this.settings = {
       microphoneId: null,
       shortcut: 'F9',
@@ -17,7 +17,6 @@ class SetupWizard {
       autoExport: true,
       transcriptPath: '',
       keepAudio: false,
-      recordingsPath: '',
       profilesPath: ''
     };
 
@@ -45,7 +44,6 @@ class SetupWizard {
       const settings = await ipcRenderer.invoke('get-settings');
       this.settings.shortcut = settings.shortcut || 'F9';
       this.settings.transcriptPath = settings.transcriptPath || '';
-      this.settings.recordingsPath = settings.recordingsPath || '';
       this.settings.profilesPath = settings.profilesPath || '';
       this.settings.microphoneId = settings.microphoneId || null;
       this.settings.docMode = settings.docMode || 'single';
@@ -62,16 +60,11 @@ class SetupWizard {
 
   updatePathDisplays() {
     const transcriptPathEl = document.getElementById('wizardTranscriptPath');
-    const audioPathEl = document.getElementById('wizardAudioPath');
     const profilesPathEl = document.getElementById('wizardProfilesPath');
 
     if (transcriptPathEl) {
       transcriptPathEl.value = this.settings.transcriptPath;
       transcriptPathEl.placeholder = this.settings.transcriptPath || 'Kein Pfad gesetzt';
-    }
-    if (audioPathEl) {
-      audioPathEl.value = this.settings.recordingsPath;
-      audioPathEl.placeholder = this.settings.recordingsPath || 'Kein Pfad gesetzt';
     }
     if (profilesPathEl) {
       profilesPathEl.value = this.settings.profilesPath;
@@ -158,8 +151,6 @@ class SetupWizard {
       const toggle = document.getElementById('wizardAudioToggle');
       toggle.classList.toggle('active');
       this.settings.keepAudio = toggle.classList.contains('active');
-      document.getElementById('wizardAudioPathSection').style.display =
-        this.settings.keepAudio ? 'block' : 'none';
     });
 
     // Path buttons
@@ -171,19 +162,17 @@ class SetupWizard {
       }
     });
 
-    document.getElementById('wizardBrowseAudioBtn')?.addEventListener('click', async () => {
-      const result = await ipcRenderer.invoke('select-folder');
-      if (result) {
-        this.settings.recordingsPath = result;
-        document.getElementById('wizardAudioPath').value = result;
-      }
-    });
-
     document.getElementById('wizardBrowseProfilesBtn')?.addEventListener('click', async () => {
       const result = await ipcRenderer.invoke('select-folder');
       if (result) {
         this.settings.profilesPath = result;
         document.getElementById('wizardProfilesPath').value = result;
+
+        // Save the new path immediately so get-voice-profiles can use it
+        await ipcRenderer.invoke('save-settings', { profilesPath: result });
+
+        // Reload existing profiles from the new path
+        await this.loadExistingProfiles();
       }
     });
 
@@ -738,7 +727,6 @@ class SetupWizard {
         autoExport: this.settings.autoExport,
         transcriptPath: this.settings.transcriptPath,
         keepAudio: this.settings.keepAudio,
-        recordingsPath: this.settings.recordingsPath,
         profilesPath: this.settings.profilesPath
       });
 
@@ -786,7 +774,6 @@ async function restartSetupWizard() {
         autoExport: true,
         transcriptPath: '',
         keepAudio: false,
-        recordingsPath: '',
         profilesPath: ''
       };
 
@@ -794,7 +781,6 @@ async function restartSetupWizard() {
       const settings = await ipcRenderer.invoke('get-settings');
       window.setupWizard.settings.shortcut = settings.shortcut || 'F9';
       window.setupWizard.settings.transcriptPath = settings.transcriptPath || '';
-      window.setupWizard.settings.recordingsPath = settings.recordingsPath || '';
       window.setupWizard.settings.profilesPath = settings.profilesPath || '';
       window.setupWizard.settings.microphoneId = settings.microphoneId || null;
       window.setupWizard.settings.docMode = settings.docMode || 'single';
@@ -824,12 +810,8 @@ async function restartSetupWizard() {
       }
 
       const transcriptPathSection = document.getElementById('wizardTranscriptPathSection');
-      const audioPathSection = document.getElementById('wizardAudioPathSection');
       if (transcriptPathSection) {
         transcriptPathSection.style.display = window.setupWizard.settings.autoExport ? 'block' : 'none';
-      }
-      if (audioPathSection) {
-        audioPathSection.style.display = window.setupWizard.settings.keepAudio ? 'block' : 'none';
       }
 
       // Show wizard at step 0

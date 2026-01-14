@@ -50,11 +50,111 @@ BEI MULTI AGEIN WENN KEINE NAHME STEHT IM TRANSKRIPT (NULL)
 ---
 einrichtung stimmprofuil updaten ??? man sieht noch keine vorhanden nach ordenr wechsel....
 
+
+
+
 -------
-speicherlogik transktip und autio in einem ordern ......
 
-----
+-------
+enn upload scheitert bei vercel keine fehlermelung
+------
 
-vercel nur 5 mb !
+cleanup tsten für audio
+------
 
------
+
+
+----!!!!!!!!!!!!!!!
+vercel nur 5 mb ! upload
+
+JETZT DEKSTOP APP LÄDT DIREKT HOCH .. API KEY OFFEN GELEGT !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+LÖSUNG. FÜR SPÄTER... JETZT ERSTMALL PRROF OF CONCEPT MIT DER DESKTOP APP
+
+
+✅ Ich würde für DEINEN Fall nehmen: Railway + Node.js + Fastify
+
+Und zwar genau so 👇
+
+🥇 Warum Railway?
+
+Schnellster Weg von 0 → läuft
+
+Kein Stress mit Networking, SSL, Ports
+
+Perfekt für kleine Streaming-Proxys
+
+Kosten: ~1–3 € / Monat
+
+Kein Cold-Start-Drama
+
+➡️ Für „ein kleiner, stabiler Upload-Rohr-Service“ ideal.
+
+(Alternative wäre Fly.io, aber das ist mehr Ops-Aufwand.)
+
+🥇 Warum Fastify (nicht Express)?
+
+Sehr gut für Streams
+
+Weniger Overhead
+
+Saubere Error-Handling
+
+Zukunftssicher
+
+Express geht auch – aber Fastify ist cleaner für genau diesen Use-Case.
+
+🧱 Empfohlener Mini-Stack
+
+Runtime
+
+Node.js 18+
+
+Framework
+
+Fastify
+
+HTTP
+
+Native Streams (req.raw → fetch body)
+
+Keine DB
+
+❌ keine Speicherung
+
+❌ keine Logs
+
+❌ kein Temp-Folder
+
+🎯 Ziel-Architektur (minimal)
+Desktop-App
+  └─► Railway Upload-Service (/upload)
+         └─► AssemblyAI /v2/upload (STREAM)
+                ◄─ upload_url
+Desktop-App
+  └─► Vercel (/start)
+
+
+➡️ Ein Upload. Kein Double-Upload. DSGVO-sauber.
+
+🔒 Sicherheit (realistisch, nicht overkill)
+
+Header:
+
+Authorization: Bearer <DentDoc-Token>
+
+Server:
+
+prüft Token (leicht)
+
+Rate-Limit (optional später)
+
+🧠 Warum ich NICHT nehmen würde
+
+❌ Vercel (Body-Limit)
+
+❌ S3 + Presigned URLs (AssemblyAI unterstützt das nicht)
+
+❌ API-Key im Desktop (nur Notlösung)
+
+❌ Kubernetes / Cloud Run (Overkill)
