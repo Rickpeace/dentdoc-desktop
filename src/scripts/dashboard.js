@@ -19,6 +19,21 @@ function switchView(viewName) {
   ipcRenderer.invoke('cleanup-mic-test');
   document.getElementById('settingsMicPlayback').style.display = 'none';
 
+  // Cancel any running voice enrollment when leaving profiles view
+  if (profilesIsRecording) {
+    console.log('Cancelling voice enrollment - user navigated away');
+    profilesCancelEnrollment();
+  }
+
+  // Cancel shortcut recording when leaving settings view
+  if (settingsIsRecordingShortcut) {
+    settingsIsRecordingShortcut = false;
+    const shortcutDisplay = document.getElementById('settingsShortcutDisplay');
+    if (shortcutDisplay) {
+      shortcutDisplay.classList.remove('recording');
+    }
+  }
+
   // Update nav items
   navItems.forEach(item => {
     item.classList.remove('active');
@@ -95,6 +110,108 @@ ipcRenderer.on('recording-completed', async () => {
   console.log('Recording completed, refreshing dashboard...');
   await loadHomeStats();
   await loadSubscriptionStatus(); // Refresh trial minutes in sidebar
+});
+
+// ===== F9 Recording Audio Monitoring =====
+// Real audio level monitoring for status overlay during F9 recording
+// FFmpeg records audio, WebAudio monitors levels, IPC bridges them
+// IMPORTANT: Uses setInterval instead of requestAnimationFrame because
+// requestAnimationFrame pauses when window is in background!
+let f9MediaStream = null;
+let f9AudioContext = null;
+let f9Analyser = null;
+let f9LevelInterval = null;
+
+async function startF9AudioMonitoring(microphoneId) {
+  // Stop any existing monitoring first
+  stopF9AudioMonitoring();
+
+  try {
+    console.log('F9 audio monitoring: starting with microphoneId:', microphoneId);
+
+    // Build constraints - same mic as F9 recording for accurate levels
+    const constraints = microphoneId ? {
+      audio: {
+        deviceId: { ideal: microphoneId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    } : {
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    };
+
+    f9MediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    console.log('F9 audio monitoring: getUserMedia success');
+
+    f9AudioContext = new AudioContext();
+    f9Analyser = f9AudioContext.createAnalyser();
+    f9Analyser.fftSize = 2048;  // Larger for better time-domain resolution
+    f9Analyser.smoothingTimeConstant = 0;  // NO smoothing
+
+    const source = f9AudioContext.createMediaStreamSource(f9MediaStream);
+    source.connect(f9Analyser);
+
+    const bufferLength = f9Analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+
+    // Use setInterval (not requestAnimationFrame) so it runs even when window is in background
+    f9LevelInterval = setInterval(() => {
+      if (!f9Analyser) return;
+
+      // Use time-domain data (raw waveform) - NO FFT smoothing
+      f9Analyser.getByteTimeDomainData(dataArray);
+
+      // Find peak amplitude from center (128 = silence)
+      let maxDeviation = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const deviation = Math.abs(dataArray[i] - 128);
+        if (deviation > maxDeviation) maxDeviation = deviation;
+      }
+      // Normalize with boost: normal speech should fill most of the range
+      const raw = maxDeviation / 128;
+      const normalized = Math.min(1, raw * 5);  // 5x boost
+
+      // Send to main process -> status overlay
+      ipcRenderer.send('audio-level-update', normalized);
+    }, 16); // ~60 FPS for instant response
+
+    console.log('F9 audio monitoring started successfully');
+  } catch (error) {
+    console.error('F9 audio monitoring error:', error);
+  }
+}
+
+function stopF9AudioMonitoring() {
+  if (f9LevelInterval) {
+    clearInterval(f9LevelInterval);
+    f9LevelInterval = null;
+  }
+  if (f9MediaStream) {
+    f9MediaStream.getTracks().forEach(track => track.stop());
+    f9MediaStream = null;
+  }
+  if (f9AudioContext) {
+    f9AudioContext.close();
+    f9AudioContext = null;
+    f9Analyser = null;
+  }
+  console.log('F9 audio monitoring stopped');
+}
+
+// Listen for F9 recording start/stop from main process
+ipcRenderer.on('recording-started', async (event, options) => {
+  console.log('F9 recording started, starting audio monitoring...');
+  await startF9AudioMonitoring(options?.microphoneId);
+});
+
+ipcRenderer.on('recording-stopped', () => {
+  console.log('F9 recording stopped, stopping audio monitoring...');
+  stopF9AudioMonitoring();
 });
 
 // Listen for subscription status refresh (triggered from main.js on window focus)
@@ -513,6 +630,74 @@ function settingsHideStatus(element) {
 }
 
 // Settings Mic Test - uses real recorder logic for realistic testing
+// Audio monitoring variables
+let settingsMicAnimationFrameId = null;
+
+async function settingsStartAudioMonitoring() {
+  try {
+    // Use selected mic or default
+    const constraints = settingsSelectedMicId ? {
+      audio: {
+        deviceId: { ideal: settingsSelectedMicId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    } : {
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    };
+
+    settingsMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    settingsAudioContext = new AudioContext();
+    settingsAnalyser = settingsAudioContext.createAnalyser();
+    settingsAnalyser.fftSize = 256;
+
+    const source = settingsAudioContext.createMediaStreamSource(settingsMediaStream);
+    source.connect(settingsAnalyser);
+
+    const bufferLength = settingsAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function updateLevel() {
+      if (!settingsAnalyser || !settingsIsTesting) return;
+
+      settingsAnalyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / bufferLength;
+      const normalized = Math.min(average / 128 * 100, 100);
+      document.getElementById('settingsMicLevelBar').style.width = normalized + '%';
+      settingsMicAnimationFrameId = requestAnimationFrame(updateLevel);
+    }
+
+    updateLevel();
+  } catch (error) {
+    console.error('Settings audio monitoring error:', error);
+  }
+}
+
+function settingsStopAudioMonitoring() {
+  if (settingsMicAnimationFrameId) {
+    cancelAnimationFrame(settingsMicAnimationFrameId);
+    settingsMicAnimationFrameId = null;
+  }
+  if (settingsMediaStream) {
+    settingsMediaStream.getTracks().forEach(track => track.stop());
+    settingsMediaStream = null;
+  }
+  if (settingsAudioContext) {
+    settingsAudioContext.close();
+    settingsAudioContext = null;
+    settingsAnalyser = null;
+  }
+}
+
 document.getElementById('settingsTestMicBtn').addEventListener('click', async () => {
   if (settingsIsTesting) {
     // Manual stop - just wait for auto-stop
@@ -532,25 +717,18 @@ document.getElementById('settingsTestMicBtn').addEventListener('click', async ()
 
     settingsShowStatus(document.getElementById('settingsMicStatus'), 'Aufnahme läuft... Sprechen Sie ins Mikrofon (5 Sek.)', 'info');
 
-    // Start real recording via IPC
+    // Start real audio monitoring (local, like Stimmprofile)
+    await settingsStartAudioMonitoring();
+
+    // Start real recording via IPC (FFmpeg)
     const startResult = await ipcRenderer.invoke('start-mic-test', settingsSelectedMicId);
     if (!startResult.success) {
       throw new Error(startResult.error);
     }
 
-    // Listen for audio level updates from recorder
-    const levelHandler = (event, level) => {
-      if (settingsIsTesting) {
-        const percent = Math.min(100, level * 100);
-        document.getElementById('settingsMicLevelBar').style.width = percent + '%';
-      }
-    };
-    ipcRenderer.on('audio-level-update', levelHandler);
-
     // Auto-stop after 5 seconds
     settingsMicTestTimeout = setTimeout(async () => {
       if (settingsIsTesting) {
-        ipcRenderer.removeListener('audio-level-update', levelHandler);
         await settingsStopMicTest();
       }
     }, 5000);
@@ -564,6 +742,9 @@ document.getElementById('settingsTestMicBtn').addEventListener('click', async ()
 
 async function settingsStopMicTest() {
   settingsIsTesting = false;
+
+  // Stop audio monitoring (local getUserMedia stream)
+  settingsStopAudioMonitoring();
 
   // Clear auto-stop timer
   if (settingsMicTestTimeout) {
@@ -926,7 +1107,12 @@ async function loadProfiles() {
   profileContainer.querySelectorAll('.btn-delete').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.profileId;
-      if (!confirm('Möchten Sie dieses Stimmprofil wirklich löschen?')) return;
+
+      // Use IPC confirm dialog instead of browser confirm() to avoid focus issues
+      const confirmed = await ipcRenderer.invoke('confirm-delete-profile');
+      if (!confirmed) {
+        return;
+      }
 
       try {
         await ipcRenderer.invoke('delete-voice-profile', id);
@@ -2248,7 +2434,8 @@ async function saveTextbaustein() {
 }
 
 async function deleteTextbaustein(key) {
-  if (!confirm(`Textbaustein "${key}" wirklich löschen?`)) {
+  const confirmed = await ipcRenderer.invoke('confirm-delete-textbaustein', key);
+  if (!confirmed) {
     return;
   }
 
@@ -2276,7 +2463,8 @@ async function deleteTextbaustein(key) {
 }
 
 async function resetTextbausteine() {
-  if (!confirm('Alle Textbausteine auf Standard zurücksetzen? Dies kann nicht rückgängig gemacht werden.')) {
+  const confirmed = await ipcRenderer.invoke('confirm-reset-textbausteine');
+  if (!confirmed) {
     return;
   }
 
@@ -2570,7 +2758,8 @@ async function saveThema() {
 }
 
 async function deleteThema(themaName) {
-  if (!confirm(`Thema "${themaName}" wirklich löschen?`)) {
+  const confirmed = await ipcRenderer.invoke('confirm-delete-thema', themaName);
+  if (!confirmed) {
     return;
   }
 
@@ -2601,7 +2790,8 @@ async function deleteThema(themaName) {
 }
 
 async function resetThemen() {
-  if (!confirm('Alle Themen auf Standard zurücksetzen? Dies kann nicht rückgängig gemacht werden.')) {
+  const confirmed = await ipcRenderer.invoke('confirm-reset-themen');
+  if (!confirmed) {
     return;
   }
 

@@ -46,6 +46,10 @@ function convertToWav16k(inputPath, outputPath = null) {
       .audioFrequency(16000)  // 16kHz sample rate
       .audioChannels(1)        // Mono
       .audioCodec('pcm_s16le') // 16-bit PCM
+      .audioFilters([
+        'highpass=f=90',        // Remove rumble (chair, footsteps) below 90Hz
+        'alimiter=limit=0.97'   // Prevent clipping at -0.26 dBFS
+      ])
       .format('wav')
       .on('start', (commandLine) => {
         console.log('FFmpeg command:', commandLine);

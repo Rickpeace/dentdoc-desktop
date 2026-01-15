@@ -9,6 +9,9 @@
  * - No USB hub compatibility issues
  * - Direct WAV output (no conversion needed)
  * - Windows device names instead of browser device IDs
+ *
+ * IMPORTANT: Uses a state machine to ensure only ONE recording at a time.
+ * States: idle -> starting -> recording -> stopping -> idle
  */
 
 const { spawn } = require('child_process');
@@ -49,9 +52,24 @@ if (fs.existsSync(bundledFFmpegPathPacked)) {
   }
 }
 
+// ============================================================================
+// STATE MACHINE - ensures only ONE recording at a time
+// ============================================================================
+// States: 'idle' | 'starting' | 'recording' | 'stopping'
+let recordingState = 'idle';
 let ffmpegProcess = null;
 let currentFilePath = null;
-let audioLevelInterval = null;
+
+// Store the current audio backend for the session
+let currentAudioBackend = 'dshow';  // Default to DirectShow
+
+/**
+ * Get current recording state (for debugging/UI)
+ * @returns {string} Current state
+ */
+function getState() {
+  return recordingState;
+}
 
 /**
  * List all Windows audio input devices using both WASAPI and DirectShow
@@ -169,17 +187,27 @@ function listDevicesWithBackend(backend) {
 }
 
 /**
- * Clean up old recording files
+ * Clean up old recording files (only when state is idle!)
  * @param {string} tempDir - Directory to clean
  */
 function cleanupOldRecordings(tempDir) {
+  // SAFETY: Only cleanup when not recording
+  if (recordingState !== 'idle') {
+    console.warn('cleanupOldRecordings skipped - recording in progress, state:', recordingState);
+    return;
+  }
+
   try {
     const files = fs.readdirSync(tempDir);
     for (const file of files) {
       if (file.startsWith('recording-') && (file.endsWith('.webm') || file.endsWith('.wav'))) {
         const filePath = path.join(tempDir, file);
-        fs.unlinkSync(filePath);
-        console.log('Cleaned up old recording:', filePath);
+        try {
+          fs.unlinkSync(filePath);
+          console.log('Cleaned up old recording:', filePath);
+        } catch (e) {
+          console.warn('Could not delete file (may be in use):', filePath, e.message);
+        }
       }
     }
   } catch (error) {
@@ -187,27 +215,45 @@ function cleanupOldRecordings(tempDir) {
   }
 }
 
-// Store the current audio backend for the session
-let currentAudioBackend = 'wasapi';  // Default to WASAPI (supports wireless headsets)
-
 /**
  * Start audio recording using FFmpeg with WASAPI (preferred) or DirectShow fallback
+ *
+ * IMPORTANT: This function will REJECT if a recording is already in progress.
+ * The caller must call stopRecording() first and wait for it to complete.
+ *
  * @param {boolean} deleteAudio - Whether to delete old recordings first
  * @param {string} deviceName - Windows audio device name (optional)
  * @returns {Promise<string>} Path to the output WAV file
  */
 function startRecording(deleteAudio = false, deviceName = null) {
   return new Promise(async (resolve, reject) => {
+    // ========================================================================
+    // STATE GUARD - Only start if idle
+    // ========================================================================
+    if (recordingState !== 'idle') {
+      console.warn('startRecording BLOCKED - state is:', recordingState);
+      reject(new Error(`Aufnahme nicht möglich - Status: ${recordingState}. Bitte warten Sie bis die aktuelle Aufnahme beendet ist.`));
+      return;
+    }
+
     try {
+      // Transition to 'starting' state
+      recordingState = 'starting';
+      console.log('[Recorder] idle -> starting');
+
       // Create temp directory if it doesn't exist
       const tempDir = path.join(app.getPath('temp'), 'dentdoc');
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
 
-      // Clean up previous recordings if requested
+      // Clean up previous recordings if requested (safe because state is 'starting')
       if (deleteAudio) {
+        // Temporarily set to idle for cleanup, then back to starting
+        const prevState = recordingState;
+        recordingState = 'idle';
         cleanupOldRecordings(tempDir);
+        recordingState = prevState;
       }
 
       // Generate unique filename - directly as WAV!
@@ -215,94 +261,147 @@ function startRecording(deleteAudio = false, deviceName = null) {
       currentFilePath = path.join(tempDir, `recording-${timestamp}.wav`);
 
       // Get device and backend info
-      let audioDevice;
-      let backend = 'wasapi';  // Default to WASAPI (supports wireless headsets)
+      const devices = await listAudioDevices();
+      if (devices.length === 0) {
+        recordingState = 'idle';
+        throw new Error('Kein Mikrofon gefunden. Bitte schließen Sie ein Mikrofon an.');
+      }
 
-      if (deviceName) {
-        audioDevice = deviceName;
-        // Find the backend for this device
-        const devices = await listAudioDevices();
-        const device = devices.find(d => d.name === deviceName);
-        if (device && device.backend) {
-          backend = device.backend;
-        }
+      let audioDevice;
+      let backend;
+
+      // Try to find matching device if deviceName was provided
+      const matchedDevice = deviceName
+        ? devices.find(d => d.name === deviceName || d.id === deviceName)
+        : null;
+
+      if (matchedDevice) {
+        audioDevice = matchedDevice.name;
+        backend = matchedDevice.backend;
+        console.log('Using matched audio device:', audioDevice, 'backend:', backend);
       } else {
-        // Use default audio device
-        const devices = await listAudioDevices();
-        if (devices.length === 0) {
-          throw new Error('Kein Mikrofon gefunden. Bitte schließen Sie ein Mikrofon an.');
-        }
+        // Use first available device (default)
         audioDevice = devices[0].name;
-        backend = devices[0].backend || 'wasapi';
+        backend = devices[0].backend;
         console.log('Using default audio device:', audioDevice, 'backend:', backend);
       }
 
       currentAudioBackend = backend;
 
-      // Build full command as string for Windows cmd.exe
-      // Use WASAPI for wireless headsets, DirectShow as fallback
-      // WASAPI: -f wasapi -i audio="Device Name"
-      // DirectShow: -f dshow -i audio="Device Name"
-      const fullCommand = `"${ffmpegPath}" -f ${backend} -i audio="${audioDevice}" -ar 16000 -ac 1 -acodec pcm_s16le -y "${currentFilePath}"`;
+      // Build FFmpeg arguments as array (avoids cmd.exe quote escaping issues)
+      // Audio filters: highpass removes rumble (chair, footsteps), alimiter prevents clipping
+      const ffmpegArgs = [
+        '-f', backend,
+        '-i', `audio=${audioDevice}`,
+        '-ar', '16000',
+        '-ac', '1',
+        '-af', 'highpass=f=90,alimiter=limit=0.97',
+        '-acodec', 'pcm_s16le',
+        '-y',
+        currentFilePath
+      ];
 
-      console.log('Starting FFmpeg recording:', fullCommand);
+      console.log('Starting FFmpeg recording:', ffmpegPath, ffmpegArgs.join(' '));
       console.log('Audio backend:', backend);
 
-      // Use spawn with cmd.exe /c to run the full command string
-      // This properly handles Windows device names with special characters
-      ffmpegProcess = spawn('cmd.exe', ['/c', fullCommand]);
+      // Spawn FFmpeg directly (not via cmd.exe to avoid quote issues)
+      ffmpegProcess = spawn(ffmpegPath, ffmpegArgs);
 
       let started = false;
+      let startTimeout = null;
 
+      // ======================================================================
+      // EVENT: FFmpeg successfully spawned
+      // ======================================================================
+      ffmpegProcess.once('spawn', () => {
+        console.log('FFmpeg process spawned');
+      });
+
+      // ======================================================================
+      // EVENT: FFmpeg stderr output (progress info)
+      // ======================================================================
       ffmpegProcess.stderr.on('data', (data) => {
         const output = data.toString();
+        console.log('FFmpeg output:', output.trim());
 
         // FFmpeg outputs progress info to stderr
         if (output.includes('size=') || output.includes('time=')) {
           if (!started) {
             started = true;
-            console.log('Recording started:', currentFilePath);
+            if (startTimeout) clearTimeout(startTimeout);
+
+            // Transition to 'recording' state
+            recordingState = 'recording';
+            console.log('[Recorder] starting -> recording');
+            console.log('[Recorder] Recording started:', currentFilePath);
+
+            // Audio level monitoring is handled by Dashboard via getUserMedia + WebAudio API
+            // Dashboard sends levels to main process via IPC, which forwards to status overlay
+
             resolve(currentFilePath);
           }
-
-          // Parse audio level for VU meter (optional, basic implementation)
-          // FFmpeg doesn't directly output levels, but we can estimate from activity
         }
 
-        // Log errors
-        if (output.includes('Error') || output.includes('error')) {
+        // Log errors explicitly
+        if (output.includes('Error') || output.includes('error') || output.includes('Could not')) {
           console.error('FFmpeg error:', output);
         }
       });
 
+      // ======================================================================
+      // EVENT: FFmpeg process error
+      // ======================================================================
       ffmpegProcess.on('error', (err) => {
         console.error('FFmpeg process error:', err);
+        if (startTimeout) clearTimeout(startTimeout);
         ffmpegProcess = null;
+        recordingState = 'idle';
+        console.log('[Recorder] -> idle (error)');
+
         if (!started) {
           reject(new Error(`Aufnahme konnte nicht gestartet werden: ${err.message}`));
         }
       });
 
-      ffmpegProcess.on('close', (code) => {
+      // ======================================================================
+      // EVENT: FFmpeg process closed
+      // ======================================================================
+      ffmpegProcess.once('close', (code) => {
         console.log('FFmpeg process closed with code:', code);
+        if (startTimeout) clearTimeout(startTimeout);
         ffmpegProcess = null;
-        stopAudioLevelSimulation();
+
+        // Only transition to idle if we're not already idle
+        // (stopRecording handles its own state transition)
+        if (recordingState !== 'idle') {
+          recordingState = 'idle';
+          console.log('[Recorder] -> idle (process closed)');
+        }
       });
 
-      // Start simulated audio level updates (since FFmpeg doesn't provide real-time levels easily)
-      startAudioLevelSimulation();
-
-      // Timeout - if FFmpeg doesn't start within 5 seconds, something is wrong
-      setTimeout(() => {
-        if (!started && ffmpegProcess) {
-          console.log('Recording assumed started (timeout fallback)');
+      // ======================================================================
+      // TIMEOUT: Fallback if FFmpeg doesn't report progress
+      // ======================================================================
+      startTimeout = setTimeout(() => {
+        // Also abort if stopRecording() was called during startup
+        if (recordingState === 'stopping' || recordingState === 'idle') {
+          console.log('[Recorder] startTimeout aborted - state changed to:', recordingState);
+          return;
+        }
+        if (!started && ffmpegProcess && recordingState === 'starting') {
+          console.warn('[Recorder] FFmpeg produced no progress output, using timeout fallback');
           started = true;
+          recordingState = 'recording';
+          console.log('[Recorder] starting -> recording (timeout)');
+          // Audio level monitoring handled by Dashboard
           resolve(currentFilePath);
         }
       }, 2000);
 
     } catch (error) {
       console.error('Start recording error:', error);
+      recordingState = 'idle';
+      console.log('[Recorder] -> idle (catch)');
       reject(error);
     }
   });
@@ -310,94 +409,190 @@ function startRecording(deleteAudio = false, deviceName = null) {
 
 /**
  * Stop the current recording
+ *
+ * IMPORTANT: This is the ONLY place where FFmpeg should be stopped.
+ * Uses graceful shutdown: 'q' -> SIGTERM -> SIGKILL
+ *
  * @returns {Promise<string>} Path to the recorded WAV file
  */
 function stopRecording() {
   return new Promise((resolve, reject) => {
-    stopAudioLevelSimulation();
+    // ========================================================================
+    // STATE GUARD - Only stop if recording
+    // ========================================================================
+    if (recordingState !== 'recording') {
+      console.warn('stopRecording IGNORED - state is:', recordingState);
 
-    if (!ffmpegProcess) {
-      reject(new Error('Keine aktive Aufnahme'));
+      // Special case: If there's a file from a previous recording, return it
+      if (currentFilePath && fs.existsSync(currentFilePath)) {
+        console.log('Returning existing file:', currentFilePath);
+        resolve(currentFilePath);
+        return;
+      }
+
+      reject(new Error(`Keine aktive Aufnahme (Status: ${recordingState})`));
       return;
     }
 
+    // Transition to 'stopping' state
+    recordingState = 'stopping';
+    console.log('[Recorder] recording -> stopping');
+
     const filePath = currentFilePath;
+    const process = ffmpegProcess;
+    let timeoutId = null;
+    let secondTimeoutId = null;
+    let resolved = false;
 
-    // Send 'q' to FFmpeg to stop recording gracefully
-    ffmpegProcess.stdin.write('q');
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (secondTimeoutId) clearTimeout(secondTimeoutId);
+    };
 
-    const timeout = setTimeout(() => {
-      // Force kill if FFmpeg doesn't stop gracefully
-      if (ffmpegProcess) {
-        console.log('Force killing FFmpeg process');
-        ffmpegProcess.kill('SIGKILL');
-        ffmpegProcess = null;
+    const resolveOnce = (result) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      // Note: state transition to 'idle' happens in 'close' event
+      resolve(result);
+    };
 
-        // Check if file exists and has content
-        if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
-          resolve(filePath);
-        } else {
-          reject(new Error('Aufnahme fehlgeschlagen - keine Audiodaten'));
+    const rejectOnce = (error) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      recordingState = 'idle';
+      console.log('[Recorder] stopping -> idle (reject)');
+      reject(error);
+    };
+
+    // ========================================================================
+    // STEP 1: Send 'q' to FFmpeg (graceful stop)
+    // ========================================================================
+    try {
+      console.log('Sending quit signal to FFmpeg...');
+      process.stdin.write('q');
+    } catch (e) {
+      console.warn('Could not send quit signal to FFmpeg:', e.message);
+    }
+
+    // ========================================================================
+    // STEP 2: After 3 seconds, send SIGTERM
+    // ========================================================================
+    timeoutId = setTimeout(() => {
+      if (process && !resolved) {
+        console.log('FFmpeg not responding to quit, sending SIGTERM');
+        try {
+          process.kill('SIGTERM');
+        } catch (e) {
+          console.warn('Could not send SIGTERM:', e.message);
         }
+
+        // ==================================================================
+        // STEP 3: After 2 more seconds, send SIGKILL
+        // ==================================================================
+        secondTimeoutId = setTimeout(() => {
+          if (process && !resolved) {
+            console.log('FFmpeg still running, force killing');
+            try {
+              process.kill('SIGKILL');
+            } catch (e) {
+              console.warn('Could not send SIGKILL:', e.message);
+            }
+
+            // Force resolve with file if it exists
+            recordingState = 'idle';
+            console.log('[Recorder] stopping -> idle (force kill)');
+
+            if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+              resolveOnce(filePath);
+            } else {
+              rejectOnce(new Error('Aufnahme fehlgeschlagen'));
+            }
+          }
+        }, 2000);
       }
     }, 3000);
 
-    ffmpegProcess.on('close', () => {
-      clearTimeout(timeout);
+    // ========================================================================
+    // EVENT: FFmpeg process closed
+    // ========================================================================
+    process.once('close', () => {
+      console.log('FFmpeg process closed during stop');
       ffmpegProcess = null;
+      recordingState = 'idle';
+      console.log('[Recorder] stopping -> idle (close)');
 
       // Verify the file exists and has content
       if (fs.existsSync(filePath)) {
         const stats = fs.statSync(filePath);
-        console.log('Recording saved:', filePath, 'Size:', stats.size, 'bytes');
+        console.log('[Recorder] Recording saved:', filePath, 'Size:', stats.size, 'bytes');
 
         if (stats.size > 0) {
-          resolve(filePath);
+          resolveOnce(filePath);
         } else {
-          reject(new Error('Aufnahme ist leer - bitte Mikrofon überprüfen'));
+          rejectOnce(new Error('Aufnahme ist leer - bitte Mikrofon überprüfen'));
         }
       } else {
-        reject(new Error('Aufnahme-Datei nicht gefunden'));
+        rejectOnce(new Error('Aufnahme-Datei nicht gefunden'));
       }
     });
   });
 }
 
 /**
- * Start simulated audio level updates
- * Since FFmpeg doesn't easily provide real-time audio levels,
- * we simulate activity to keep the UI responsive
+ * Force stop any running recording (emergency use only!)
+ *
+ * WARNING: This bypasses the normal state machine and should ONLY be used
+ * when stopRecording() fails or hangs. Normal code should NEVER call this.
+ *
+ * Use cases:
+ * - stopRecording() threw an error
+ * - stopRecording() is stuck (timeout)
+ * - App is shutting down and needs to cleanup
+ *
+ * @returns {Promise<void>}
+ * @internal
  */
-function startAudioLevelSimulation() {
-  // Send periodic audio level updates
-  // In a future version, we could parse FFmpeg's output more sophisticatedly
-  // or use a separate audio analysis process
+async function forceStop() {
+  console.warn('[Recorder] FORCE STOP called - emergency cleanup');
 
-  let phase = 0;
-  audioLevelInterval = setInterval(() => {
-    // Generate a somewhat natural-looking audio level pattern
-    // This is just for visual feedback - not actual audio levels
-    const baseLevel = 0.15 + Math.sin(phase) * 0.1;
-    const noise = (Math.random() - 0.5) * 0.15;
-    const level = Math.max(0, Math.min(1, baseLevel + noise));
+  if (ffmpegProcess) {
+    try {
+      ffmpegProcess.stdin.write('q');
+    } catch (e) {}
 
-    // Emit to any listeners
-    if (global.statusOverlay) {
-      global.statusOverlay.webContents.send('audio-level', level);
-    }
+    try {
+      ffmpegProcess.kill('SIGTERM');
+    } catch (e) {}
 
-    phase += 0.3;
-  }, 100);
-}
+    // Wait for process to close
+    await new Promise(resolve => {
+      const timeout = setTimeout(() => {
+        if (ffmpegProcess) {
+          try {
+            ffmpegProcess.kill('SIGKILL');
+          } catch (e) {}
+        }
+        resolve();
+      }, 1000);
 
-/**
- * Stop audio level simulation
- */
-function stopAudioLevelSimulation() {
-  if (audioLevelInterval) {
-    clearInterval(audioLevelInterval);
-    audioLevelInterval = null;
+      if (ffmpegProcess) {
+        ffmpegProcess.once('close', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      } else {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+
+    ffmpegProcess = null;
   }
+
+  recordingState = 'idle';
+  console.log('[Recorder] FORCE STOP complete, state: idle');
 }
 
 /**
@@ -405,12 +600,14 @@ function stopAudioLevelSimulation() {
  * @returns {boolean}
  */
 function isRecording() {
-  return ffmpegProcess !== null;
+  return recordingState === 'recording';
 }
 
 module.exports = {
   listAudioDevices,
   startRecording,
   stopRecording,
-  isRecording
+  forceStop,
+  isRecording,
+  getState
 };

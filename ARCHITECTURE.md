@@ -140,6 +140,30 @@ let dashboardWindow = null;        // Hauptfenster mit allen Views (Home, Settin
 let tray = null;                   // System-Tray Icon
 ```
 
+### Dashboard Window Management
+
+Das Dashboard wird beim App-Start **hidden** erstellt und bleibt im Hintergrund aktiv:
+
+```javascript
+// App-Start: Dashboard hidden erstellen
+dashboardWindow = new BrowserWindow({
+  show: false,  // Hidden!
+  webPreferences: {
+    backgroundThrottling: false  // Wichtig für Audio-Monitoring
+  }
+});
+```
+
+**Warum hidden statt on-demand?**
+- Dashboard muss für F9-Audio-Monitoring verfügbar sein
+- `backgroundThrottling: false` erlaubt JavaScript im Hintergrund
+- Erspart ~1-2 Sekunden beim ersten Öffnen
+
+**Window-Lifecycle:**
+- Schließen (X-Button): Window wird nur **hidden**, nicht destroyed
+- Tray-Click: Window wird **shown** (nicht neu erstellt)
+- App-Quit: Window wird destroyed
+
 ### Kern-Funktionen
 
 #### `startRecording()` (Zeilen 795-860)
@@ -388,130 +412,149 @@ const deviceId = crypto.randomUUID();
 
 ---
 
-## Audio-Aufnahme (src/audioRecorder.js + src/recorder.html)
+## Audio-Aufnahme (src/audioRecorderFFmpeg.js)
 
-Audio-Aufnahme via WebRTC mit robuster Fallback-Kaskade.
+Audio-Aufnahme direkt als WAV PCM via FFmpeg mit DirectShow/WASAPI.
 
-### Warum WebRTC statt FFmpeg?
+### Warum FFmpeg statt WebRTC?
 
 | Aspekt | WebRTC | FFmpeg |
 |--------|--------|--------|
-| WASAPI Support | ✅ Ja (intern) | ❌ Nur mit Full-Build (~90MB) |
-| USB-Hub Kompatibilität | ✅ Mit Fallbacks | ✅ Ja |
-| Wireless Headsets | ✅ Ja | ❌ Nicht mit ffmpeg-static |
-| Zusätzliche Binaries | Keine | ffmpeg.exe nötig |
+| Format | WebM (Opus - verlustbehaftet) | WAV PCM (verlustfrei) |
+| Sherpa-Konvertierung | Nötig | Nicht nötig |
+| Diarization-Qualität | Gut | Besser (kein Codec-Verlust) |
+| Audio-Filter | Keine | Hochpass + Limiter integriert |
+| USB/Wireless | ✅ Ja | ✅ Ja (DirectShow) |
 
-**Entscheidung:** WebRTC nutzt intern WASAPI shared mode, was sowohl USB-Hubs als auch kabellose Headsets unterstützt.
+**Entscheidung:** FFmpeg liefert verlustfreies PCM direkt - optimal für Sherpa Speaker Recognition.
 
-### Architektur
+### Audio-Pipeline
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   main.js       │────▶│  audioRecorder.js │────▶│  recorder.html  │
-│                 │     │                  │     │  (Hidden Window) │
-│  store.get      │     │  startRecording  │     │                 │
-│ ('microphoneId')│     │  (deviceId)      │     │  WebRTC API     │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
+Konferenzmikro
+    → FFmpeg (DirectShow/WASAPI)
+    → Audio-Filter (Hochpass 90Hz + Limiter 0.97)
+    → WAV PCM 16kHz Mono 16-bit
+    → AssemblyAI (STT) + Sherpa (Speaker Recognition)
 ```
 
 ### Audio-Spezifikationen
 
-| Parameter | Wert |
-|-----------|------|
-| Format | WebM + Opus |
-| Kanäle | 1 (Mono) |
-| Sample Rate | 16kHz (ideal) |
-| Echo Cancellation | Aktiviert |
-| Noise Suppression | Aktiviert |
+| Parameter | Wert | Grund |
+|-----------|------|-------|
+| Format | WAV PCM | Verlustfrei für beste Erkennung |
+| Sample Rate | 16 kHz | Optimal für Sprache |
+| Kanäle | 1 (Mono) | Konferenzmikro ist Mono |
+| Bit Depth | 16-bit | Standard für Sprache |
+| Hochpass | 90 Hz | Entfernt Rumpeln (Stuhl, Trittschall) |
+| Limiter | 0.97 (-0.26 dBFS) | Verhindert Clipping |
 
-### Robuste Fallback-Kaskade (recorder.html)
+### Audio-Filter (Best Practice für Zahnarztpraxis)
 
-Die `getAudioStream(savedDeviceId)` Funktion versucht 4 Methoden nacheinander:
+#### Hochpass-Filter (90 Hz)
+- **Entfernt:** Trittschall, Stuhlbewegungen, tiefes Brummen
+- **Bewahrt:** Alle Stimmfrequenzen (Grundfrequenz Stimme ~85-255 Hz)
+- **Slope:** 12 dB/Oktave (Standard)
 
-```javascript
-async function getAudioStream(savedDeviceId) {
-  // 300ms Verzögerung für USB-Geräte (USB-Hubs brauchen Zeit)
-  await new Promise(r => setTimeout(r, 300));
+#### Limiter (0.97)
+- **Verhindert:** Clipping bei lauten Geräuschen (Sauger, Lachen, Instrumente)
+- **Threshold:** -0.26 dBFS (greift selten ein, bewahrt Dynamik)
+- **Attack:** Sehr kurz (Peaks abfangen)
 
-  // Prüfe ob gespeichertes Gerät noch existiert
-  const savedDeviceExists = devices.some(d => d.deviceId === savedDeviceId);
+### WICHTIG: Was NICHT gemacht wird
 
-  // Versuch 1: Gespeichertes Gerät (exact constraint)
-  if (savedDeviceExists) {
-    stream = await getUserMedia({ deviceId: { exact: savedDeviceId } });
-  }
+| Vermeiden | Grund |
+|-----------|-------|
+| ❌ Echo Cancellation | Zerstört Phase → Sherpa kann Sprecher nicht unterscheiden |
+| ❌ Noise Suppression | Beschädigt Stimm-Spektren → schlechtere Diarization |
+| ❌ Auto Gain Control | Verändert Pegel künstlich → Voiceprints leiden |
+| ❌ Aggressive Noise Reduction | Zerstört Stimmmerkmale komplett |
 
-  // Versuch 2: Gespeichertes Gerät (ideal/preferred - weniger strikt)
-  if (savedDeviceId) {
-    stream = await getUserMedia({ deviceId: { ideal: savedDeviceId } });
-  }
+### FFmpeg-Befehl
 
-  // Versuch 3: Standard-Gerät mit Audio-Constraints
-  stream = await getUserMedia({
-    audio: { channelCount: 1, sampleRate: { ideal: 16000 }, ... }
-  });
-
-  // Versuch 4: Beliebiges Audio-Gerät (minimal)
-  stream = await getUserMedia({ audio: true });
-}
+```bash
+ffmpeg -f dshow -i audio="Mikrofon Name" \
+  -ar 16000 \
+  -ac 1 \
+  -af "highpass=f=90,alimiter=limit=0.97" \
+  -acodec pcm_s16le \
+  -y output.wav
 ```
 
-**Warum diese Reihenfolge:**
-1. **Exact**: Nutzt exakt das vom User gewählte Gerät
-2. **Ideal**: Falls Device-ID sich geändert hat (USB-Reconnect), versucht Chromium ähnliches Gerät
-3. **Default mit Constraints**: System-Standardgerät mit optimalen Audio-Einstellungen
-4. **Minimal**: Letzte Rettung - irgendein funktionierendes Mikrofon
+### Graceful Shutdown (wichtig!)
 
-### Funktionen (audioRecorder.js)
+Beim Stoppen der Aufnahme:
+
+```javascript
+// 1. Sanft beenden (FFmpeg finalisiert WAV Header)
+ffmpegProcess.stdin.write('q');
+
+// 2. Falls keine Reaktion nach 3 Sek: SIGTERM
+ffmpegProcess.kill('SIGTERM');
+
+// 3. Nur als letzter Ausweg nach weiteren 2 Sek: SIGKILL
+ffmpegProcess.kill('SIGKILL');
+```
+
+**Warum wichtig:**
+- WAV-Header muss korrekt geschrieben werden
+- Mikrofon muss freigegeben werden
+- Keine Zombie-Prozesse
+
+### State Machine (Race Condition Prevention)
+
+Der Recorder verwendet eine State Machine um mehrere gleichzeitige FFmpeg-Prozesse zu verhindern:
+
+```
+┌─────────┐   startRecording()   ┌───────────┐   FFmpeg ready   ┌───────────┐
+│  idle   │ ──────────────────▶ │  starting │ ──────────────▶ │ recording │
+└─────────┘                      └───────────┘                  └───────────┘
+     ▲                                                               │
+     │                                                               │
+     │              stopRecording()                                  │
+     │         ┌───────────┐                                         │
+     └──────── │  stopping │ ◀───────────────────────────────────────┘
+               └───────────┘
+```
+
+**States:**
+- `idle`: Bereit für neue Aufnahme
+- `starting`: FFmpeg wird gestartet (5 Sek. Timeout)
+- `recording`: Aufnahme aktiv
+- `stopping`: Graceful shutdown läuft
+
+**State Guards:**
+- `startRecording()` nur möglich wenn `idle`
+- `stopRecording()` nur möglich wenn `recording`
+- `forceStop()` für Notfälle (intern)
+
+### Funktionen (audioRecorderFFmpeg.js)
 
 | Funktion | Beschreibung |
 |----------|--------------|
-| `startRecording(deleteAudio, deviceId)` | Startet Aufnahme, sendet deviceId an recorder.html |
-| `stopRecording()` | Stoppt, empfängt Blob via IPC, speichert als WebM |
-| `isRecording()` | Prüft ob Aufnahme aktiv |
-| `cleanupOldRecordings(tempDir)` | Löscht alte Aufnahmen wenn aktiviert |
+| `listAudioDevices()` | Listet Windows Audio-Geräte (WASAPI → DirectShow Fallback) |
+| `startRecording(deleteAudio, deviceName)` | Startet FFmpeg mit Filtern (nur wenn `idle`) |
+| `stopRecording()` | Graceful shutdown mit Timeout-Kaskade (nur wenn `recording`) |
+| `getState()` | Gibt aktuellen State zurück (`idle`/`starting`/`recording`/`stopping`) |
+| `forceStop()` | Notfall-Stop, bypassed State Guards (intern) |
 
-### IPC-Kommunikation (recorder.html)
+### Fallback: WebRTC Recorder
 
-| Event | Richtung | Beschreibung |
-|-------|----------|--------------|
-| `start-recording` | Main → Renderer | Startet mit `{ deviceId }` |
-| `stop-recording` | Main → Renderer | Stoppt MediaRecorder |
-| `recording-started` | Renderer → Main | Bestätigung dass Aufnahme läuft |
-| `recording-data` | Renderer → Main | Audio-Blob als Uint8Array |
-| `recording-error` | Renderer → Main | Fehlermeldung |
-| `audio-level-update` | Renderer → Main | Pegel für VU-Meter (0-1) |
+Falls FFmpeg fehlschlägt, existiert `src/audioRecorder.js` als Fallback.
+Dort sind Browser-Constraints deaktiviert:
 
-### Einstellungs-Flow
-
+```javascript
+audio: {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false
+}
 ```
-SPEICHERN (Dashboard/Setup-Wizard):
-  navigator.mediaDevices.enumerateDevices()
-  → User wählt Mikrofon (deviceId = Browser-ID)
-  → ipcRenderer.invoke('save-settings', { microphoneId })
-  → main.js: store.set('microphoneId', ...)
-
-AUFNAHME:
-  F9 gedrückt
-  → main.js: microphoneId = store.get('microphoneId')
-  → audioRecorder.startRecording(deleteAudio, microphoneId)
-  → recorder.html: getAudioStream(savedDeviceId)
-  → 4-stufige Fallback-Kaskade
-  → MediaRecorder → .webm Datei
-```
-
-### Alternative: FFmpeg-Recorder (nicht aktiv)
-
-Die Datei `src/audioRecorderFFmpeg.js` existiert als Alternative, wird aber **nicht verwendet**.
-
-Sie wäre nur relevant wenn:
-- Ein vollständiger FFmpeg-Build mit WASAPI in `bin/ffmpeg.exe` liegt
-- WebRTC aus irgendeinem Grund nicht funktioniert
 
 **Aktueller Import in main.js:**
 ```javascript
-const audioRecorder = require('./src/audioRecorder');  // WebRTC
-// NICHT: require('./src/audioRecorderFFmpeg');        // FFmpeg
+const audioRecorder = require('./src/audioRecorderFFmpeg');  // FFmpeg (aktiv)
+// Fallback: require('./src/audioRecorder');                 // WebRTC
 ```
 
 ---
@@ -555,23 +598,57 @@ Der Mikrofon-Test in Settings und Setup-Wizard verwendet die **echte Recorder-Lo
 | `get-mic-test-audio` | Liest Audio-Datei und gibt Base64 + MIME-Type für Browser-Playback zurück |
 | `cleanup-mic-test` | Löscht Test-Audio-Datei |
 
-### Audio-Level Weiterleitung
+### Audio-Level Weiterleitung (F9-Aufnahme)
 
-Das `audio-level-update` Event wird vom Recorder-Window an Main gesendet und von dort an **beide** Fenster weitergeleitet:
+Bei F9-Aufnahmen wird das Audio-Level vom **Dashboard** ermittelt (nicht vom Recorder-Window), da FFmpeg keine nativen Level-Daten liefert.
 
+**Architektur:**
+```
+Dashboard (hidden)
+    → getUserMedia (WebAudio API)
+    → getByteTimeDomainData (raw waveform)
+    → Peak Detection (NO smoothing)
+    → IPC 'audio-level-update'
+           ↓
+       Main Process
+           ↓
+    Status-Overlay
+    → Icon-Animation (scale 1.0-1.3)
+```
+
+**Warum Dashboard statt Recorder-Window?**
+- FFmpeg liefert keine Audio-Level-Daten
+- Dashboard hat `backgroundThrottling: false` → läuft auch wenn hidden
+- WebAudio API im Dashboard holt Levels vom gleichen Mikrofon parallel
+
+**Code (main.js):**
 ```javascript
-// main.js
 ipcMain.on('audio-level-update', (event, level) => {
-  // An Status-Overlay (für normale Aufnahme)
+  // An Status-Overlay (für F9-Aufnahme Icon-Animation)
   if (statusOverlay && !statusOverlay.isDestroyed()) {
     statusOverlay.webContents.send('audio-level', level);
   }
-  // An Dashboard (für Mic-Test)
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    dashboardWindow.webContents.send('audio-level-update', level);
-  }
 });
 ```
+
+**Code (dashboard.js):**
+```javascript
+// Bei recording-started: getUserMedia + WebAudio Analyser starten
+// setInterval alle 16ms (~60 FPS):
+f9Analyser.getByteTimeDomainData(dataArray);
+let maxDeviation = 0;
+for (let i = 0; i < bufferLength; i++) {
+  const deviation = Math.abs(dataArray[i] - 128);
+  if (deviation > maxDeviation) maxDeviation = deviation;
+}
+const normalized = Math.min(1, (maxDeviation / 128) * 5);  // 5x boost
+ipcRenderer.send('audio-level-update', normalized);
+```
+
+**Wichtig:**
+- `getByteTimeDomainData` statt `getByteFrequencyData` → keine FFT-Smoothing
+- `smoothingTimeConstant = 0` → kein internes Smoothing
+- Direkte Peak-Erkennung → Icon folgt Audio sofort (kein Decay-Delay)
 
 ### Ablauf im Frontend
 
@@ -658,20 +735,28 @@ catch (error) {
 
 ## Audio-Konvertierung (src/audio-converter.js)
 
-FFmpeg-Wrapper für Format-Konvertierung mit 93 Zeilen.
+FFmpeg-Wrapper für Format-Konvertierung (z.B. importierte MP3/M4A Dateien).
 
 ### Funktionen
 
 | Funktion | Beschreibung |
 |----------|--------------|
-| `convertToWav16k(inputPath, outputPath)` | Konvertiert zu 16kHz WAV |
+| `convertToWav16k(inputPath, outputPath)` | Konvertiert zu 16kHz WAV mit Filtern |
 | `convertAndReplace(webmPath)` | Konvertiert und gibt WAV-Pfad zurück |
 
-### FFmpeg-Befehl
+### FFmpeg-Befehl (mit Audio-Filtern)
 
 ```bash
-ffmpeg -i input.webm -ar 16000 -ac 1 -acodec pcm_s16le -f wav output_16k.wav
+ffmpeg -i input.webm \
+  -ar 16000 \
+  -ac 1 \
+  -af "highpass=f=90,alimiter=limit=0.97" \
+  -acodec pcm_s16le \
+  -f wav output_16k.wav
 ```
+
+**Hinweis:** Bei FFmpeg-Recording ist diese Konvertierung nicht mehr nötig,
+da direkt WAV aufgenommen wird. Wird nur noch für importierte Dateien verwendet.
 
 ### Pfad-Auflösung
 
@@ -1327,6 +1412,49 @@ const noActiveSubscription = !hasActiveSubscription &&
 - Auto-Hide nach 5 Sekunden
 - Manche öffnen Dashboard (Subscription)
 - Alle werden in Debug-Dateien geloggt
+
+### Electron-spezifische Workarounds
+
+#### Focus-Problem nach Browser-confirm()
+
+**Problem:** Nach `confirm()` Dialog verliert das Electron-Fenster den Fokus. Input-Felder sind nicht mehr klickbar.
+
+**Lösung:** IPC-basierte Dialoge verwenden statt Browser `confirm()`:
+
+```javascript
+// ❌ SCHLECHT - verursacht Focus-Probleme
+if (!confirm('Wirklich löschen?')) return;
+
+// ✅ GUT - Electron dialog.showMessageBox via IPC
+const confirmed = await ipcRenderer.invoke('confirm-delete-profile');
+if (!confirmed) return;
+```
+
+**IPC Handler (main.js):**
+```javascript
+ipcMain.handle('confirm-delete-profile', async () => {
+  const result = await dialog.showMessageBox(dashboardWindow, {
+    type: 'warning',
+    buttons: ['Löschen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Stimmprofil löschen',
+    message: 'Möchten Sie dieses Stimmprofil wirklich löschen?'
+  });
+  return result.response === 0;
+});
+```
+
+**Betroffene Dialoge:**
+- `confirm-delete-profile` - Stimmprofil löschen
+- `confirm-delete-category` - Kategorie löschen
+- `confirm-delete-baustein` - Baustein löschen
+- `confirm-reset-baustein` - Baustein zurücksetzen
+- `confirm-reset-all-bausteine` - Alle Bausteine zurücksetzen
+- `confirm-delete-textbaustein` - Textbaustein löschen
+- `confirm-reset-textbausteine` - Alle Textbausteine zurücksetzen
+- `confirm-delete-thema` - Thema löschen
+- `confirm-reset-themen` - Alle Themen zurücksetzen
 
 ---
 

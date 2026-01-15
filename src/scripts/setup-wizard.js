@@ -445,6 +445,72 @@ class SetupWizard {
     }
   }
 
+  async startAudioMonitoring(deviceId) {
+    try {
+      // Use selected mic or default
+      const constraints = deviceId ? {
+        audio: {
+          deviceId: { ideal: deviceId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      } : {
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      };
+
+      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.audioContext = new AudioContext();
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 256;
+
+      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+      source.connect(this.analyser);
+
+      const bufferLength = this.analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      const levelBar = document.getElementById('wizardMicLevelBar');
+
+      const updateLevel = () => {
+        if (!this.analyser || !this.isTesting) return;
+
+        this.analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+        const normalized = Math.min(average / 128 * 100, 100);
+        if (levelBar) levelBar.style.width = normalized + '%';
+        this.animationFrameId = requestAnimationFrame(updateLevel);
+      };
+
+      updateLevel();
+    } catch (error) {
+      console.error('Wizard audio monitoring error:', error);
+    }
+  }
+
+  stopAudioMonitoring() {
+    if (this.animationFrameId) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+      this.analyser = null;
+    }
+  }
+
   async startMicTest() {
     const btn = document.getElementById('wizardMicTestBtn');
     const levelBar = document.getElementById('wizardMicLevelBar');
@@ -467,25 +533,18 @@ class SetupWizard {
       const micSelect = document.getElementById('wizardMicSelect');
       const deviceId = micSelect ? micSelect.value : null;
 
-      // Start real recording via IPC
+      // Start real audio monitoring (local, like Stimmprofile)
+      await this.startAudioMonitoring(deviceId);
+
+      // Start real recording via IPC (FFmpeg)
       const startResult = await ipcRenderer.invoke('start-mic-test', deviceId);
       if (!startResult.success) {
         throw new Error(startResult.error);
       }
 
-      // Listen for audio level updates from recorder
-      this.levelHandler = (event, level) => {
-        if (this.isTesting) {
-          const percent = Math.min(100, level * 100);
-          levelBar.style.width = percent + '%';
-        }
-      };
-      ipcRenderer.on('audio-level-update', this.levelHandler);
-
       // Auto-stop after 5 seconds
       this.micTestTimeout = setTimeout(async () => {
         if (this.isTesting) {
-          ipcRenderer.removeListener('audio-level-update', this.levelHandler);
           await this.stopMicTest();
         }
       }, 5000);
@@ -506,16 +565,13 @@ class SetupWizard {
 
     this.isTesting = false;
 
+    // Stop audio monitoring (local getUserMedia stream)
+    this.stopAudioMonitoring();
+
     // Clear auto-stop timer
     if (this.micTestTimeout) {
       clearTimeout(this.micTestTimeout);
       this.micTestTimeout = null;
-    }
-
-    // Remove level handler
-    if (this.levelHandler) {
-      ipcRenderer.removeListener('audio-level-update', this.levelHandler);
-      this.levelHandler = null;
     }
 
     if (btn) {

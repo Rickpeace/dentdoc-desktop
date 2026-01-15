@@ -122,6 +122,8 @@
       min-width: 0;
     }
 
+    /* Audio Level Bar CSS removed - only icon animation is used */
+
     .title {
       color: var(--text-primary);
       font-size: 1rem;
@@ -514,6 +516,8 @@
       </button>
     </div>
 
+    <!-- Audio Level Bar removed - only icon animation is used -->
+
     <div id="progressContainer" class="progress-container">
       <div class="progress-bar">
         <div id="progressFill" class="progress-fill"></div>
@@ -606,6 +610,7 @@
     const actions = document.getElementById('actions');
     const copySummaryBtn = document.getElementById('copySummaryBtn');
     const copyFullBtn = document.getElementById('copyFullBtn');
+    // Audio level bar removed - only icon animation used
 
     let currentDocumentation = null;
     let currentTranscript = null;
@@ -689,10 +694,9 @@
       // level should be between 0 and 1
       const normalizedLevel = Math.max(0, Math.min(1, level));
 
-      // Scale the icon based on audio level (1.0 to 1.5 scale)
-      // Boost the input significantly to make effect more visible
-      const boostedLevel = Math.min(1, normalizedLevel * 4);
-      const scale = 1 + (boostedLevel * 0.5);
+      // Direct mapping - no smoothing, icon follows audio exactly
+      // Scale: 1.0 (silent) to 1.3 (loud)
+      const scale = 1 + (normalizedLevel * 0.3);
       icon.style.transform = `scale(${scale})`;
     }
 
@@ -712,6 +716,7 @@
           startTimer();
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
+          // Audio level shown via icon animation only
           resetSteps();
           break;
         case 'processing':

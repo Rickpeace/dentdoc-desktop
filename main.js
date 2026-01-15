@@ -6,7 +6,7 @@ const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Noti
 const fs = require('fs');
 const os = require('os');
 const Store = require('electron-store');
-const audioRecorder = require('./src/audioRecorder');
+const audioRecorder = require('./src/audioRecorderFFmpeg');
 const apiClient = require('./src/apiClient');
 
 // Early debug logging
@@ -96,7 +96,8 @@ function createDashboardWindow() {
     minHeight: 600,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      backgroundThrottling: false  // Keep renderer running when hidden (for F9 audio monitoring)
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     resizable: true,
@@ -161,9 +162,12 @@ function createDashboardWindow() {
   dashboardWindow.setMenu(dashboardMenu);
   dashboardWindow.setMenuBarVisibility(false);
 
-  dashboardWindow.once('ready-to-show', () => {
-    dashboardWindow.show();
-  });
+  // NOTE: We no longer auto-show on ready-to-show.
+  // Dashboard is created hidden at app startup to enable audio monitoring for F9 recording.
+  // User explicitly opens it via tray menu or other actions.
+
+  // Make dashboard window available globally for audio level updates
+  global.dashboardWindow = dashboardWindow;
 
   // Minimize to tray instead of closing
   dashboardWindow.on('close', (e) => {
@@ -175,6 +179,7 @@ function createDashboardWindow() {
 
   dashboardWindow.on('closed', () => {
     dashboardWindow = null;
+    global.dashboardWindow = null;
   });
 
   // Refresh subscription status when window gains focus (for multi-PC sync)
@@ -1056,6 +1061,18 @@ async function startRecording() {
   debugLog(`keepAudio setting: ${keepAudio} -> deleteAudio: ${deleteAudio}`);
 
   try {
+    // Check if recorder is busy (e.g., mic test running)
+    const recorderState = audioRecorder.getState();
+    if (recorderState !== 'idle') {
+      console.log('Recorder busy with state:', recorderState, '- stopping first');
+      try {
+        await audioRecorder.stopRecording();
+      } catch (e) {
+        console.warn('Could not stop existing recording:', e.message);
+        await audioRecorder.forceStop();
+      }
+    }
+
     isRecording = true;
     updateTrayMenu();
 
@@ -1070,6 +1087,11 @@ async function startRecording() {
 
     const shortcut = store.get('shortcut') || 'F9';
     updateStatusOverlay('Aufnahme läuft...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
+
+    // Notify dashboard to start audio monitoring (for real level display in status overlay)
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('recording-started', { microphoneId });
+    }
   } catch (error) {
     console.error('Recording error:', error);
     updateStatusOverlay('Fehler', 'Aufnahme konnte nicht gestartet werden', 'error');
@@ -1079,6 +1101,11 @@ async function startRecording() {
 }
 
 async function stopRecording() {
+  // Notify dashboard to stop audio monitoring immediately
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('recording-stopped');
+  }
+
   try {
     tray.setToolTip('DentDoc - Verarbeite Aufnahme...');
 
@@ -2120,7 +2147,10 @@ ipcMain.handle('save-settings', async (event, settings) => {
     store.set('profilesPath', settings.profilesPath);
     // Reload voice profiles with new path
     const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
+    console.log('[save-settings] Setting profiles path to:', settings.profilesPath);
     voiceProfiles.setStorePath(settings.profilesPath);
+    console.log('[save-settings] New store path:', voiceProfiles.getStorePath());
+    console.log('[save-settings] Profiles at new path:', voiceProfiles.getAllProfiles().length);
   }
 
   // Save auto-close setting
@@ -2584,6 +2614,71 @@ ipcMain.handle('confirm-delete-baustein', async (event, bausteinName) => {
   return result.response === 0;
 });
 
+ipcMain.handle('confirm-delete-profile', async () => {
+  const result = await dialog.showMessageBox(dashboardWindow, {
+    type: 'warning',
+    buttons: ['Löschen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Stimmprofil löschen',
+    message: 'Möchten Sie dieses Stimmprofil wirklich löschen?',
+    detail: 'Dies kann nicht rückgängig gemacht werden!'
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('confirm-delete-textbaustein', async (event, key) => {
+  const result = await dialog.showMessageBox(dashboardWindow, {
+    type: 'warning',
+    buttons: ['Löschen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Textbaustein löschen',
+    message: `Textbaustein "${key}" wirklich löschen?`,
+    detail: 'Dies kann nicht rückgängig gemacht werden!'
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('confirm-reset-textbausteine', async () => {
+  const result = await dialog.showMessageBox(dashboardWindow, {
+    type: 'warning',
+    buttons: ['Alle zurücksetzen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Textbausteine zurücksetzen',
+    message: 'Alle Textbausteine auf Standard zurücksetzen?',
+    detail: 'Dies kann nicht rückgängig gemacht werden!'
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('confirm-delete-thema', async (event, themaName) => {
+  const result = await dialog.showMessageBox(dashboardWindow, {
+    type: 'warning',
+    buttons: ['Löschen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Thema löschen',
+    message: `Thema "${themaName}" wirklich löschen?`,
+    detail: 'Dies kann nicht rückgängig gemacht werden!'
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('confirm-reset-themen', async () => {
+  const result = await dialog.showMessageBox(dashboardWindow, {
+    type: 'warning',
+    buttons: ['Alle zurücksetzen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Themen zurücksetzen',
+    message: 'Alle Themen auf Standard zurücksetzen?',
+    detail: 'Dies kann nicht rückgängig gemacht werden!'
+  });
+  return result.response === 0;
+});
+
 ipcMain.handle('import-bausteine', async (event, json) => {
   bausteineManager.importBausteine(json);
   return { success: true };
@@ -2597,7 +2692,10 @@ ipcMain.handle('export-bausteine', async () => {
 const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
 
 ipcMain.handle('get-voice-profiles', async () => {
-  return voiceProfiles.getAllProfiles();
+  console.log('[get-voice-profiles] Current store path:', voiceProfiles.getStorePath());
+  const profiles = voiceProfiles.getAllProfiles();
+  console.log('[get-voice-profiles] Found profiles:', profiles.length);
+  return profiles;
 });
 
 ipcMain.handle('delete-voice-profile', async (event, id) => {
@@ -2610,6 +2708,18 @@ ipcMain.handle('start-voice-enrollment', async (event, data) => {
   }
 
   try {
+    // Check if recorder is busy (e.g., mic test or other recording running)
+    const recorderState = audioRecorder.getState();
+    if (recorderState !== 'idle') {
+      console.log('Enrollment: Recorder busy with state:', recorderState, '- stopping first');
+      try {
+        await audioRecorder.stopRecording();
+      } catch (e) {
+        console.warn('Could not stop existing recording:', e.message);
+        await audioRecorder.forceStop();
+      }
+    }
+
     isEnrolling = true;
     // Support both old format (string) and new format ({ name, role })
     if (typeof data === 'string') {
@@ -2635,7 +2745,13 @@ ipcMain.handle('stop-voice-enrollment', async () => {
   }
 
   try {
-    await audioRecorder.stopRecording();
+    // Only stop if actually recording
+    const recorderState = audioRecorder.getState();
+    if (recorderState === 'recording') {
+      await audioRecorder.stopRecording();
+    } else {
+      console.log('Enrollment stop: Recorder not in recording state:', recorderState);
+    }
 
     // Create voice profile from recording with role
     const profile = await speakerRecognition.enrollSpeaker(
@@ -2664,10 +2780,16 @@ ipcMain.handle('cancel-voice-enrollment', async () => {
 
   const pathToDelete = currentEnrollmentPath;
 
-  try {
-    await audioRecorder.stopRecording();
-  } catch (error) {
-    console.error('Error stopping recording during cancel:', error);
+  // Only stop if actually recording
+  const recorderState = audioRecorder.getState();
+  if (recorderState === 'recording') {
+    try {
+      await audioRecorder.stopRecording();
+    } catch (error) {
+      console.error('Error stopping recording during cancel:', error);
+    }
+  } else {
+    console.log('Enrollment cancel: Recorder not in recording state:', recorderState);
   }
 
   // Delete the temporary recording file
@@ -2718,6 +2840,19 @@ function cleanupMicTestFile() {
 // Start mic test recording (uses real recorder logic)
 ipcMain.handle('start-mic-test', async (event, deviceId) => {
   try {
+    // Check if a recording is already in progress
+    const currentState = audioRecorder.getState();
+    if (currentState !== 'idle') {
+      console.log('Mic test: Recording already in progress, stopping first. State:', currentState);
+      try {
+        await audioRecorder.stopRecording();
+      } catch (e) {
+        console.warn('Could not stop existing recording:', e.message);
+        // Use forceStop as fallback
+        await audioRecorder.forceStop();
+      }
+    }
+
     // Clean up any previous test recording
     cleanupMicTestFile();
 
@@ -2754,7 +2889,8 @@ ipcMain.handle('get-mic-test-audio', async () => {
     }
     const buffer = fs.readFileSync(micTestPath);
     const base64 = buffer.toString('base64');
-    return { success: true, data: base64, mimeType: 'audio/webm' };
+    // FFmpeg records directly as WAV now
+    return { success: true, data: base64, mimeType: 'audio/wav' };
   } catch (error) {
     console.error('Get mic test audio error:', error);
     return { success: false, error: error.message };
@@ -2908,11 +3044,19 @@ ipcMain.handle('get-app-version', () => {
 app.whenReady().then(() => {
   createTray();
 
-  // Initialize custom voice profiles path if set
-  const profilesPath = store.get('profilesPath');
-  if (profilesPath) {
-    const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
-    voiceProfiles.setStorePath(profilesPath);
+  // Initialize voice profiles path (use stored path or default)
+  const storedProfilesPath = store.get('profilesPath');
+  const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
+
+  if (storedProfilesPath) {
+    // Use custom path
+    console.log('[App] Using stored profiles path:', storedProfilesPath);
+    voiceProfiles.setStorePath(storedProfilesPath);
+  } else {
+    // Use default path in Documents folder
+    const defaultProfilesPath = path.join(app.getPath('documents'), 'DentDoc', 'Stimmprofile');
+    console.log('[App] Using default profiles path:', defaultProfilesPath);
+    voiceProfiles.setStorePath(defaultProfilesPath);
   }
 
   // Register global shortcut (use saved or default F9)
@@ -2956,6 +3100,13 @@ app.whenReady().then(() => {
     }).then(user => {
       store.set('user', user);
       updateTrayMenu();
+
+      // Create dashboard window hidden at startup (for F9 audio monitoring)
+      // The renderer needs to be running to handle getUserMedia for real audio levels
+      if (!dashboardWindow || dashboardWindow.isDestroyed()) {
+        createDashboardWindow();
+        // Don't show it - user opens it via tray menu
+      }
 
       // Check trial/subscription status on app start and show notification if needed
       const isTrialUser = user?.planTier === 'free_trial';

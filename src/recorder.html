@@ -49,8 +49,9 @@
               deviceId: { exact: savedDeviceId },
               channelCount: 1,
               sampleRate: { ideal: 16000 },
-              echoCancellation: true,
-              noiseSuppression: true
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
             }
           });
           console.log('Success: Got stream from saved device (exact)');
@@ -70,8 +71,9 @@
               deviceId: { ideal: savedDeviceId },
               channelCount: 1,
               sampleRate: { ideal: 16000 },
-              echoCancellation: true,
-              noiseSuppression: true
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
             }
           });
           console.log('Success: Got stream from saved device (preferred)');
@@ -89,8 +91,9 @@
           audio: {
             channelCount: 1,
             sampleRate: { ideal: 16000 },
-            echoCancellation: true,
-            noiseSuppression: true
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
           }
         });
         console.log('Success: Got stream from default device');

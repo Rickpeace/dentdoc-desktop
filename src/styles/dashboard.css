@@ -1397,6 +1397,13 @@ kbd {
   margin-bottom: 0;
 }
 
+/* Ensure input fields are always clickable (fix for intermittent click issues) */
+.form-row .form-group input,
+.form-row .form-group select {
+  position: relative;
+  z-index: 1;
+}
+
 .read-text-box {
   background: rgba(0, 0, 0, 0.3);
   border: 2px solid rgba(249, 115, 22, 0.3);
