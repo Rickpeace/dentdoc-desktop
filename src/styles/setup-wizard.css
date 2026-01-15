@@ -307,6 +307,19 @@
   border-radius: var(--radius-full);
 }
 
+.wizard-mic-playback {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--space-3);
+}
+
+.wizard-mic-playback button {
+  display: flex;
+  align-items: center;
+}
+
 .wizard-mic-status {
   font-size: 0.875rem;
   color: var(--text-tertiary);

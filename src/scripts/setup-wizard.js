@@ -11,7 +11,7 @@ class SetupWizard {
     this.currentStep = 0;
     this.totalSteps = 8; // 0-7 (removed separate audio step)
     this.settings = {
-      microphoneId: null,
+      microphoneId: null, // Windows device name for FFmpeg
       shortcut: 'F9',
       docMode: 'single',
       autoExport: true,
@@ -25,6 +25,7 @@ class SetupWizard {
     this.audioContext = null;
     this.mediaStream = null;
     this.analyser = null;
+    this.micTestTimeout = null;  // Auto-stop timer
 
     // Shortcut recording state
     this.isRecordingShortcut = false;
@@ -45,7 +46,7 @@ class SetupWizard {
       this.settings.shortcut = settings.shortcut || 'F9';
       this.settings.transcriptPath = settings.transcriptPath || '';
       this.settings.profilesPath = settings.profilesPath || '';
-      this.settings.microphoneId = settings.microphoneId || null;
+      this.settings.microphoneId = settings.microphoneId || null; // Windows device name
       this.settings.docMode = settings.docMode || 'single';
       this.settings.autoExport = settings.autoExport !== false;
       this.settings.keepAudio = settings.keepAudio || false;
@@ -87,6 +88,10 @@ class SetupWizard {
       overlay.classList.remove('active');
     }
     this.stopMicTest();
+    // Clean up mic test audio file
+    ipcRenderer.invoke('cleanup-mic-test');
+    const playbackDiv = document.getElementById('wizardMicPlayback');
+    if (playbackDiv) playbackDiv.style.display = 'none';
   }
 
   async closeWizard() {
@@ -117,13 +122,14 @@ class SetupWizard {
 
     // Microphone
     document.getElementById('wizardMicSelect')?.addEventListener('change', (e) => {
-      this.settings.microphoneId = e.target.value;
+      this.settings.microphoneId = e.target.value; // Windows device name
       if (this.isTesting) {
         this.stopMicTest();
         this.startMicTest();
       }
     });
     document.getElementById('wizardMicTestBtn')?.addEventListener('click', () => this.toggleMicTest());
+    document.getElementById('wizardPlayMicBtn')?.addEventListener('click', () => this.playMicTest());
 
     // Shortcut
     document.getElementById('wizardChangeShortcutBtn')?.addEventListener('click', () => this.startShortcutRecording());
@@ -399,6 +405,7 @@ class SetupWizard {
     if (!select) return;
 
     try {
+      // Use WebRTC to enumerate audio devices
       const devices = await navigator.mediaDevices.enumerateDevices();
       const mics = devices.filter(d => d.kind === 'audioinput');
 
@@ -431,7 +438,8 @@ class SetupWizard {
 
   toggleMicTest() {
     if (this.isTesting) {
-      this.stopMicTest();
+      // Don't allow manual stop - wait for auto-stop
+      return;
     } else {
       this.startMicTest();
     }
@@ -441,47 +449,47 @@ class SetupWizard {
     const btn = document.getElementById('wizardMicTestBtn');
     const levelBar = document.getElementById('wizardMicLevelBar');
     const status = document.getElementById('wizardMicStatus');
+    const playbackDiv = document.getElementById('wizardMicPlayback');
 
     try {
       this.isTesting = true;
-      btn.textContent = 'Test stoppen';
+      btn.textContent = 'Aufnahme läuft...';
       btn.classList.remove('wizard-btn-secondary');
       btn.classList.add('wizard-btn-primary');
-      status.textContent = 'Sprechen Sie ins Mikrofon...';
+      btn.disabled = true;
+      status.textContent = 'Aufnahme läuft... Sprechen Sie ins Mikrofon (5 Sek.)';
       status.className = 'wizard-mic-status';
 
-      const constraints = {
-        audio: this.settings.microphoneId
-          ? { deviceId: { exact: this.settings.microphoneId } }
-          : true
-      };
+      // Hide previous playback
+      if (playbackDiv) playbackDiv.style.display = 'none';
 
-      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      this.audioContext = new AudioContext();
-      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
-      source.connect(this.analyser);
+      // Get selected microphone ID
+      const micSelect = document.getElementById('wizardMicSelect');
+      const deviceId = micSelect ? micSelect.value : null;
 
-      const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+      // Start real recording via IPC
+      const startResult = await ipcRenderer.invoke('start-mic-test', deviceId);
+      if (!startResult.success) {
+        throw new Error(startResult.error);
+      }
 
-      const updateLevel = () => {
-        if (!this.isTesting) return;
-
-        this.analyser.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-        const level = Math.min(100, (average / 128) * 100);
-        levelBar.style.width = level + '%';
-
-        if (level > 10) {
-          status.textContent = 'Mikrofon funktioniert!';
-          status.className = 'wizard-mic-status success';
+      // Listen for audio level updates from recorder
+      this.levelHandler = (event, level) => {
+        if (this.isTesting) {
+          const percent = Math.min(100, level * 100);
+          levelBar.style.width = percent + '%';
         }
-
-        requestAnimationFrame(updateLevel);
       };
+      ipcRenderer.on('audio-level-update', this.levelHandler);
 
-      updateLevel();
+      // Auto-stop after 5 seconds
+      this.micTestTimeout = setTimeout(async () => {
+        if (this.isTesting) {
+          ipcRenderer.removeListener('audio-level-update', this.levelHandler);
+          await this.stopMicTest();
+        }
+      }, 5000);
+
     } catch (error) {
       console.error('Mic test error:', error);
       status.textContent = 'Fehler: ' + error.message;
@@ -490,29 +498,87 @@ class SetupWizard {
     }
   }
 
-  stopMicTest() {
+  async stopMicTest() {
     const btn = document.getElementById('wizardMicTestBtn');
     const levelBar = document.getElementById('wizardMicLevelBar');
+    const status = document.getElementById('wizardMicStatus');
+    const playbackDiv = document.getElementById('wizardMicPlayback');
 
     this.isTesting = false;
 
+    // Clear auto-stop timer
+    if (this.micTestTimeout) {
+      clearTimeout(this.micTestTimeout);
+      this.micTestTimeout = null;
+    }
+
+    // Remove level handler
+    if (this.levelHandler) {
+      ipcRenderer.removeListener('audio-level-update', this.levelHandler);
+      this.levelHandler = null;
+    }
+
     if (btn) {
-      btn.textContent = 'Mikrofon testen';
+      btn.textContent = 'Mikrofon testen (5 Sek.)';
       btn.classList.remove('wizard-btn-primary');
       btn.classList.add('wizard-btn-secondary');
+      btn.disabled = false;
     }
 
     if (levelBar) {
       levelBar.style.width = '0%';
     }
 
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
+    try {
+      // Stop recording and get audio file
+      const stopResult = await ipcRenderer.invoke('stop-mic-test');
+      if (stopResult.success) {
+        status.textContent = 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen';
+        status.className = 'wizard-mic-status success';
+        // Show playback button
+        if (playbackDiv) playbackDiv.style.display = 'flex';
+      } else {
+        status.textContent = 'Fehler beim Stoppen: ' + stopResult.error;
+        status.className = 'wizard-mic-status error';
+      }
+    } catch (error) {
+      console.error('Stop mic test error:', error);
+      status.textContent = 'Fehler: ' + error.message;
+      status.className = 'wizard-mic-status error';
     }
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
+  }
+
+  async playMicTest() {
+    const btn = document.getElementById('wizardPlayMicBtn');
+    const audio = document.getElementById('wizardMicAudio');
+    const status = document.getElementById('wizardMicStatus');
+
+    // If already playing, stop
+    if (audio && !audio.paused) {
+      audio.pause();
+      audio.currentTime = 0;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;"><polygon points="5,3 19,12 5,21"/></svg>Anhören';
+      return;
+    }
+
+    try {
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>Stoppen';
+
+      const result = await ipcRenderer.invoke('get-mic-test-audio');
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      audio.src = `data:${result.mimeType};base64,${result.data}`;
+      audio.onended = () => {
+        btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;"><polygon points="5,3 19,12 5,21"/></svg>Anhören';
+      };
+      await audio.play();
+    } catch (error) {
+      console.error('Playback error:', error);
+      status.textContent = 'Wiedergabe-Fehler: ' + error.message;
+      status.className = 'wizard-mic-status error';
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;"><polygon points="5,3 19,12 5,21"/></svg>Anhören';
     }
   }
 
@@ -569,6 +635,22 @@ class SetupWizard {
   }
 
   showStep(index) {
+    // Stop any running mic test when changing steps (industry standard behavior)
+    this.stopMicTest();
+
+    // Reset mic test UI when showing microphone step (step 1)
+    if (index === 1) {
+      const playbackDiv = document.getElementById('wizardMicPlayback');
+      const statusDiv = document.getElementById('wizardMicStatus');
+      const levelBar = document.getElementById('wizardMicLevelBar');
+      if (playbackDiv) playbackDiv.style.display = 'none';
+      if (statusDiv) {
+        statusDiv.textContent = 'Klicken Sie auf "Mikrofon testen" und sprechen Sie';
+        statusDiv.className = 'wizard-mic-status';
+      }
+      if (levelBar) levelBar.style.width = '0%';
+    }
+
     // Hide all steps
     document.querySelectorAll('.wizard-step').forEach(step => {
       step.classList.remove('active');
@@ -698,16 +780,12 @@ class SetupWizard {
   }
 
   nextStep() {
-    this.stopMicTest();
-
     if (this.currentStep < this.totalSteps - 1) {
       this.showStep(this.currentStep + 1);
     }
   }
 
   prevStep() {
-    this.stopMicTest();
-
     if (this.currentStep > 0) {
       this.showStep(this.currentStep - 1);
     }
@@ -721,7 +799,7 @@ class SetupWizard {
     // Save all settings
     try {
       await ipcRenderer.invoke('save-settings', {
-        microphoneId: this.settings.microphoneId,
+        microphoneId: this.settings.microphoneId, // Windows device name
         shortcut: this.settings.shortcut,
         docMode: this.settings.docMode,
         autoExport: this.settings.autoExport,

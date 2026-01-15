@@ -1117,6 +1117,18 @@ kbd {
   transition: width 0.1s;
 }
 
+.mic-playback {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+.mic-playback button {
+  display: flex;
+  align-items: center;
+}
+
 .shortcut-input-row {
   display: flex;
   gap: var(--space-3);

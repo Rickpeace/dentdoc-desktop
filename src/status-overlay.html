@@ -56,17 +56,20 @@
       display: flex;
       align-items: center;
       gap: var(--space-4);
+      position: relative;
+      z-index: 1;
     }
 
-    /* Drag handle for moving the window */
+    /* Drag handle for moving the window - covers entire container but stays behind interactive elements */
     .drag-handle {
       position: absolute;
       top: 0;
       left: 0;
-      right: 50px;
-      height: 50px;
+      right: 0;
+      bottom: 0;
       cursor: move;
       -webkit-app-region: drag;
+      z-index: 0;
     }
 
     .icon {
@@ -180,6 +183,8 @@
     .progress-container {
       display: none;
       margin-top: var(--space-5);
+      position: relative;
+      z-index: 1;
     }
 
     .progress-container.visible {
@@ -279,6 +284,11 @@
       flex-direction: column;
       margin-top: var(--space-5);
       gap: var(--space-3);
+      position: relative;
+      z-index: 10;
+      max-height: 280px;
+      overflow-y: auto;
+      -webkit-app-region: no-drag;
     }
 
     .actions.visible {
@@ -333,6 +343,80 @@
     .action-btn.full .btn-icon {
       background: linear-gradient(135deg, var(--info-500), var(--info-600));
       box-shadow: none;
+    }
+
+    /* Shortening buttons - smaller compact style */
+    .shortening-section {
+      display: none;
+      margin-top: var(--space-4);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--glass-border);
+      position: relative;
+      z-index: 1;
+    }
+
+    .shortening-section.visible {
+      display: block;
+    }
+
+    .shortening-label {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-2);
+    }
+
+    .shortening-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+
+    .shortening-btn {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      color: var(--text-secondary);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-md);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      -webkit-app-region: no-drag;
+    }
+
+    .shortening-btn:hover {
+      background: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
+      color: var(--text-primary);
+    }
+
+    .shortening-btn.copied {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: var(--success-500);
+    }
+
+    .shortening-btn .short-icon {
+      font-size: 0.875rem;
+    }
+
+    [data-theme="light"] .shortening-btn {
+      background: #ffffff;
+      border-color: #e5e7eb;
+    }
+
+    [data-theme="light"] .shortening-btn:hover {
+      background: #f9fafb;
+      border-color: #fdba74;
+    }
+
+    [data-theme="light"] .shortening-btn.copied {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
     }
 
     .action-btn .btn-text {
@@ -471,6 +555,37 @@
         </div>
         <div class="btn-status">✓</div>
       </button>
+
+      <!-- Shortening buttons section -->
+      <div id="shorteningSection" class="shortening-section">
+        <div class="shortening-label">Kürzungen kopieren</div>
+        <div class="shortening-buttons">
+          <button id="copyKeywords90" class="shortening-btn" title="~90% kürzer - Nur Stichworte">
+            <span class="short-icon">⚡</span>
+            <span>Stichworte</span>
+          </button>
+          <button id="copyChef70" class="shortening-btn" title="~70% kürzer - Chef ultra">
+            <span class="short-icon">👨‍⚕️</span>
+            <span>Chef Ultra</span>
+          </button>
+          <button id="copyChef50" class="shortening-btn" title="~50% kürzer - Chef">
+            <span class="short-icon">📊</span>
+            <span>Chef</span>
+          </button>
+          <button id="copyPvs40" class="shortening-btn" title="~40% kürzer - PVS Standard">
+            <span class="short-icon">🏥</span>
+            <span>PVS</span>
+          </button>
+          <button id="copyZfa30" class="shortening-btn" title="~30% kürzer - ZFA Alltag">
+            <span class="short-icon">📝</span>
+            <span>ZFA</span>
+          </button>
+          <button id="copyNormalized" class="shortening-btn" title="Sprachlich normalisiert - Gleicher Inhalt">
+            <span class="short-icon">✨</span>
+            <span>Normalisiert</span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -494,6 +609,7 @@
 
     let currentDocumentation = null;
     let currentTranscript = null;
+    let currentShortenings = null;
     let currentState = null;
     let timerInterval = null;
     let recordingStartTime = null;
@@ -628,9 +744,19 @@
           if (data.documentation) {
             currentDocumentation = data.documentation;
             currentTranscript = data.transcript;
+            currentShortenings = data.shortenings || null;
             actions.classList.add('visible');
             copySummaryBtn.classList.remove('copied');
             copyFullBtn.classList.remove('copied');
+            // Show shortening buttons if shortenings available
+            const shorteningSection = document.getElementById('shorteningSection');
+            if (currentShortenings) {
+              shorteningSection.classList.add('visible');
+              // Reset all shortening buttons
+              document.querySelectorAll('.shortening-btn').forEach(btn => btn.classList.remove('copied'));
+            } else {
+              shorteningSection.classList.remove('visible');
+            }
           }
           break;
         case 'error':
@@ -649,6 +775,8 @@
           }
           break;
       }
+
+      // Size is now controlled entirely by main process in updateStatusOverlay()
     });
 
     closeBtn.addEventListener('click', () => {
@@ -667,13 +795,86 @@
     });
 
     copyFullBtn.addEventListener('click', () => {
-      if (currentTranscript && currentDocumentation) {
-        const fullText = '--- Dokumentation ---\n\n' + currentDocumentation + '\n\n--- Transkript ---\n\n' + currentTranscript;
-        ipcRenderer.invoke('copy-to-clipboard', fullText);
+      let fullText = '';
+
+      // Build full text with all versions (shortest to longest)
+      if (currentShortenings) {
+        if (currentShortenings.keywords90) {
+          fullText += '--- Stichworte (90% kürzer) ---\n\n' + currentShortenings.keywords90 + '\n\n';
+        }
+        if (currentShortenings.chef70) {
+          fullText += '--- Chef Ultra (70% kürzer) ---\n\n' + currentShortenings.chef70 + '\n\n';
+        }
+        if (currentShortenings.chef50) {
+          fullText += '--- Chef (50% kürzer) ---\n\n' + currentShortenings.chef50 + '\n\n';
+        }
+        if (currentShortenings.pvs40) {
+          fullText += '--- PVS (40% kürzer) ---\n\n' + currentShortenings.pvs40 + '\n\n';
+        }
+        if (currentShortenings.zfa30) {
+          fullText += '--- ZFA (30% kürzer) ---\n\n' + currentShortenings.zfa30 + '\n\n';
+        }
+        if (currentShortenings.normalized) {
+          fullText += '--- Normalisiert (sprachlich optimiert) ---\n\n' + currentShortenings.normalized + '\n\n';
+        }
+      }
+
+      // Full documentation
+      if (currentDocumentation) {
+        fullText += '--- Dokumentation (Vollständig) ---\n\n' + currentDocumentation + '\n\n';
+      }
+
+      // Transcript
+      if (currentTranscript) {
+        fullText += '--- Transkript ---\n\n' + currentTranscript;
+      }
+
+      if (fullText) {
+        ipcRenderer.invoke('copy-to-clipboard', fullText.trim());
         showCopied(copyFullBtn);
-      } else if (currentDocumentation) {
-        ipcRenderer.invoke('copy-to-clipboard', currentDocumentation);
-        showCopied(copyFullBtn);
+      }
+    });
+
+    // Shortening buttons click handlers
+    document.getElementById('copyKeywords90').addEventListener('click', () => {
+      if (currentShortenings?.keywords90) {
+        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.keywords90);
+        showCopied(document.getElementById('copyKeywords90'));
+      }
+    });
+
+    document.getElementById('copyChef70').addEventListener('click', () => {
+      if (currentShortenings?.chef70) {
+        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.chef70);
+        showCopied(document.getElementById('copyChef70'));
+      }
+    });
+
+    document.getElementById('copyChef50').addEventListener('click', () => {
+      if (currentShortenings?.chef50) {
+        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.chef50);
+        showCopied(document.getElementById('copyChef50'));
+      }
+    });
+
+    document.getElementById('copyPvs40').addEventListener('click', () => {
+      if (currentShortenings?.pvs40) {
+        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.pvs40);
+        showCopied(document.getElementById('copyPvs40'));
+      }
+    });
+
+    document.getElementById('copyZfa30').addEventListener('click', () => {
+      if (currentShortenings?.zfa30) {
+        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.zfa30);
+        showCopied(document.getElementById('copyZfa30'));
+      }
+    });
+
+    document.getElementById('copyNormalized').addEventListener('click', () => {
+      if (currentShortenings?.normalized) {
+        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.normalized);
+        showCopied(document.getElementById('copyNormalized'));
       }
     });
 
@@ -687,25 +888,6 @@
     // Listen for audio level updates
     ipcRenderer.on('audio-level', (event, level) => {
       updateAudioLevel(level);
-    });
-
-    // Auto-resize window to fit content
-    function resizeWindowToFit() {
-      const container = document.querySelector('.container');
-      // Get the actual rendered size including padding and border
-      const width = container.offsetWidth + 4; // + body padding (2px each side)
-      const height = container.offsetHeight + 4;
-      ipcRenderer.send('resize-status-overlay', width, height);
-    }
-
-    // Resize after status update (with small delay for DOM to update)
-    ipcRenderer.on('update-status', () => {
-      setTimeout(resizeWindowToFit, 50);
-    });
-
-    // Initial resize when loaded
-    window.addEventListener('load', () => {
-      setTimeout(resizeWindowToFit, 100);
     });
   </script>
 </body>

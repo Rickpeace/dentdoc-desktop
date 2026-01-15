@@ -326,10 +326,19 @@
               <option value="">Lade Mikrofone...</option>
             </select>
             <div class="mic-test">
-              <button id="settingsTestMicBtn" class="btn btn-secondary">Test starten</button>
+              <button id="settingsTestMicBtn" class="btn btn-secondary">Test starten (5 Sek.)</button>
               <div class="mic-level">
                 <div id="settingsMicLevelBar" class="mic-level-bar"></div>
               </div>
+            </div>
+            <div class="mic-playback" id="settingsMicPlayback" style="display: none;">
+              <button id="settingsPlayMicBtn" class="btn btn-secondary">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;">
+                  <polygon points="5,3 19,12 5,21"/>
+                </svg>
+                Anhören
+              </button>
+              <audio id="settingsMicAudio" style="display: none;"></audio>
             </div>
             <div id="settingsMicStatus" class="status-message"></div>
             <button id="settingsOpenSoundBtn" class="btn btn-secondary w-full mt-4">Windows Sound-Einstellungen öffnen</button>
@@ -1208,10 +1217,19 @@
           </div>
 
           <div class="wizard-mic-test">
-            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardMicTestBtn">Mikrofon testen</button>
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardMicTestBtn">Mikrofon testen (5 Sek.)</button>
             <div class="wizard-mic-level">
               <div class="wizard-mic-level-bar" id="wizardMicLevelBar"></div>
             </div>
+          </div>
+          <div class="wizard-mic-playback" id="wizardMicPlayback" style="display: none;">
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardPlayMicBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;">
+                <polygon points="5,3 19,12 5,21"/>
+              </svg>
+              Anhören
+            </button>
+            <audio id="wizardMicAudio" style="display: none;"></audio>
           </div>
           <div class="wizard-mic-status" id="wizardMicStatus">Klicken Sie auf "Mikrofon testen" und sprechen Sie</div>
         </div>

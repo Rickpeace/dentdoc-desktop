@@ -230,21 +230,34 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
         req.destroy(new Error('Upload timeout'));
       });
 
-      // Track progress - update every 5% to minimize overhead
+      // Track progress using chunked writing for accurate progress reporting
+      const chunkSize = 512 * 1024; // 512KB chunks
       let lastReportedPercent = 0;
-      const progressInterval = setInterval(() => {
-        const percent = Math.round((req.socket?.bytesWritten || 0) * 100 / fileSize);
-        if (percent !== lastReportedPercent && percent <= 100) {
-          lastReportedPercent = percent;
-          onProgress?.({ phase: 'upload', percent, message: `Upload ${percent}%` });
+      let offset = 0;
+
+      const writeNextChunk = () => {
+        while (offset < fileSize) {
+          const end = Math.min(offset + chunkSize, fileSize);
+          const chunk = fileBuffer.slice(offset, end);
+          offset = end;
+
+          const percent = Math.round(offset * 100 / fileSize);
+          if (percent !== lastReportedPercent) {
+            lastReportedPercent = percent;
+            onProgress?.({ phase: 'upload', percent, message: `Upload ${percent}%` });
+          }
+
+          if (!req.write(chunk)) {
+            // Buffer full, wait for drain and continue
+            req.once('drain', writeNextChunk);
+            return;
+          }
         }
-      }, 100); // Check every 100ms
+        // All chunks written
+        req.end();
+      };
 
-      // Clean up interval when done
-      req.on('close', () => clearInterval(progressInterval));
-
-      // Write all data at once - Node.js handles buffering efficiently
-      req.end(fileBuffer);
+      writeNextChunk();
     });
 
     console.log('[uploadAudio] Upload successful, got upload_url');
@@ -494,10 +507,11 @@ async function getDocumentationV2(transcriptionId, token, bausteine) {
 
 /**
  * Generate documentation using V1.2 Hybrid (1 API call, 60% cost savings)
+ * Now includes 5 shortened versions (parallel generation)
  * @param {number} transcriptionId - Transcription ID
  * @param {string} token - Auth token
  * @param {boolean} runVerifier - Optional: Force verifier check
- * @returns {Promise<{documentation: string, transcript: string|null, meta: object|null}>}
+ * @returns {Promise<{documentation: string, transcript: string|null, meta: object|null, shortenings: object|null}>}
  */
 async function getDocumentationV1_2(transcriptionId, token, runVerifier = false) {
   try {
@@ -509,7 +523,7 @@ async function getDocumentationV1_2(transcriptionId, token, runVerifier = false)
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        timeout: 120000 // 2 minutes (faster than V1.1)
+        timeout: 180000 // 3 minutes (now includes 5 shortenings)
       }
     );
 
@@ -520,7 +534,8 @@ async function getDocumentationV1_2(transcriptionId, token, runVerifier = false)
     return {
       documentation: response.data.documentation,
       transcript: response.data.transcript || null,
-      meta: response.data.meta || null
+      meta: response.data.meta || null,
+      shortenings: response.data.shortenings || null
     };
   } catch (error) {
     console.error('Documentation V1.2 error:', error.response?.data || error.message);

@@ -50,18 +50,17 @@ BEI MULTI AGEIN WENN KEINE NAHME STEHT IM TRANSKRIPT (NULL)
 ---
 einrichtung stimmprofuil updaten ??? man sieht noch keine vorhanden nach ordenr wechsel....
 
-
-
-
 -------
 
 -------
 enn upload scheitert bei vercel keine fehlermelung
 ------
-
 cleanup tsten für audio
 ------
-
+sprecherprofile
+kann man nicht unbennenn
+-----
+in der live app gehen die preznteualen update scrhitte nicht
 
 
 ----!!!!!!!!!!!!!!!

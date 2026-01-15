@@ -388,15 +388,31 @@ const deviceId = crypto.randomUUID();
 
 ---
 
-## Audio-Aufnahme (src/audioRecorder.js)
+## Audio-Aufnahme (src/audioRecorder.js + src/recorder.html)
 
-Audio-Aufnahme via Browser APIs mit 114 Zeilen.
+Audio-Aufnahme via WebRTC mit robuster Fallback-Kaskade.
+
+### Warum WebRTC statt FFmpeg?
+
+| Aspekt | WebRTC | FFmpeg |
+|--------|--------|--------|
+| WASAPI Support | ✅ Ja (intern) | ❌ Nur mit Full-Build (~90MB) |
+| USB-Hub Kompatibilität | ✅ Mit Fallbacks | ✅ Ja |
+| Wireless Headsets | ✅ Ja | ❌ Nicht mit ffmpeg-static |
+| Zusätzliche Binaries | Keine | ffmpeg.exe nötig |
+
+**Entscheidung:** WebRTC nutzt intern WASAPI shared mode, was sowohl USB-Hubs als auch kabellose Headsets unterstützt.
 
 ### Architektur
 
-- Verwendet verstecktes BrowserWindow mit `recorder.html`
-- Kommuniziert via IPC mit Hauptprozess
-- WebM-Format mit Opus-Codec
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   main.js       │────▶│  audioRecorder.js │────▶│  recorder.html  │
+│                 │     │                  │     │  (Hidden Window) │
+│  store.get      │     │  startRecording  │     │                 │
+│ ('microphoneId')│     │  (deviceId)      │     │  WebRTC API     │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+```
 
 ### Audio-Spezifikationen
 
@@ -404,17 +420,239 @@ Audio-Aufnahme via Browser APIs mit 114 Zeilen.
 |-----------|------|
 | Format | WebM + Opus |
 | Kanäle | 1 (Mono) |
-| Sample Rate | 16kHz |
+| Sample Rate | 16kHz (ideal) |
 | Echo Cancellation | Aktiviert |
 | Noise Suppression | Aktiviert |
 
-### Funktionen
+### Robuste Fallback-Kaskade (recorder.html)
+
+Die `getAudioStream(savedDeviceId)` Funktion versucht 4 Methoden nacheinander:
+
+```javascript
+async function getAudioStream(savedDeviceId) {
+  // 300ms Verzögerung für USB-Geräte (USB-Hubs brauchen Zeit)
+  await new Promise(r => setTimeout(r, 300));
+
+  // Prüfe ob gespeichertes Gerät noch existiert
+  const savedDeviceExists = devices.some(d => d.deviceId === savedDeviceId);
+
+  // Versuch 1: Gespeichertes Gerät (exact constraint)
+  if (savedDeviceExists) {
+    stream = await getUserMedia({ deviceId: { exact: savedDeviceId } });
+  }
+
+  // Versuch 2: Gespeichertes Gerät (ideal/preferred - weniger strikt)
+  if (savedDeviceId) {
+    stream = await getUserMedia({ deviceId: { ideal: savedDeviceId } });
+  }
+
+  // Versuch 3: Standard-Gerät mit Audio-Constraints
+  stream = await getUserMedia({
+    audio: { channelCount: 1, sampleRate: { ideal: 16000 }, ... }
+  });
+
+  // Versuch 4: Beliebiges Audio-Gerät (minimal)
+  stream = await getUserMedia({ audio: true });
+}
+```
+
+**Warum diese Reihenfolge:**
+1. **Exact**: Nutzt exakt das vom User gewählte Gerät
+2. **Ideal**: Falls Device-ID sich geändert hat (USB-Reconnect), versucht Chromium ähnliches Gerät
+3. **Default mit Constraints**: System-Standardgerät mit optimalen Audio-Einstellungen
+4. **Minimal**: Letzte Rettung - irgendein funktionierendes Mikrofon
+
+### Funktionen (audioRecorder.js)
 
 | Funktion | Beschreibung |
 |----------|--------------|
-| `startRecording(deleteAudio)` | Startet Aufnahme nach `%TEMP%/dentdoc/recording-{timestamp}.webm` |
-| `stopRecording()` | Stoppt, sendet Blob via IPC, speichert Datei |
-| `cleanupOldRecordings(tempDir)` | Löscht alte Aufnahmen wenn `deleteAudio` aktiviert |
+| `startRecording(deleteAudio, deviceId)` | Startet Aufnahme, sendet deviceId an recorder.html |
+| `stopRecording()` | Stoppt, empfängt Blob via IPC, speichert als WebM |
+| `isRecording()` | Prüft ob Aufnahme aktiv |
+| `cleanupOldRecordings(tempDir)` | Löscht alte Aufnahmen wenn aktiviert |
+
+### IPC-Kommunikation (recorder.html)
+
+| Event | Richtung | Beschreibung |
+|-------|----------|--------------|
+| `start-recording` | Main → Renderer | Startet mit `{ deviceId }` |
+| `stop-recording` | Main → Renderer | Stoppt MediaRecorder |
+| `recording-started` | Renderer → Main | Bestätigung dass Aufnahme läuft |
+| `recording-data` | Renderer → Main | Audio-Blob als Uint8Array |
+| `recording-error` | Renderer → Main | Fehlermeldung |
+| `audio-level-update` | Renderer → Main | Pegel für VU-Meter (0-1) |
+
+### Einstellungs-Flow
+
+```
+SPEICHERN (Dashboard/Setup-Wizard):
+  navigator.mediaDevices.enumerateDevices()
+  → User wählt Mikrofon (deviceId = Browser-ID)
+  → ipcRenderer.invoke('save-settings', { microphoneId })
+  → main.js: store.set('microphoneId', ...)
+
+AUFNAHME:
+  F9 gedrückt
+  → main.js: microphoneId = store.get('microphoneId')
+  → audioRecorder.startRecording(deleteAudio, microphoneId)
+  → recorder.html: getAudioStream(savedDeviceId)
+  → 4-stufige Fallback-Kaskade
+  → MediaRecorder → .webm Datei
+```
+
+### Alternative: FFmpeg-Recorder (nicht aktiv)
+
+Die Datei `src/audioRecorderFFmpeg.js` existiert als Alternative, wird aber **nicht verwendet**.
+
+Sie wäre nur relevant wenn:
+- Ein vollständiger FFmpeg-Build mit WASAPI in `bin/ffmpeg.exe` liegt
+- WebRTC aus irgendeinem Grund nicht funktioniert
+
+**Aktueller Import in main.js:**
+```javascript
+const audioRecorder = require('./src/audioRecorder');  // WebRTC
+// NICHT: require('./src/audioRecorderFFmpeg');        // FFmpeg
+```
+
+---
+
+## Mikrofon-Test (Realistischer Test mit Wiedergabe)
+
+Der Mikrofon-Test in Settings und Setup-Wizard verwendet die **echte Recorder-Logik** statt einer vereinfachten getUserMedia-Prüfung. So kann der User die tatsächliche Aufnahmequalität beurteilen.
+
+### Architektur
+
+```
+┌─────────────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│  Dashboard/Wizard   │────▶│    main.js      │────▶│  audioRecorder   │
+│  (Frontend)         │     │  IPC Handlers   │     │  (recorder.html) │
+└─────────────────────┘     └─────────────────┘     └──────────────────┘
+         │                          │                        │
+         │  start-mic-test          │  startRecording()      │
+         │  ◄─────────────────────  │  ◄─────────────────    │
+         │                          │                        │
+         │  audio-level-update      │                        │
+         │  ◄─────────────────────  │  ◄─────────────────    │
+         │  (Echtzeit-Pegel)        │                        │
+         │                          │                        │
+         │  stop-mic-test           │  stopRecording()       │
+         │  ◄─────────────────────  │  ◄─────────────────    │
+         │                          │                        │
+         │  get-mic-test-audio      │  fs.readFileSync()     │
+         │  ◄─────────────────────  │                        │
+         │  (Base64 für Playback)   │                        │
+         │                          │                        │
+         │  cleanup-mic-test        │  fs.unlinkSync()       │
+         │  ◄─────────────────────  │                        │
+```
+
+### IPC-Handler (main.js)
+
+| Handler | Beschreibung |
+|---------|--------------|
+| `start-mic-test` | Startet echte Aufnahme mit deviceId, räumt vorherige Test-Datei auf |
+| `stop-mic-test` | Stoppt Aufnahme, gibt Dateipfad zurück (robust bei bereits gestoppter Aufnahme) |
+| `get-mic-test-audio` | Liest Audio-Datei und gibt Base64 + MIME-Type für Browser-Playback zurück |
+| `cleanup-mic-test` | Löscht Test-Audio-Datei |
+
+### Audio-Level Weiterleitung
+
+Das `audio-level-update` Event wird vom Recorder-Window an Main gesendet und von dort an **beide** Fenster weitergeleitet:
+
+```javascript
+// main.js
+ipcMain.on('audio-level-update', (event, level) => {
+  // An Status-Overlay (für normale Aufnahme)
+  if (statusOverlay && !statusOverlay.isDestroyed()) {
+    statusOverlay.webContents.send('audio-level', level);
+  }
+  // An Dashboard (für Mic-Test)
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('audio-level-update', level);
+  }
+});
+```
+
+### Ablauf im Frontend
+
+```
+1. User klickt "Mikrofon testen (5 Sek.)"
+   │
+   ▼
+2. ipcRenderer.invoke('start-mic-test', deviceId)
+   │  → Startet echte Aufnahme mit 4-stufiger Fallback-Kaskade
+   │  → Alte Test-Datei wird gelöscht
+   │
+   ▼
+3. Level-Meter wird aktualisiert (audio-level-update Events)
+   │  → Zeigt Echtzeit-Pegel während Aufnahme
+   │
+   ▼
+4. Nach 5 Sekunden: Auto-Stop
+   │  → ipcRenderer.invoke('stop-mic-test')
+   │  → WebM-Datei wird in %TEMP%/dentdoc/ gespeichert
+   │
+   ▼
+5. Playback-Button erscheint ("Anhören")
+   │
+   ▼
+6. User klickt "Anhören"
+   │  → ipcRenderer.invoke('get-mic-test-audio')
+   │  → Audio als Base64 empfangen
+   │  → Wiedergabe über <audio> Element
+   │
+   ▼
+7. Cleanup bei:
+   │  → Neuem Test (automatisch)
+   │  → View-Wechsel (Settings verlassen)
+   │  → Wizard schließen
+   │  → App beenden
+```
+
+### Cleanup-Strategie
+
+Die Test-Audio-Datei wird automatisch aufgeräumt:
+
+| Trigger | Aktion |
+|---------|--------|
+| Neuer Test gestartet | `cleanupMicTestFile()` vor Start |
+| Settings View verlassen | `ipcRenderer.invoke('cleanup-mic-test')` |
+| Setup-Wizard schließen | `ipcRenderer.invoke('cleanup-mic-test')` |
+| App beenden | `cleanupMicTestFile()` in `will-quit` Event |
+
+### Robustheit bei Race-Conditions
+
+Da die Aufnahme asynchron ist, kann es zu Race-Conditions kommen (z.B. Aufnahme bereits gestoppt bevor `stop-mic-test` aufgerufen wird). Diese werden behandelt:
+
+```javascript
+// audioRecorder.js - stopRecording()
+if (!recordingStarted) {
+  // Aufnahme bereits gestoppt - vorhandene Datei zurückgeben
+  if (currentFilePath && fs.existsSync(currentFilePath)) {
+    resolve(currentFilePath);
+    return;
+  }
+}
+
+// main.js - stop-mic-test Handler
+catch (error) {
+  // Fallback: Wenn Datei existiert, trotzdem Erfolg melden
+  if (micTestPath && fs.existsSync(micTestPath)) {
+    return { success: true, path: micTestPath };
+  }
+}
+```
+
+### Unterschied zum alten Mic-Test
+
+| Aspekt | Alt (vor v1.4.2) | Neu (ab v1.4.2) |
+|--------|------------------|-----------------|
+| Audio-Quelle | `getUserMedia({ audio: true })` | Echter Recorder mit Fallback-Kaskade |
+| Audio-Constraints | Minimal | Vollständig (16kHz, Mono, Echo/Noise Cancellation) |
+| Aufnahme | Keine | 5 Sek. WebM-Datei |
+| Wiedergabe | Nicht möglich | "Anhören"-Button mit Audio-Playback |
+| Qualitätsprüfung | Nur Pegel-Anzeige | Tatsächliche Aufnahmequalität hörbar |
+| Device-Fallback | Keiner | 4-stufige Fallback-Kaskade |
 
 ---
 
@@ -669,6 +907,44 @@ Floating, always-on-top Fenster:
 - Draggable, Position wird gespeichert
 - Fehler auto-hide nach 5 Sek
 - Erfolg auto-hide nach 3 Sek (wenn aktiviert)
+
+#### Dynamische Fenstergröße & Click-Through
+
+Das Status-Overlay passt seine Größe dynamisch an den Inhalt an (Recording-Status ist kleiner als Success-Status mit Buttons). Dies verhindert, dass unsichtbare Bereiche unterhalb des Fensters Mausklicks blockieren.
+
+**Lösung für Click-Blocking Problem:**
+```javascript
+// In status-overlay.html - resizeWindowToFit()
+// Wird mehrfach nach Status-Updates aufgerufen (10ms, 50ms, 150ms)
+// um sicherzustellen, dass das Fenster exakt auf den Container passt
+ipcRenderer.send('resize-status-overlay', width, height);
+```
+
+**Drag-Handle über gesamtes Fenster:**
+Das Fenster ist überall verschiebbar durch einen Drag-Handle, der das gesamte Fenster abdeckt aber hinter den interaktiven Elementen liegt:
+
+```css
+/* Drag-Handle im Hintergrund (z-index: 0) */
+.drag-handle {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  -webkit-app-region: drag;
+  z-index: 0;
+}
+
+/* Interaktive Elemente darüber (z-index: 1) */
+.header, .actions, .progress-container, .shortening-section {
+  position: relative;
+  z-index: 1;
+}
+
+/* Buttons explizit no-drag */
+.close-btn, .action-btn, .shortening-btn {
+  -webkit-app-region: no-drag;
+}
+```
+
+So ist das Fenster überall verschiebbar, aber Buttons bleiben klickbar.
 
 ### voice-profiles.html
 
@@ -1114,6 +1390,46 @@ npm run build:win
 
 ## Changelog
 
+### Version 1.4.2 (2025-01-15)
+
+**Realistischer Mikrofon-Test mit Wiedergabe:**
+- Mic-Test in Settings und Setup-Wizard verwendet jetzt echte Recorder-Logik
+- 5-Sekunden Test-Aufnahme mit 4-stufiger Fallback-Kaskade
+- Neuer "Anhören"-Button zur Wiedergabe der Test-Aufnahme
+- Audio-Level-Weiterleitung an Dashboard für Echtzeit-Pegel-Anzeige
+- Automatisches Cleanup der Test-Dateien bei View-Wechsel, Wizard-Schließen und App-Beenden
+- Robuste Fehlerbehandlung bei Race-Conditions (bereits gestoppte Aufnahme)
+
+**Technische Details:**
+- Neue IPC-Handler: `start-mic-test`, `stop-mic-test`, `get-mic-test-audio`, `cleanup-mic-test`
+- Audio-Playback über Base64-Encoding im Browser
+- Test-Dateien in `%TEMP%/dentdoc/` mit automatischem Cleanup
+
+### Version 1.4.1 (2025-01-15)
+
+**Robuste Audio-Aufnahme mit WebRTC Fallback-Kaskade:**
+- Neues `recorder.html` mit 4-stufiger Fallback-Strategie
+- 300ms Verzögerung für USB-Hub Initialisierung
+- Unterstützt sowohl USB-Hubs als auch kabellose Headsets
+- Device-Existenz-Prüfung vor Aufnahmeversuch
+- `audioRecorderFFmpeg.js` erstellt aber nicht aktiv (für zukünftige Nutzung)
+
+**Hintergrund:**
+- Problem: Mikrofon über USB-Hub funktionierte nicht zuverlässig
+- Analyse: WebRTC nutzt intern WASAPI shared mode
+- Lösung: Robuste Fallbacks statt FFmpeg (das WASAPI nur mit Full-Build unterstützt)
+
+### Version 1.4.0 (2025-01-14)
+
+**Direct AssemblyAI Upload:**
+- Bypass Vercel 4.5MB Limit durch direkten Upload zu AssemblyAI
+- UI-Verbesserungen
+
+### Version 1.3.9 (2025-01-13)
+
+**Network Folder Selection Fix:**
+- Netzwerkordner-Auswahl für Transkript-Pfad korrigiert
+
 ### Version 1.3.2 (2025-01-09)
 
 **Async Upload mit Echtzeit-Status-Feedback:**
@@ -1159,5 +1475,5 @@ npm run build:win
 
 ## Version
 
-**Aktuelle Version:** 1.3.2
-**Letztes Update dieser Dokumentation:** 2025-01-09
+**Aktuelle Version:** 1.4.2
+**Letztes Update dieser Dokumentation:** 2025-01-15

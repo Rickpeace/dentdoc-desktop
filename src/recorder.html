@@ -12,31 +12,134 @@
     let audioContext = null;
     let analyser = null;
     let animationId = null;
+    let currentStream = null;
 
-    ipcRenderer.on('start-recording', async () => {
+    /**
+     * Robust audio stream acquisition with fallback cascade
+     * 1. Try saved device ID (exact)
+     * 2. Try saved device ID (preferred)
+     * 3. Try default device
+     * 4. Try any audio device
+     */
+    async function getAudioStream(savedDeviceId) {
+      const errors = [];
+
+      // Small delay to let USB devices initialize (helps with USB hubs)
+      await new Promise(r => setTimeout(r, 300));
+
+      // Get current device list
+      let devices = [];
       try {
-        audioChunks = [];
+        devices = await navigator.mediaDevices.enumerateDevices();
+        const audioDevices = devices.filter(d => d.kind === 'audioinput');
+        console.log('Available audio devices:', audioDevices.map(d => ({ id: d.deviceId, label: d.label })));
+      } catch (e) {
+        console.warn('Could not enumerate devices:', e);
+      }
 
+      // Check if saved device still exists
+      const savedDeviceExists = savedDeviceId && devices.some(d => d.deviceId === savedDeviceId);
+
+      // Attempt 1: Saved device with exact constraint
+      if (savedDeviceExists) {
+        try {
+          console.log('Attempt 1: Trying saved device (exact):', savedDeviceId);
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: { exact: savedDeviceId },
+              channelCount: 1,
+              sampleRate: { ideal: 16000 },
+              echoCancellation: true,
+              noiseSuppression: true
+            }
+          });
+          console.log('Success: Got stream from saved device (exact)');
+          return stream;
+        } catch (e) {
+          console.warn('Attempt 1 failed:', e.message);
+          errors.push(`Saved device (exact): ${e.message}`);
+        }
+      }
+
+      // Attempt 2: Saved device with preferred constraint (less strict)
+      if (savedDeviceId) {
+        try {
+          console.log('Attempt 2: Trying saved device (preferred):', savedDeviceId);
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: { ideal: savedDeviceId },
+              channelCount: 1,
+              sampleRate: { ideal: 16000 },
+              echoCancellation: true,
+              noiseSuppression: true
+            }
+          });
+          console.log('Success: Got stream from saved device (preferred)');
+          return stream;
+        } catch (e) {
+          console.warn('Attempt 2 failed:', e.message);
+          errors.push(`Saved device (preferred): ${e.message}`);
+        }
+      }
+
+      // Attempt 3: Default device with constraints
+      try {
+        console.log('Attempt 3: Trying default device with constraints');
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
-            sampleRate: 16000,
+            sampleRate: { ideal: 16000 },
             echoCancellation: true,
             noiseSuppression: true
           }
         });
+        console.log('Success: Got stream from default device');
+        return stream;
+      } catch (e) {
+        console.warn('Attempt 3 failed:', e.message);
+        errors.push(`Default device: ${e.message}`);
+      }
 
-        // Set up audio analysis
+      // Attempt 4: Any audio device (minimal constraints)
+      try {
+        console.log('Attempt 4: Trying any audio device (minimal constraints)');
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true
+        });
+        console.log('Success: Got stream with minimal constraints');
+        return stream;
+      } catch (e) {
+        console.warn('Attempt 4 failed:', e.message);
+        errors.push(`Any device: ${e.message}`);
+      }
+
+      // All attempts failed
+      const errorMsg = `Kein Mikrofon verfügbar. Versuche:\n${errors.join('\n')}`;
+      throw new Error(errorMsg);
+    }
+
+    ipcRenderer.on('start-recording', async (event, options = {}) => {
+      try {
+        audioChunks = [];
+        const savedDeviceId = options.deviceId || null;
+
+        console.log('Starting recording, saved device:', savedDeviceId);
+
+        // Get audio stream with robust fallback
+        currentStream = await getAudioStream(savedDeviceId);
+
+        // Set up audio analysis for level meter
         audioContext = new AudioContext();
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
-        const source = audioContext.createMediaStreamSource(stream);
+        const source = audioContext.createMediaStreamSource(currentStream);
         source.connect(analyser);
 
         // Start monitoring audio levels
         monitorAudioLevel();
 
-        mediaRecorder = new MediaRecorder(stream, {
+        // Create media recorder
+        mediaRecorder = new MediaRecorder(currentStream, {
           mimeType: 'audio/webm;codecs=opus'
         });
 
@@ -51,25 +154,24 @@
           const arrayBuffer = await audioBlob.arrayBuffer();
           ipcRenderer.send('recording-data', Array.from(new Uint8Array(arrayBuffer)));
 
-          // Stop all tracks
-          stream.getTracks().forEach(track => track.stop());
+          // Cleanup
+          cleanup();
+        };
 
-          // Stop audio analysis
-          if (animationId) {
-            cancelAnimationFrame(animationId);
-            animationId = null;
-          }
-          if (audioContext) {
-            audioContext.close();
-            audioContext = null;
-          }
+        mediaRecorder.onerror = (event) => {
+          console.error('MediaRecorder error:', event.error);
+          ipcRenderer.send('recording-error', event.error?.message || 'MediaRecorder error');
+          cleanup();
         };
 
         mediaRecorder.start(1000); // Collect data every second
-        console.log('Recording started');
+        console.log('Recording started successfully');
+        ipcRenderer.send('recording-started');
+
       } catch (error) {
         console.error('Recording error:', error);
         ipcRenderer.send('recording-error', error.message);
+        cleanup();
       }
     });
 
@@ -80,15 +182,26 @@
       const dataArray = new Uint8Array(bufferLength);
 
       const checkLevel = () => {
+        if (!analyser) return;
+
         analyser.getByteFrequencyData(dataArray);
 
-        // Calculate average volume
-        let sum = 0;
+        // Use RMS (Root Mean Square) for better audio level representation
+        let sumSquares = 0;
+        let peak = 0;
         for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
+          sumSquares += dataArray[i] * dataArray[i];
+          if (dataArray[i] > peak) peak = dataArray[i];
         }
-        const average = sum / bufferLength;
-        const normalized = average / 255; // Normalize to 0-1
+        const rms = Math.sqrt(sumSquares / bufferLength);
+
+        // Combine RMS and peak for responsive meter (70% RMS, 30% peak)
+        const combined = (rms * 0.7 + peak * 0.3);
+
+        // Apply logarithmic scaling for more natural response
+        // and boost low values to make meter more responsive
+        const scaled = Math.pow(combined / 255, 0.6);
+        const normalized = Math.min(1, scaled * 1.5); // Boost and clamp to 0-1
 
         // Send to main process
         ipcRenderer.send('audio-level-update', normalized);
@@ -99,6 +212,29 @@
       checkLevel();
     }
 
+    function cleanup() {
+      // Stop animation
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+
+      // Close audio context
+      if (audioContext) {
+        audioContext.close().catch(() => {});
+        audioContext = null;
+        analyser = null;
+      }
+
+      // Stop all tracks
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+      }
+
+      mediaRecorder = null;
+    }
+
     ipcRenderer.on('stop-recording', () => {
       if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
@@ -107,6 +243,9 @@
         ipcRenderer.send('recording-error', 'No active recording');
       }
     });
+
+    // Handle window unload
+    window.addEventListener('beforeunload', cleanup);
   </script>
 </body>
 </html>

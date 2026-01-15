@@ -58,6 +58,7 @@ let currentShortcut = null;
 let autoHideTimeout = null;
 let lastDocumentation = null;
 let lastTranscript = null;
+let lastShortenings = null;
 let heartbeatInterval = null;
 
 // Single instance lock
@@ -856,7 +857,7 @@ async function processAudioFile(audioFilePath) {
       result = await apiClient.getDocumentationV2(transcriptionId, token, bausteine);
     } else if (docMode === 'hybrid-v1.2') {
       // Hybrid V1.2: 1 API call, 60% cost savings
-      updateStatusOverlay('Dokumentation wird erstellt...', 'Hybrid-KI generiert Zusammenfassung...', 'processing', { step: 4 });
+      updateStatusOverlay('Dokumentation...', 'Hybrid-KI verarbeitet...', 'processing', { step: 4 });
       result = await apiClient.getDocumentationV1_2(transcriptionId, token);
     } else if (docMode === 'single-v1.1') {
       // Single Prompt V1.1: Use experimental endpoint
@@ -874,10 +875,12 @@ async function processAudioFile(audioFilePath) {
 
     const documentation = result.documentation;
     const finalTranscript = result.transcript || transcript;
+    const shortenings = result.shortenings || null;
 
     // Store for "show last result"
     lastDocumentation = documentation;
     lastTranscript = finalTranscript;
+    lastShortenings = shortenings;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
@@ -926,7 +929,7 @@ async function processAudioFile(audioFilePath) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, transcript: finalTranscript, autoClose }
+      { documentation, transcript: finalTranscript, shortenings, autoClose }
     );
 
     // Update user minutes
@@ -1061,7 +1064,9 @@ async function startRecording() {
     tray.setImage(recordingIconPath);
     tray.setToolTip('DentDoc - 🔴 Aufnahme läuft...');
 
-    currentRecordingPath = await audioRecorder.startRecording(deleteAudio);
+    // Get selected microphone (browser device ID)
+    const microphoneId = store.get('microphoneId') || null;
+    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneId);
 
     const shortcut = store.get('shortcut') || 'F9';
     updateStatusOverlay('Aufnahme läuft...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
@@ -1243,6 +1248,28 @@ function getValidOverlayPosition() {
   return { x, y };
 }
 
+// Deterministic overlay size based on state (main process controls size, not renderer)
+function getOverlaySizeForState(type, extra = {}) {
+  switch (type) {
+    case 'recording':
+      return { width: 402, height: 96 };
+
+    case 'processing':
+      return { width: 402, height: 151 };
+
+    case 'success':
+      // Smaller height if no shortenings (e.g., "Letzte Dokumentation anzeigen")
+      const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
+      return { width: 402, height: hasShorts ? 417 : 277 };
+
+    case 'error':
+      return { width: 402, height: 141 };
+
+    default:
+      return { width: 402, height: 121 };
+  }
+}
+
 function createStatusOverlay() {
   if (statusOverlay && !statusOverlay.isDestroyed()) {
     return statusOverlay;
@@ -1265,7 +1292,7 @@ function createStatusOverlay() {
     skipTaskbar: true,
     resizable: false,
     movable: true,
-    focusable: true, // Allow focus for dragging
+    focusable: false, // Don't steal focus from other apps (prevents double-click issue)
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -1275,6 +1302,9 @@ function createStatusOverlay() {
   statusOverlay.loadFile('src/status-overlay.html');
   statusOverlay.setVisibleOnAllWorkspaces(true);
   statusOverlay.setAlwaysOnTop(true, 'screen-saver'); // Höhere Priorität
+
+  // Make statusOverlay globally available for audio level updates
+  global.statusOverlay = statusOverlay;
 
   // Mark overlay as ready once loaded and send any pending status
   statusOverlay.webContents.on('did-finish-load', () => {
@@ -1410,6 +1440,11 @@ function updateStatusOverlay(title, message, type, extra = {}) {
   }
 
   const overlay = createStatusOverlay();
+
+  // Set correct size for this state (pass extra for success size calculation)
+  const { width, height } = getOverlaySizeForState(type, extra);
+  overlay.setSize(width, height, false);
+
   const statusData = {
     title,
     message,
@@ -1417,7 +1452,8 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     step: extra.step || null,
     uploadProgress: extra.uploadProgress,
     documentation: extra.documentation || null,
-    transcript: extra.transcript || null
+    transcript: extra.transcript || null,
+    shortenings: extra.shortenings || null
   };
 
   // Store the data to send
@@ -1430,11 +1466,8 @@ function updateStatusOverlay(title, message, type, extra = {}) {
   }
   // Otherwise the did-finish-load handler will send it
 
-  // Window will auto-resize via IPC from the renderer after content updates
-
   overlay.show();
-  overlay.setAlwaysOnTop(true, 'screen-saver'); // Stelle sicher, dass es im Vordergrund bleibt
-  overlay.focus(); // Bringe es in den Fokus
+  overlay.setAlwaysOnTop(true, 'screen-saver');
 
   // When showing success with actions, validate position to ensure window stays on screen
   if (type === 'success' && extra.documentation) {
@@ -1458,9 +1491,12 @@ function hideStatusOverlay() {
     clearTimeout(autoHideTimeout);
     autoHideTimeout = null;
   }
-  if (statusOverlay && !statusOverlay.isDestroyed()) {
-    statusOverlay.hide();
-  }
+  if (!statusOverlay || statusOverlay.isDestroyed()) return;
+
+  // DESTROY instead of hide - prevents zombie window with cached bounds
+  statusOverlay.destroy();
+  statusOverlay = null;
+  statusOverlayReady = false;
 }
 
 // Show last documentation result again
@@ -1476,7 +1512,8 @@ function showLastResult() {
     'success',
     {
       documentation: lastDocumentation,
-      transcript: lastTranscript
+      transcript: lastTranscript,
+      shortenings: lastShortenings
     }
   );
 }
@@ -1486,19 +1523,8 @@ ipcMain.on('close-status-overlay', () => {
   hideStatusOverlay();
 });
 
-// IPC handler for click-through on transparent areas
-ipcMain.on('set-ignore-mouse-events', (_event, ignore, options = {}) => {
-  if (statusOverlay && !statusOverlay.isDestroyed()) {
-    statusOverlay.setIgnoreMouseEvents(ignore, options);
-  }
-});
-
-// IPC handler for auto-resizing status overlay to fit content
-ipcMain.on('resize-status-overlay', (_event, width, height) => {
-  if (statusOverlay && !statusOverlay.isDestroyed()) {
-    statusOverlay.setSize(width, height);
-  }
-});
+// IPC handler removed - main already sets size in updateStatusOverlay()
+// The renderer notification is no longer needed
 
 // IPC handler for opening microphone settings from error overlay
 ipcMain.on('open-microphone-settings', () => {
@@ -2037,6 +2063,17 @@ ipcMain.handle('logout', async () => {
 });
 
 // IPC Handlers for settings
+// Get Windows audio devices (FFmpeg DirectShow)
+ipcMain.handle('get-audio-devices', async () => {
+  try {
+    const devices = await audioRecorder.listAudioDevices();
+    return devices;
+  } catch (error) {
+    console.error('Error listing audio devices:', error);
+    return [];
+  }
+});
+
 ipcMain.handle('get-settings', async () => {
   // Default paths in Documents folder
   const documentsPath = app.getPath('documents');
@@ -2052,7 +2089,7 @@ ipcMain.handle('get-settings', async () => {
 
   return {
     shortcut: store.get('shortcut') || 'F9',
-    microphoneId: store.get('microphoneId') || null,
+    microphoneId: store.get('microphoneId') || null,      // Browser device ID (WebRTC)
     transcriptPath: storedTranscriptPath !== undefined && storedTranscriptPath !== '' ? storedTranscriptPath : defaultTranscriptPath,
     profilesPath: storedProfilesPath !== undefined && storedProfilesPath !== '' ? storedProfilesPath : defaultProfilesPath,
     autoClose: store.get('autoCloseOverlay', false),
@@ -2066,9 +2103,10 @@ ipcMain.handle('get-settings', async () => {
 ipcMain.handle('save-settings', async (event, settings) => {
   console.log('save-settings called with:', JSON.stringify(settings, null, 2));
 
-  // Save microphone
-  if (settings.microphoneId) {
+  // Save microphone (browser device ID for WebRTC)
+  if (settings.microphoneId !== undefined) {
     store.set('microphoneId', settings.microphoneId);
+    console.log('Saved microphoneId:', settings.microphoneId);
   }
 
   // Save transcript path
@@ -2581,7 +2619,9 @@ ipcMain.handle('start-voice-enrollment', async (event, data) => {
       currentEnrollmentName = data.name;
       currentEnrollmentRole = data.role || 'Arzt';
     }
-    currentEnrollmentPath = await audioRecorder.startRecording();
+    // Get selected microphone (browser device ID)
+    const microphoneId = store.get('microphoneId') || null;
+    currentEnrollmentPath = await audioRecorder.startRecording(false, microphoneId);
     return { success: true };
   } catch (error) {
     isEnrolling = false;
@@ -2648,11 +2688,83 @@ ipcMain.handle('cancel-voice-enrollment', async () => {
   return { success: true };
 });
 
-// Forward audio level updates from recorder to status overlay
+// Forward audio level updates from recorder to status overlay and dashboard
 ipcMain.on('audio-level-update', (event, level) => {
   if (statusOverlay && !statusOverlay.isDestroyed()) {
     statusOverlay.webContents.send('audio-level', level);
   }
+  // Also forward to dashboard for mic test
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('audio-level-update', level);
+  }
+});
+
+// Mic test recording state
+let micTestPath = null;
+
+// Helper to clean up mic test file
+function cleanupMicTestFile() {
+  if (micTestPath && fs.existsSync(micTestPath)) {
+    try {
+      fs.unlinkSync(micTestPath);
+      console.log('Cleaned up mic test file:', micTestPath);
+      micTestPath = null;
+    } catch (e) {
+      console.warn('Could not delete mic test recording:', e);
+    }
+  }
+}
+
+// Start mic test recording (uses real recorder logic)
+ipcMain.handle('start-mic-test', async (event, deviceId) => {
+  try {
+    // Clean up any previous test recording
+    cleanupMicTestFile();
+
+    micTestPath = await audioRecorder.startRecording(false, deviceId);
+    return { success: true, path: micTestPath };
+  } catch (error) {
+    console.error('Mic test start error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Stop mic test recording and return the audio file path
+ipcMain.handle('stop-mic-test', async () => {
+  try {
+    const filePath = await audioRecorder.stopRecording();
+    micTestPath = filePath;
+    return { success: true, path: filePath };
+  } catch (error) {
+    // If recording was already stopped but file exists, return success
+    if (micTestPath && fs.existsSync(micTestPath)) {
+      console.log('Mic test: Recording already stopped, using existing file');
+      return { success: true, path: micTestPath };
+    }
+    console.error('Mic test stop error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get mic test audio file as base64 for playback
+ipcMain.handle('get-mic-test-audio', async () => {
+  try {
+    if (!micTestPath || !fs.existsSync(micTestPath)) {
+      return { success: false, error: 'Keine Test-Aufnahme vorhanden' };
+    }
+    const buffer = fs.readFileSync(micTestPath);
+    const base64 = buffer.toString('base64');
+    return { success: true, data: base64, mimeType: 'audio/webm' };
+  } catch (error) {
+    console.error('Get mic test audio error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Clean up mic test recording
+ipcMain.handle('cleanup-mic-test', async () => {
+  cleanupMicTestFile();
+  return { success: true };
 });
 
 // Open Windows sound settings
@@ -2904,6 +3016,8 @@ app.on('window-all-closed', (e) => {
 app.on('will-quit', () => {
   // Unregister all shortcuts
   globalShortcut.unregisterAll();
+  // Clean up mic test file
+  cleanupMicTestFile();
 });
 
 // Handle second instance
