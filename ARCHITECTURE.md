@@ -246,6 +246,27 @@ Uhrzeit:  14:30
 [Generierte Dokumentation]
 
 ────────────────────────────────────────────────────────────────────
+  KÜRZUNGEN (nur bei v1.2 Hybrid-Modus)
+────────────────────────────────────────────────────────────────────
+── Stichworte (90% kürzer) ──
+[...]
+
+── Chef Ultra (70% kürzer) ──
+[...]
+
+── Chef (50% kürzer) ──
+[...]
+
+── PVS (40% kürzer) ──
+[...]
+
+── ZFA (30% kürzer) ──
+[...]
+
+── Normalisiert (sprachlich optimiert) ──
+[...]
+
+────────────────────────────────────────────────────────────────────
   VOLLSTÄNDIGES TRANSKRIPT
 ────────────────────────────────────────────────────────────────────
 [Vollständiges Transkript mit Sprecherzuordnung]
@@ -1520,6 +1541,22 @@ npm run build:win
 
 ## Changelog
 
+### Version 1.4.4 (2025-01-16)
+
+**Transkript-Export mit Kürzungen:**
+- Gespeicherte Transkript-Dateien enthalten jetzt alle Kürzungsvarianten (Stichworte, Chef Ultra, Chef, PVS, ZFA, Normalisiert) wenn v1.2 Hybrid-Modus verwendet wird
+- Neuer "KÜRZUNGEN"-Abschnitt im Transkript-Dateiformat zwischen Zusammenfassung und Vollständigem Transkript
+
+**Audio-Speicherung korrigiert:**
+- Audio-Dateien werden jetzt mit korrekter `.wav` Erweiterung gespeichert (statt hartcodiert `.webm`)
+- Verwendet automatisch die tatsächliche Dateiendung des Quell-Audios
+
+### Version 1.4.3 (2025-01-15)
+
+**Audio-Optimierung & UI-Verbesserungen:**
+- Instant Audio-Meter ohne Verzögerung
+- Focus-Fixes für Electron-Dialoge
+
 ### Version 1.4.2 (2025-01-15)
 
 **Realistischer Mikrofon-Test mit Wiedergabe:**
@@ -1605,10 +1642,6 @@ npm run build:win
 
 ## Version
 
-**Aktuelle Version:** 1.4.2
-**Letztes Update dieser Dokumentation:** 2025-01-15
+**Aktuelle Version:** 1.4.4
+**Letztes Update dieser Dokumentation:** 2025-01-16
 
-
-
-SPEICHER TRANSCTIP ALLES und nicht nur das was es jetzzt giobt 
-gepeicehrtes audio is in web.. warum nciuht wave ...
