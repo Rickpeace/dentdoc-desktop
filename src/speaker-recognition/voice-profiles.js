@@ -10,14 +10,8 @@ let store = new Store({
   }
 });
 
-// Debug logging helper (imported from main process or standalone)
+// Debug logging helper - set via setDebugLog() from main process to avoid circular dependency
 let debugLog = console.log;
-try {
-  const { debugLog: mainDebugLog } = require('../../main.js');
-  if (mainDebugLog) debugLog = mainDebugLog;
-} catch (e) {
-  // Running standalone, use console.log
-}
 
 /**
  * Set a custom storage path for voice profiles
