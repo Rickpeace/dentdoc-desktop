@@ -420,6 +420,152 @@ async function enrollSpeaker(name, audioFilePath, role = 'Arzt') {
 }
 
 /**
+ * Create embedding from multiple utterance segments for a single speaker
+ * Used by speaker optimization to collect audio from transcript utterances
+ * @param {string} audioFilePath - Path to WAV file
+ * @param {Array} utterances - Utterances for this speaker [{start, end, text}]
+ * @param {number} targetDurationMs - Target total duration (default 15000)
+ * @returns {Object} { embedding, totalDuration, segments }
+ */
+async function createEmbeddingFromUtterances(audioFilePath, utterances, targetDurationMs = 15000) {
+  await initialize();
+
+  const audioSegments = [];
+  let totalDuration = 0;
+  const usedSegments = [];
+
+  // Sort by duration (prefer longer segments for better quality)
+  const sorted = [...utterances].sort((a, b) =>
+    (b.end - b.start) - (a.end - a.start)
+  );
+
+  for (const utt of sorted) {
+    if (totalDuration >= targetDurationMs) break;
+
+    const segmentDuration = Math.min(
+      utt.end - utt.start,
+      targetDurationMs - totalDuration
+    );
+
+    // Skip very short segments (less than 500ms)
+    if (segmentDuration < 500) continue;
+
+    const segment = extractAudioSegment(audioFilePath, utt.start, segmentDuration);
+    if (segment.length > 0) {
+      audioSegments.push(segment);
+      totalDuration += segmentDuration;
+      usedSegments.push({ start: utt.start, duration: segmentDuration });
+    }
+  }
+
+  if (totalDuration < 5000) {
+    throw new Error('Nicht genug Audio-Daten (mindestens 5 Sekunden benötigt)');
+  }
+
+  // Concatenate segments
+  const totalSamples = audioSegments.reduce((sum, arr) => sum + arr.length, 0);
+  const concatenated = new Float32Array(totalSamples);
+  let offset = 0;
+  for (const seg of audioSegments) {
+    concatenated.set(seg, offset);
+    offset += seg.length;
+  }
+
+  // Create embedding
+  const stream = recognizer.createStream();
+  stream.acceptWaveform({ sampleRate: 16000, samples: concatenated });
+  stream.inputFinished();
+  const embedding = recognizer.compute(stream, false);
+
+  return {
+    embedding: Array.from(embedding),
+    totalDuration,
+    segments: usedSegments
+  };
+}
+
+/**
+ * Create a playable WAV preview clip from utterance segments
+ * @param {string} audioFilePath - Source WAV file
+ * @param {Array} utterances - Utterances to extract
+ * @param {string} outputPath - Where to save the preview
+ * @param {number} maxDurationMs - Max duration (default 15000)
+ * @returns {Promise<string>} Path to preview WAV file
+ */
+async function createPreviewClip(audioFilePath, utterances, outputPath, maxDurationMs = 15000) {
+  const audioSegments = [];
+  let totalDuration = 0;
+
+  // Sort by duration (prefer longer segments)
+  const sorted = [...utterances].sort((a, b) =>
+    (b.end - b.start) - (a.end - a.start)
+  );
+
+  for (const utt of sorted) {
+    if (totalDuration >= maxDurationMs) break;
+
+    const segmentDuration = Math.min(utt.end - utt.start, maxDurationMs - totalDuration);
+
+    // Skip very short segments
+    if (segmentDuration < 500) continue;
+
+    const segment = extractAudioSegment(audioFilePath, utt.start, segmentDuration);
+
+    if (segment.length > 0) {
+      audioSegments.push(segment);
+      totalDuration += segmentDuration;
+    }
+  }
+
+  // Concatenate and write WAV
+  const totalSamples = audioSegments.reduce((sum, arr) => sum + arr.length, 0);
+  const concatenated = new Float32Array(totalSamples);
+  let offset = 0;
+  for (const seg of audioSegments) {
+    concatenated.set(seg, offset);
+    offset += seg.length;
+  }
+
+  // Write WAV file
+  writeWavFile(outputPath, concatenated, 16000);
+
+  return outputPath;
+}
+
+/**
+ * Write Float32Array samples to WAV file
+ * @param {string} filePath - Output file path
+ * @param {Float32Array} samples - Audio samples (-1 to 1)
+ * @param {number} sampleRate - Sample rate (default 16000)
+ */
+function writeWavFile(filePath, samples, sampleRate = 16000) {
+  const buffer = Buffer.alloc(44 + samples.length * 2);
+
+  // WAV header
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + samples.length * 2, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);       // Chunk size
+  buffer.writeUInt16LE(1, 20);        // PCM format
+  buffer.writeUInt16LE(1, 22);        // Mono
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);  // Byte rate
+  buffer.writeUInt16LE(2, 32);        // Block align
+  buffer.writeUInt16LE(16, 34);       // Bits per sample
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(samples.length * 2, 40);
+
+  // Audio data (convert float to int16)
+  for (let i = 0; i < samples.length; i++) {
+    const val = Math.max(-1, Math.min(1, samples[i]));
+    buffer.writeInt16LE(Math.round(val * 32767), 44 + i * 2);
+  }
+
+  fs.writeFileSync(filePath, buffer);
+}
+
+/**
  * Clean up resources
  */
 function cleanup() {
@@ -432,8 +578,11 @@ function cleanup() {
 module.exports = {
   initialize,
   createEmbedding,
+  createEmbeddingFromUtterances,
+  createPreviewClip,
   identifySpeaker,
   identifySpeakersFromUtterances,
   enrollSpeaker,
-  cleanup
+  cleanup,
+  extractAudioSegment
 };

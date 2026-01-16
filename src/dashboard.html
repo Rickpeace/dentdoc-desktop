@@ -952,6 +952,109 @@
         </div>
       </div>
 
+      <!-- Speaker Optimization Modal -->
+      <div class="modal-overlay" id="speakerOptimizationModal">
+        <div class="modal speaker-optimization-modal">
+          <div class="modal-header">
+            <h2>
+              <span class="modal-icon">🎯</span>
+              Sprechererkennung optimieren
+            </h2>
+            <button id="optimizationCloseBtn" class="modal-close-btn">&times;</button>
+          </div>
+
+          <p class="modal-description">
+            Wählen Sie einen unerkannten Sprecher aus, um ihn einem Profil zuzuordnen.
+            Patienten werden aus Datenschutzgründen nicht gespeichert.
+          </p>
+
+          <div class="optimization-content">
+            <!-- Left: Unrecognized Speakers List -->
+            <div class="optimization-speakers-column">
+              <h3 class="column-title">Unerkannte Sprecher</h3>
+              <div id="optimizationSpeakersList" class="speaker-list">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Right: Selected Speaker Detail Panel -->
+            <div class="optimization-detail-column">
+              <!-- Placeholder when no speaker selected -->
+              <div id="optimizationPlaceholder" class="detail-placeholder">
+                <div class="placeholder-icon">👆</div>
+                <p>Wählen Sie links einen Sprecher aus</p>
+              </div>
+
+              <!-- Detail panel (shown when speaker selected) -->
+              <div id="optimizationDetailPanel" class="detail-panel" style="display: none;">
+                <h3 id="optimizationSpeakerHeader">Sprecher konfigurieren</h3>
+
+                <!-- Audio Preview -->
+                <div class="audio-preview-section">
+                  <button id="optimizationPreviewBtn" class="btn btn-secondary btn-icon" disabled>
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                      <polygon points="5,3 19,12 5,21"/>
+                    </svg>
+                    Anhören
+                  </button>
+                  <span class="preview-hint">Vorschau der Sprachaufnahme</span>
+                </div>
+
+                <!-- Role Selection -->
+                <div class="role-selection">
+                  <label class="section-label">Rolle auswählen:</label>
+                  <div class="role-buttons">
+                    <button class="role-btn" data-role="Arzt">
+                      <span class="role-icon">👨‍⚕️</span>
+                      <span>Arzt/Ärztin</span>
+                    </button>
+                    <button class="role-btn" data-role="ZFA">
+                      <span class="role-icon">👩‍💼</span>
+                      <span>ZFA</span>
+                    </button>
+                    <button class="role-btn patient-disabled" data-role="Patient" disabled title="Patienten werden aus Datenschutzgründen nicht gespeichert">
+                      <span class="role-icon">👤</span>
+                      <span>Patient</span>
+                      <span class="role-note">(nicht speicherbar)</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Action Selection -->
+                <div class="action-selection">
+                  <label class="section-label">Aktion:</label>
+                  <select id="optimizationActionSelect" class="form-select">
+                    <option value="">Bitte auswählen...</option>
+                    <option value="new">Neues Profil erstellen</option>
+                    <option value="existing">Zu bestehendem Profil hinzufügen</option>
+                  </select>
+                </div>
+
+                <!-- New Profile Section (hidden by default) -->
+                <div id="optimizationNewProfileSection" class="profile-section" style="display: none;">
+                  <label class="section-label">Name des neuen Profils:</label>
+                  <input type="text" id="optimizationNewProfileName" class="form-input" placeholder="z.B. Dr. Müller" />
+                </div>
+
+                <!-- Existing Profile Section (hidden by default) -->
+                <div id="optimizationExistingProfileSection" class="profile-section" style="display: none;">
+                  <label class="section-label">Profil auswählen:</label>
+                  <select id="optimizationProfileSelect" class="form-select">
+                    <option value="">Profil auswählen...</option>
+                    <!-- Populated dynamically, filtered by role -->
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button id="optimizationCancelBtn" class="btn btn-secondary">Abbrechen</button>
+            <button id="optimizationConfirmBtn" class="btn btn-primary" disabled>Speichern</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Feedback View -->
       <div class="view" id="view-feedback">
         <div class="feedback-container">

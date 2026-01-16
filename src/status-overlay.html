@@ -421,6 +421,39 @@
       border-color: #bbf7d0;
     }
 
+    /* Speaker Optimization Section */
+    .optimization-section {
+      margin-top: var(--space-3);
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--glass-border);
+    }
+
+    .optimization-section .action-btn.optimize {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+      border-color: rgba(99, 102, 241, 0.3);
+    }
+
+    .optimization-section .action-btn.optimize:hover {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
+      border-color: rgba(99, 102, 241, 0.5);
+    }
+
+    .optimization-section .action-btn.optimize .btn-icon {
+      background: linear-gradient(135deg, var(--primary-500), #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    [data-theme="light"] .optimization-section .action-btn.optimize {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
+      border-color: rgba(99, 102, 241, 0.2);
+    }
+
+    [data-theme="light"] .optimization-section .action-btn.optimize:hover {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.15));
+      border-color: rgba(99, 102, 241, 0.4);
+    }
+
     .action-btn .btn-text {
       flex: 1;
       min-width: 0;
@@ -589,6 +622,17 @@
             <span>Normalisiert</span>
           </button>
         </div>
+      </div>
+
+      <!-- Speaker Optimization Section -->
+      <div id="optimizationSection" class="optimization-section" style="display: none;">
+        <button id="optimizeBtn" class="action-btn optimize">
+          <div class="btn-icon">🎯</div>
+          <div class="btn-text">
+            <div class="btn-title">Sprechererkennung optimieren</div>
+            <div class="btn-desc"><span id="unrecognizedCount">0</span> unerkannte Sprecher</div>
+          </div>
+        </button>
       </div>
     </div>
   </div>
@@ -762,6 +806,9 @@
             } else {
               shorteningSection.classList.remove('visible');
             }
+
+            // Check for unrecognized speakers and show optimization button
+            checkOptimizationAvailable();
           }
           break;
         case 'error':
@@ -893,6 +940,41 @@
     // Listen for audio level updates
     ipcRenderer.on('audio-level', (event, level) => {
       updateAudioLevel(level);
+    });
+
+    // Speaker Optimization
+    const optimizationSection = document.getElementById('optimizationSection');
+    const optimizeBtn = document.getElementById('optimizeBtn');
+    const unrecognizedCountEl = document.getElementById('unrecognizedCount');
+
+    async function checkOptimizationAvailable() {
+      try {
+        const result = await ipcRenderer.invoke('get-pending-optimization-data');
+        if (result.available && result.unrecognizedCount > 0) {
+          unrecognizedCountEl.textContent = result.unrecognizedCount;
+          optimizationSection.style.display = 'block';
+        } else {
+          optimizationSection.style.display = 'none';
+        }
+      } catch (e) {
+        console.error('Error checking optimization availability:', e);
+        optimizationSection.style.display = 'none';
+      }
+    }
+
+    optimizeBtn.addEventListener('click', async () => {
+      try {
+        // Initialize the optimization session
+        const result = await ipcRenderer.invoke('init-optimization-from-pending');
+        if (result.success) {
+          // Open the dashboard with optimization modal
+          ipcRenderer.send('open-speaker-optimization-modal');
+        } else {
+          console.error('Failed to init optimization:', result.error);
+        }
+      } catch (e) {
+        console.error('Error starting optimization:', e);
+      }
     });
   </script>
 </body>

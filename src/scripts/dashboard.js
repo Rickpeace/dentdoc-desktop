@@ -2833,3 +2833,469 @@ document.getElementById('themenModal')?.addEventListener('click', (e) => {
   }
 });
 
+
+// =============================================================================
+// SPEAKER OPTIMIZATION
+// =============================================================================
+
+let optimizationData = null;           // Data from main.js: { unrecognizedSpeakers, speakerMapping }
+let optimizationSelectedSpeaker = null; // Currently selected speaker ID (e.g., 'SPEAKER_00')
+let optimizationSelectedRole = null;    // 'Arzt' | 'ZFA'
+let optimizationAudioElement = null;    // Audio element for preview playback
+let optimizationProfiles = [];          // Available profiles for dropdown
+
+/**
+ * Listen for 'show-speaker-optimization-modal' from main.js
+ * This is triggered when user clicks "Optimize" in status-overlay
+ */
+ipcRenderer.on('show-speaker-optimization-modal', async (event, data) => {
+  console.log('[SpeakerOptimization] Modal requested with data:', data);
+  optimizationData = data;
+  await openSpeakerOptimizationModal();
+});
+
+/**
+ * Opens the speaker optimization modal and populates it with data
+ */
+async function openSpeakerOptimizationModal() {
+  const modal = document.getElementById('speakerOptimizationModal');
+  if (!modal) {
+    console.error('[SpeakerOptimization] Modal element not found');
+    return;
+  }
+
+  // Reset state
+  optimizationSelectedSpeaker = null;
+  optimizationSelectedRole = null;
+  optimizationAudioElement = null;
+
+  // Load available profiles for dropdown
+  try {
+    optimizationProfiles = await ipcRenderer.invoke('get-profiles-for-optimization');
+  } catch (error) {
+    console.error('[SpeakerOptimization] Error loading profiles:', error);
+    optimizationProfiles = [];
+  }
+
+  // Populate unrecognized speakers list
+  populateUnrecognizedSpeakers();
+
+  // Reset detail panel to initial state
+  resetOptimizationDetailPanel();
+
+  // Show modal
+  modal.classList.add('active');
+}
+
+/**
+ * Populates the list of unrecognized speakers
+ */
+function populateUnrecognizedSpeakers() {
+  const listEl = document.getElementById('optimizationSpeakersList');
+  if (!listEl || !optimizationData) return;
+
+  const { unrecognizedSpeakers, speakerMapping } = optimizationData;
+
+  if (!unrecognizedSpeakers || unrecognizedSpeakers.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">Keine unerkannten Sprecher</div>';
+    return;
+  }
+
+  listEl.innerHTML = unrecognizedSpeakers.map(speaker => {
+    // Get speaker info from mapping
+    const mappingEntry = speakerMapping?.find(m => m.speakerId === speaker.speakerId);
+    const utteranceCount = speaker.utteranceCount || 0;
+    const totalDuration = speaker.totalDurationMs || 0;
+    const durationSec = (totalDuration / 1000).toFixed(1);
+    const displayLabel = mappingEntry?.displayLabel || speaker.speakerId;
+
+    return `
+      <div class="speaker-card" data-speaker-id="${speaker.speakerId}">
+        <div class="speaker-card-header">
+          <span class="speaker-label">${escapeHtml(displayLabel)}</span>
+          <span class="speaker-badge unrecognized">Unerkannt</span>
+        </div>
+        <div class="speaker-card-stats">
+          <span>${utteranceCount} Äußerungen</span>
+          <span>${durationSec}s Audio</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Add click handlers
+  listEl.querySelectorAll('.speaker-card').forEach(card => {
+    card.addEventListener('click', () => {
+      selectOptimizationSpeaker(card.dataset.speakerId);
+    });
+  });
+}
+
+/**
+ * Selects a speaker and shows the detail panel
+ */
+async function selectOptimizationSpeaker(speakerId) {
+  optimizationSelectedSpeaker = speakerId;
+  optimizationSelectedRole = null;
+
+  // Update speaker card selection
+  document.querySelectorAll('#optimizationSpeakersList .speaker-card').forEach(card => {
+    card.classList.toggle('selected', card.dataset.speakerId === speakerId);
+  });
+
+  // Show detail panel
+  const detailPanel = document.getElementById('optimizationDetailPanel');
+  const placeholder = document.getElementById('optimizationPlaceholder');
+
+  if (placeholder) placeholder.style.display = 'none';
+  if (detailPanel) detailPanel.style.display = 'block';
+
+  // Get speaker info
+  const speaker = optimizationData.unrecognizedSpeakers.find(s => s.speakerId === speakerId);
+  const mappingEntry = optimizationData.speakerMapping?.find(m => m.speakerId === speakerId);
+  const displayLabel = mappingEntry?.displayLabel || speakerId;
+
+  // Update header
+  const headerEl = document.getElementById('optimizationSpeakerHeader');
+  if (headerEl) {
+    headerEl.textContent = `${displayLabel} konfigurieren`;
+  }
+
+  // Reset role selection
+  document.querySelectorAll('.role-btn').forEach(btn => {
+    btn.classList.remove('selected');
+  });
+
+  // Reset action selection
+  document.getElementById('optimizationActionSelect').value = '';
+  document.getElementById('optimizationNewProfileSection').style.display = 'none';
+  document.getElementById('optimizationExistingProfileSection').style.display = 'none';
+
+  // Update preview button state
+  updateOptimizationPreviewButton();
+
+  // Update confirm button state
+  updateOptimizationConfirmButton();
+}
+
+/**
+ * Resets the detail panel to initial state
+ */
+function resetOptimizationDetailPanel() {
+  const detailPanel = document.getElementById('optimizationDetailPanel');
+  const placeholder = document.getElementById('optimizationPlaceholder');
+
+  if (detailPanel) detailPanel.style.display = 'none';
+  if (placeholder) placeholder.style.display = 'flex';
+}
+
+/**
+ * Updates the preview button state based on selection
+ */
+function updateOptimizationPreviewButton() {
+  const btn = document.getElementById('optimizationPreviewBtn');
+  if (btn) {
+    btn.disabled = !optimizationSelectedSpeaker;
+  }
+}
+
+/**
+ * Updates the confirm button state
+ */
+function updateOptimizationConfirmButton() {
+  const btn = document.getElementById('optimizationConfirmBtn');
+  if (!btn) return;
+
+  const actionSelect = document.getElementById('optimizationActionSelect');
+  const action = actionSelect?.value;
+
+  let isValid = false;
+
+  if (optimizationSelectedSpeaker && optimizationSelectedRole) {
+    if (action === 'new') {
+      const nameInput = document.getElementById('optimizationNewProfileName');
+      isValid = nameInput?.value.trim().length > 0;
+    } else if (action === 'existing') {
+      const profileSelect = document.getElementById('optimizationProfileSelect');
+      isValid = profileSelect?.value.length > 0;
+    }
+  }
+
+  btn.disabled = !isValid;
+}
+
+/**
+ * Handles role button clicks
+ */
+function handleRoleSelection(role) {
+  if (role === 'Patient') {
+    // Patients cannot be enrolled - show tooltip/message
+    return;
+  }
+
+  optimizationSelectedRole = role;
+
+  // Update button states
+  document.querySelectorAll('.role-btn').forEach(btn => {
+    btn.classList.remove('selected');
+    if (btn.dataset.role === role) {
+      btn.classList.add('selected');
+    }
+  });
+
+  // Update profile dropdown to filter by role
+  populateOptimizationProfileDropdown();
+  updateOptimizationConfirmButton();
+}
+
+/**
+ * Populates the existing profile dropdown filtered by role
+ */
+function populateOptimizationProfileDropdown() {
+  const select = document.getElementById('optimizationProfileSelect');
+  if (!select) return;
+
+  select.innerHTML = '<option value="">Profil auswählen...</option>';
+
+  if (!optimizationSelectedRole) return;
+
+  // Filter profiles by selected role
+  const matchingProfiles = optimizationProfiles.filter(p => p.role === optimizationSelectedRole);
+
+  matchingProfiles.forEach(profile => {
+    const option = document.createElement('option');
+    option.value = profile.id;
+    option.textContent = profile.name;
+    select.appendChild(option);
+  });
+}
+
+/**
+ * Handles action selection (new profile vs existing)
+ */
+function handleActionSelection(action) {
+  const newSection = document.getElementById('optimizationNewProfileSection');
+  const existingSection = document.getElementById('optimizationExistingProfileSection');
+
+  if (action === 'new') {
+    newSection.style.display = 'block';
+    existingSection.style.display = 'none';
+  } else if (action === 'existing') {
+    newSection.style.display = 'none';
+    existingSection.style.display = 'block';
+    populateOptimizationProfileDropdown();
+  } else {
+    newSection.style.display = 'none';
+    existingSection.style.display = 'none';
+  }
+
+  updateOptimizationConfirmButton();
+}
+
+/**
+ * Plays audio preview for selected speaker
+ */
+async function playOptimizationPreview() {
+  if (!optimizationSelectedSpeaker) return;
+
+  const btn = document.getElementById('optimizationPreviewBtn');
+  const originalContent = btn.innerHTML;
+
+  try {
+    // If already playing, stop
+    if (optimizationAudioElement && !optimizationAudioElement.paused) {
+      optimizationAudioElement.pause();
+      optimizationAudioElement.currentTime = 0;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Anhören';
+      return;
+    }
+
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="animation: spin 1s linear infinite;"><circle cx="12" cy="12" r="10" stroke="currentColor" fill="none" stroke-width="2" stroke-dasharray="30 70"/></svg> Lädt...';
+    btn.disabled = true;
+
+    // Get audio preview from main process
+    const result = await ipcRenderer.invoke('get-speaker-preview', optimizationSelectedSpeaker);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Preview konnte nicht geladen werden');
+    }
+
+    // Create audio element
+    optimizationAudioElement = new Audio(`data:audio/wav;base64,${result.audioData}`);
+
+    optimizationAudioElement.onended = () => {
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Anhören';
+      btn.disabled = false;
+    };
+
+    optimizationAudioElement.onerror = () => {
+      btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Anhören';
+      btn.disabled = false;
+      console.error('[SpeakerOptimization] Audio playback error');
+    };
+
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Stoppen';
+    btn.disabled = false;
+
+    await optimizationAudioElement.play();
+  } catch (error) {
+    console.error('[SpeakerOptimization] Preview error:', error);
+    btn.innerHTML = originalContent;
+    btn.disabled = false;
+    alert('Fehler beim Laden der Vorschau: ' + error.message);
+  }
+}
+
+/**
+ * Confirms the speaker enrollment
+ */
+async function confirmOptimizationEnrollment() {
+  if (!optimizationSelectedSpeaker || !optimizationSelectedRole) {
+    return;
+  }
+
+  const actionSelect = document.getElementById('optimizationActionSelect');
+  const action = actionSelect?.value;
+
+  const btn = document.getElementById('optimizationConfirmBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Wird gespeichert...';
+
+  try {
+    let enrollData = {
+      speakerId: optimizationSelectedSpeaker,
+      role: optimizationSelectedRole,
+      action: action
+    };
+
+    if (action === 'new') {
+      const nameInput = document.getElementById('optimizationNewProfileName');
+      enrollData.newProfileName = nameInput.value.trim();
+
+      if (!enrollData.newProfileName) {
+        throw new Error('Bitte geben Sie einen Namen ein');
+      }
+    } else if (action === 'existing') {
+      const profileSelect = document.getElementById('optimizationProfileSelect');
+      enrollData.existingProfileId = profileSelect.value;
+
+      if (!enrollData.existingProfileId) {
+        throw new Error('Bitte wählen Sie ein Profil');
+      }
+    }
+
+    const result = await ipcRenderer.invoke('enroll-optimized-speaker', enrollData);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Speichern fehlgeschlagen');
+    }
+
+    // Show success feedback
+    btn.textContent = '✓ Gespeichert!';
+    btn.classList.add('success');
+
+    // Remove the enrolled speaker from list
+    optimizationData.unrecognizedSpeakers = optimizationData.unrecognizedSpeakers.filter(
+      s => s.speakerId !== optimizationSelectedSpeaker
+    );
+
+    // Check if there are more speakers to process
+    if (optimizationData.unrecognizedSpeakers.length === 0) {
+      // All done - close modal after delay
+      setTimeout(() => {
+        closeSpeakerOptimizationModal();
+      }, 1000);
+    } else {
+      // Refresh the list and reset selection
+      setTimeout(() => {
+        populateUnrecognizedSpeakers();
+        resetOptimizationDetailPanel();
+        btn.textContent = originalText;
+        btn.classList.remove('success');
+        btn.disabled = false;
+      }, 1000);
+    }
+
+  } catch (error) {
+    console.error('[SpeakerOptimization] Enrollment error:', error);
+    btn.textContent = originalText;
+    btn.disabled = false;
+    alert('Fehler: ' + error.message);
+  }
+}
+
+/**
+ * Closes the speaker optimization modal
+ */
+async function closeSpeakerOptimizationModal() {
+  const modal = document.getElementById('speakerOptimizationModal');
+  if (modal) {
+    modal.classList.remove('active');
+  }
+
+  // Stop any playing audio
+  if (optimizationAudioElement) {
+    optimizationAudioElement.pause();
+    optimizationAudioElement = null;
+  }
+
+  // Cancel optimization session
+  try {
+    await ipcRenderer.invoke('cancel-speaker-optimization');
+  } catch (error) {
+    console.error('[SpeakerOptimization] Cancel error:', error);
+  }
+
+  // Reset state
+  optimizationData = null;
+  optimizationSelectedSpeaker = null;
+  optimizationSelectedRole = null;
+  optimizationProfiles = [];
+}
+
+// Speaker Optimization Event Listeners
+document.getElementById('optimizationCloseBtn')?.addEventListener('click', closeSpeakerOptimizationModal);
+document.getElementById('optimizationCancelBtn')?.addEventListener('click', closeSpeakerOptimizationModal);
+document.getElementById('optimizationPreviewBtn')?.addEventListener('click', playOptimizationPreview);
+document.getElementById('optimizationConfirmBtn')?.addEventListener('click', confirmOptimizationEnrollment);
+
+// Role buttons
+document.querySelectorAll('.role-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    handleRoleSelection(btn.dataset.role);
+  });
+});
+
+// Action select
+document.getElementById('optimizationActionSelect')?.addEventListener('change', (e) => {
+  handleActionSelection(e.target.value);
+});
+
+// Profile select
+document.getElementById('optimizationProfileSelect')?.addEventListener('change', () => {
+  updateOptimizationConfirmButton();
+});
+
+// New profile name input
+document.getElementById('optimizationNewProfileName')?.addEventListener('input', () => {
+  updateOptimizationConfirmButton();
+});
+
+// Close modal on overlay click
+document.getElementById('speakerOptimizationModal')?.addEventListener('click', (e) => {
+  if (e.target.classList.contains('modal-overlay')) {
+    closeSpeakerOptimizationModal();
+  }
+});
+
+// Close modal on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('speakerOptimizationModal');
+    if (modal?.classList.contains('active')) {
+      closeSpeakerOptimizationModal();
+    }
+  }
+});
+

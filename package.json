@@ -1,6 +1,6 @@
 {
   "name": "dentdoc-desktop",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "DentDoc Desktop App - Automatische Dokumentation für Zahnärzte",
   "main": "main.js",
   "scripts": {

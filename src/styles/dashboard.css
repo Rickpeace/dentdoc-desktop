@@ -3175,3 +3175,457 @@ kbd {
   color: var(--text-tertiary);
 }
 
+/* ===========================================
+   Speaker Optimization Modal
+   =========================================== */
+.speaker-optimization-modal {
+  max-width: 520px;
+  width: 100%;
+}
+
+.speaker-optimization-modal h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.speaker-optimization-modal .modal-icon {
+  font-size: 1.5rem;
+}
+
+.speaker-optimization-modal .modal-description {
+  color: var(--text-secondary);
+  margin-bottom: var(--space-5);
+  font-size: 0.875rem;
+}
+
+/* Speaker list */
+.speaker-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.speaker-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.speaker-card:hover {
+  border-color: var(--primary-500);
+  background: var(--glass-bg-hover);
+}
+
+.speaker-card.selected {
+  border-color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.speaker-card .speaker-icon {
+  font-size: 1.5rem;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.speaker-card .speaker-info {
+  flex: 1;
+}
+
+.speaker-card .speaker-label {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.speaker-card .speaker-stats {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* Selected speaker panel */
+.selected-speaker-panel {
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+}
+
+.selected-speaker-panel h3 {
+  font-size: 0.9375rem;
+  margin-bottom: var(--space-4);
+  color: var(--text-primary);
+}
+
+/* Audio preview */
+.audio-preview-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.audio-preview-section .preview-duration {
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+}
+
+/* Role selection */
+.role-selection {
+  margin-bottom: var(--space-4);
+}
+
+.section-label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.role-buttons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.role-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.role-btn:hover:not(.disabled) {
+  border-color: var(--primary-500);
+  background: var(--glass-bg-hover);
+}
+
+.role-btn.active {
+  border-color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--primary-500);
+}
+
+.role-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.role-btn .role-icon {
+  font-size: 1.5rem;
+}
+
+.role-btn .role-note {
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+}
+
+/* Action selection */
+.action-selection {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--glass-border);
+}
+
+.action-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.action-option:hover {
+  border-color: var(--primary-500);
+}
+
+.action-option:has(input:checked) {
+  border-color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.action-option input[type="radio"] {
+  margin-top: 3px;
+  accent-color: var(--primary-500);
+}
+
+.action-option label {
+  flex: 1;
+  cursor: pointer;
+}
+
+.action-option .action-title {
+  display: block;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.action-option .profile-select,
+.action-option .profile-name-input {
+  width: 100%;
+  padding: var(--space-2);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.action-option .profile-select:focus,
+.action-option .profile-name-input:focus {
+  outline: none;
+  border-color: var(--primary-500);
+}
+
+/* New two-column layout for speaker optimization modal */
+.speaker-optimization-modal {
+  max-width: 720px;
+}
+
+.speaker-optimization-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-3);
+}
+
+.speaker-optimization-modal .modal-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.speaker-optimization-modal .modal-close-btn:hover {
+  color: var(--text-primary);
+}
+
+.optimization-content {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  min-height: 300px;
+}
+
+.optimization-speakers-column {
+  border-right: 1px solid var(--glass-border);
+  padding-right: var(--space-4);
+}
+
+.optimization-speakers-column .column-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.optimization-speakers-column .speaker-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.optimization-detail-column {
+  min-height: 280px;
+}
+
+/* Detail placeholder */
+.detail-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.detail-placeholder .placeholder-icon {
+  font-size: 2rem;
+  margin-bottom: var(--space-2);
+  opacity: 0.5;
+}
+
+.detail-placeholder p {
+  font-size: 0.875rem;
+}
+
+/* Detail panel */
+.detail-panel {
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  height: 100%;
+}
+
+.detail-panel h3 {
+  font-size: 1rem;
+  color: var(--text-primary);
+  margin-bottom: var(--space-4);
+}
+
+/* Speaker card styles for new layout */
+.speaker-card {
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--space-3);
+}
+
+.speaker-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: var(--space-1);
+}
+
+.speaker-card .speaker-badge {
+  font-size: 0.625rem;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.speaker-card .speaker-badge.unrecognized {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--error-500);
+}
+
+.speaker-card-stats {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+}
+
+.speaker-card-stats span {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Audio preview hint */
+.audio-preview-section .preview-hint {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+/* Profile sections */
+.profile-section {
+  margin-top: var(--space-3);
+}
+
+.profile-section .form-input,
+.profile-section .form-select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.profile-section .form-input:focus,
+.profile-section .form-select:focus {
+  outline: none;
+  border-color: var(--primary-500);
+}
+
+/* Action select in detail panel */
+.action-selection .form-select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  margin-top: var(--space-1);
+}
+
+.action-selection .form-select:focus {
+  outline: none;
+  border-color: var(--primary-500);
+}
+
+/* Role button selected state (using .selected instead of .active) */
+.role-btn.selected {
+  border-color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--primary-500);
+}
+
+/* Patient disabled button special styling */
+.role-btn.patient-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  position: relative;
+}
+
+.role-btn.patient-disabled::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 3px,
+    rgba(255, 255, 255, 0.03) 3px,
+    rgba(255, 255, 255, 0.03) 6px
+  );
+  border-radius: var(--radius-md);
+  pointer-events: none;
+}
+
+/* Confirm button success state */
+.modal-actions .btn.success {
+  background: var(--success-500);
+  border-color: var(--success-500);
+}
+
+/* Empty state in speaker list */
+.speaker-list .empty-state {
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 0.875rem;
+}
+

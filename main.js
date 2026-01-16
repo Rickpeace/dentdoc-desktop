@@ -349,9 +349,10 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {string} options.tempAudioPath - Path to temporary audio file
  * @param {boolean} options.saveTranscript - Whether to save transcript
  * @param {boolean} options.saveAudio - Whether to save audio
+ * @param {Object} options.shortenings - Shortenings from v1.2 hybrid mode
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, saveTranscript = true, saveAudio = false } = options;
+  const { tempAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -385,6 +386,40 @@ function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping 
   let filenameSuffix = nameParts.length > 0 ? nameParts.join('_') : 'Unbekannt';
   const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}_${filenameSuffix}`;
 
+  // Build shortenings section if available
+  let shorteningsSection = '';
+  if (shortenings) {
+    const shorteningParts = [];
+    if (shortenings.keywords90) {
+      shorteningParts.push(`── Stichworte (90% kürzer) ──\n\n${shortenings.keywords90}`);
+    }
+    if (shortenings.chef70) {
+      shorteningParts.push(`── Chef Ultra (70% kürzer) ──\n\n${shortenings.chef70}`);
+    }
+    if (shortenings.chef50) {
+      shorteningParts.push(`── Chef (50% kürzer) ──\n\n${shortenings.chef50}`);
+    }
+    if (shortenings.pvs40) {
+      shorteningParts.push(`── PVS (40% kürzer) ──\n\n${shortenings.pvs40}`);
+    }
+    if (shortenings.zfa30) {
+      shorteningParts.push(`── ZFA (30% kürzer) ──\n\n${shortenings.zfa30}`);
+    }
+    if (shortenings.normalized) {
+      shorteningParts.push(`── Normalisiert (sprachlich optimiert) ──\n\n${shortenings.normalized}`);
+    }
+    if (shorteningParts.length > 0) {
+      shorteningsSection = `
+
+────────────────────────────────────────────────────────────────────
+  KÜRZUNGEN
+────────────────────────────────────────────────────────────────────
+
+${shorteningParts.join('\n\n')}
+`;
+    }
+  }
+
   // Create file content for transcript
   const content = `╔════════════════════════════════════════════════════════════════════╗
 ║                          DENTDOC TRANSKRIPT                        ║
@@ -398,7 +433,7 @@ Uhrzeit:  ${now.toLocaleTimeString('de-DE')}
 ────────────────────────────────────────────────────────────────────
 
 ${summary}
-
+${shorteningsSection}
 
 ────────────────────────────────────────────────────────────────────
   VOLLSTÄNDIGES TRANSKRIPT
@@ -445,7 +480,9 @@ ${transcript}
       if (tempAudioPath) {
         console.log('tempAudioPath exists check:', fs.existsSync(tempAudioPath));
         if (fs.existsSync(tempAudioPath)) {
-          const audioPath = path.join(folderPath, `${baseFilename}.webm`);
+          // Use actual file extension from source (wav, webm, etc.)
+          const audioExt = path.extname(tempAudioPath) || '.wav';
+          const audioPath = path.join(folderPath, `${baseFilename}${audioExt}`);
           fs.copyFileSync(tempAudioPath, audioPath);
           console.log('Audio saved to:', audioPath);
         } else {
@@ -844,6 +881,47 @@ async function processAudioFile(audioFilePath) {
         // Update backend with speaker mapping
         await apiClient.updateSpeakerMapping(transcriptionId, currentSpeakerMapping, token);
         debugLog('Speaker mapping updated in backend successfully');
+
+        // Store optimization data if there are unrecognized speakers
+        const hasUnrecognized = Object.values(currentSpeakerMapping).some(
+          label => label.startsWith('Sprecher ')
+        );
+
+        if (hasUnrecognized) {
+          // Store data for potential speaker optimization
+          // Note: optimizationSession is set by IPC handler, but we prepare the data here
+
+          // Copy audio file to last-recording.wav for optimization
+          // This ensures the audio is available until the next recording
+          const tempDir = path.join(app.getPath('temp'), 'dentdoc');
+          const lastRecordingPath = path.join(tempDir, 'last-recording.wav');
+
+          try {
+            // Ensure temp directory exists
+            if (!fs.existsSync(tempDir)) {
+              fs.mkdirSync(tempDir, { recursive: true });
+            }
+
+            // Copy current recording to last-recording.wav
+            if (fs.existsSync(audioFilePath)) {
+              fs.copyFileSync(audioFilePath, lastRecordingPath);
+              debugLog(`[SpeakerOptimization] Audio copied to ${lastRecordingPath}`);
+            }
+          } catch (copyError) {
+            console.error('Failed to copy audio for optimization:', copyError);
+            debugLog(`[SpeakerOptimization] Failed to copy audio: ${copyError.message}`);
+          }
+
+          const optimizationData = {
+            transcriptionId,
+            audioFilePath: lastRecordingPath, // Use the persisted path
+            utterances,
+            speakerMapping: currentSpeakerMapping
+          };
+          // Store temporarily for the status overlay to access
+          global.pendingOptimizationData = optimizationData;
+          debugLog(`[SpeakerOptimization] ${Object.values(currentSpeakerMapping).filter(l => l.startsWith('Sprecher ')).length} unrecognized speakers - optimization available`);
+        }
       }
     } catch (speakerError) {
       console.error('Speaker recognition failed:', speakerError);
@@ -903,7 +981,8 @@ async function processAudioFile(audioFilePath) {
         saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
           tempAudioPath: currentRecordingPath,
           saveTranscript: autoExport,
-          saveAudio: keepAudio
+          saveAudio: keepAudio,
+          shortenings: shortenings
         });
       } catch (error) {
         console.error('Failed to save recording files:', error);
@@ -2901,6 +2980,373 @@ ipcMain.handle('get-mic-test-audio', async () => {
 ipcMain.handle('cleanup-mic-test', async () => {
   cleanupMicTestFile();
   return { success: true };
+});
+
+// ============ Speaker Optimization IPC Handlers ============
+// See SPEAKER-RECOGNITION.md for full documentation
+
+// Store optimization session data
+let optimizationSession = null;
+
+/**
+ * Start optimization flow - analyze unrecognized speakers
+ * @param {Object} data - { transcriptionId, audioFilePath, utterances, speakerMapping }
+ */
+ipcMain.handle('start-speaker-optimization', async (event, data) => {
+  try {
+    const { transcriptionId, audioFilePath, utterances, speakerMapping } = data;
+
+    // Find unrecognized speakers (those showing as "Sprecher A/B/C")
+    const unrecognizedSpeakers = [];
+
+    for (const [speakerId, label] of Object.entries(speakerMapping)) {
+      if (label.startsWith('Sprecher ')) {
+        // Get utterances for this speaker
+        const speakerUtterances = utterances.filter(u => u.speaker === speakerId);
+        const totalDuration = speakerUtterances.reduce(
+          (sum, u) => sum + (u.end - u.start), 0
+        );
+
+        unrecognizedSpeakers.push({
+          speakerId,
+          label,
+          utterances: speakerUtterances,
+          totalDuration,
+          // Backend would provide inferred role, for now null
+          inferredRole: null
+        });
+      }
+    }
+
+    optimizationSession = {
+      transcriptionId,
+      audioFilePath,
+      utterances,
+      speakerMapping,
+      unrecognizedSpeakers,
+      createdAt: Date.now()
+    };
+
+    debugLog(`[SpeakerOptimization] Session started with ${unrecognizedSpeakers.length} unrecognized speakers`);
+
+    return {
+      success: true,
+      unrecognizedSpeakers: unrecognizedSpeakers.map(s => ({
+        speakerId: s.speakerId,
+        label: s.label,
+        totalDuration: s.totalDuration,
+        inferredRole: s.inferredRole,
+        utteranceCount: s.utterances.length
+      }))
+    };
+  } catch (error) {
+    console.error('Start speaker optimization error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Get preview audio for a specific unrecognized speaker
+ * @param {string} speakerId - Speaker ID (A, B, C, etc.)
+ */
+ipcMain.handle('get-speaker-preview', async (event, speakerId) => {
+  try {
+    if (!optimizationSession) {
+      throw new Error('Keine Optimierungs-Session aktiv');
+    }
+
+    const speaker = optimizationSession.unrecognizedSpeakers.find(
+      s => s.speakerId === speakerId
+    );
+
+    if (!speaker) {
+      throw new Error('Sprecher nicht gefunden');
+    }
+
+    // Create preview clip (max 15 seconds)
+    const previewPath = path.join(os.tmpdir(), `dentdoc-preview-${speakerId}.wav`);
+    await speakerRecognition.createPreviewClip(
+      optimizationSession.audioFilePath,
+      speaker.utterances,
+      previewPath,
+      15000
+    );
+
+    // Read as base64 for playback
+    const buffer = fs.readFileSync(previewPath);
+    const base64 = buffer.toString('base64');
+
+    return {
+      success: true,
+      audio: base64,
+      mimeType: 'audio/wav',
+      duration: Math.min(speaker.totalDuration, 15000)
+    };
+  } catch (error) {
+    console.error('Get speaker preview error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Enroll unrecognized speaker to existing or new profile
+ * @param {Object} data - { speakerId, action, profileId?, name?, role }
+ *   action: 'add-to-existing' | 'create-new'
+ */
+ipcMain.handle('enroll-optimized-speaker', async (event, data) => {
+  try {
+    const { speakerId, action, profileId, name, role } = data;
+
+    if (!optimizationSession) {
+      throw new Error('Keine Optimierungs-Session aktiv');
+    }
+
+    // CRITICAL: Never enroll patients
+    if (role === 'Patient') {
+      throw new Error('Patienten können nicht als Stimmprofil gespeichert werden');
+    }
+
+    const speaker = optimizationSession.unrecognizedSpeakers.find(
+      s => s.speakerId === speakerId
+    );
+
+    if (!speaker) {
+      throw new Error('Sprecher nicht gefunden');
+    }
+
+    // Create embedding from utterances
+    const embeddingResult = await speakerRecognition.createEmbeddingFromUtterances(
+      optimizationSession.audioFilePath,
+      speaker.utterances,
+      15000  // 15 seconds target
+    );
+
+    if (action === 'add-to-existing') {
+      // Get profile to check role match
+      const existingProfile = voiceProfiles.getProfile(profileId);
+      if (!existingProfile) {
+        throw new Error('Profil nicht gefunden');
+      }
+
+      // CRITICAL: Role immutability check
+      if (existingProfile.role !== role) {
+        throw new Error(`Rolle stimmt nicht überein: Profil ist ${existingProfile.role}, gewählt wurde ${role}`);
+      }
+
+      // Add to existing profile as pending embedding
+      const profile = voiceProfiles.addPendingEmbedding(profileId, embeddingResult.embedding, {
+        sourceDuration: embeddingResult.totalDuration,
+        transcriptionId: optimizationSession.transcriptionId
+      });
+
+      debugLog(`[SpeakerOptimization] Added pending embedding to "${profile.name}"`);
+
+      return {
+        success: true,
+        action: 'added-to-pending',
+        profile: {
+          id: profile.id,
+          name: profile.name,
+          pendingCount: profile.pending_embeddings ? profile.pending_embeddings.length : 0,
+          promoted: !profile.pending_embeddings || profile.pending_embeddings.length === 0
+        }
+      };
+
+    } else if (action === 'create-new') {
+      if (!name || !name.trim()) {
+        throw new Error('Bitte Namen eingeben');
+      }
+
+      // Create new profile with initial pending embedding (NOT confirmed!)
+      const profile = voiceProfiles.saveProfileWithPending(name.trim(), embeddingResult.embedding, role, {
+        sourceDuration: embeddingResult.totalDuration,
+        transcriptionId: optimizationSession.transcriptionId
+      });
+
+      debugLog(`[SpeakerOptimization] Created new profile "${profile.name}" with pending embedding`);
+
+      return {
+        success: true,
+        action: 'created-new',
+        profile: {
+          id: profile.id,
+          name: profile.name,
+          role: profile.role
+        }
+      };
+    }
+
+    throw new Error('Unbekannte Aktion');
+  } catch (error) {
+    console.error('Enroll optimized speaker error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Cancel optimization session
+ */
+ipcMain.handle('cancel-speaker-optimization', async () => {
+  try {
+    // Clean up preview files
+    if (optimizationSession) {
+      for (const speaker of optimizationSession.unrecognizedSpeakers) {
+        const previewPath = path.join(os.tmpdir(), `dentdoc-preview-${speaker.speakerId}.wav`);
+        if (fs.existsSync(previewPath)) {
+          try { fs.unlinkSync(previewPath); } catch (e) { /* ignore */ }
+        }
+      }
+    }
+
+    optimizationSession = null;
+    debugLog('[SpeakerOptimization] Session cancelled');
+    return { success: true };
+  } catch (error) {
+    console.error('Cancel speaker optimization error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Get existing profiles for optimization UI (excluding patients)
+ */
+ipcMain.handle('get-profiles-for-optimization', async () => {
+  try {
+    const profiles = voiceProfiles.getAllProfiles();
+    return {
+      success: true,
+      profiles: profiles
+        .filter(p => p.role !== 'Patient')
+        .map(p => ({
+          id: p.id,
+          name: p.name,
+          role: p.role,
+          embeddingCount: (p.confirmed_embeddings?.length || 1) + (p.pending_embeddings?.length || 0)
+        }))
+    };
+  } catch (error) {
+    console.error('Get profiles for optimization error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Check if optimization is available (unrecognized speakers exist)
+ */
+ipcMain.handle('check-optimization-available', async () => {
+  if (!optimizationSession) {
+    return { available: false };
+  }
+  return {
+    available: optimizationSession.unrecognizedSpeakers.length > 0,
+    unrecognizedCount: optimizationSession.unrecognizedSpeakers.length
+  };
+});
+
+/**
+ * Get pending optimization data (stored after transcription)
+ */
+ipcMain.handle('get-pending-optimization-data', async () => {
+  if (!global.pendingOptimizationData) {
+    return { available: false };
+  }
+
+  const data = global.pendingOptimizationData;
+  const unrecognizedCount = Object.values(data.speakerMapping).filter(
+    l => l.startsWith('Sprecher ')
+  ).length;
+
+  return {
+    available: unrecognizedCount > 0,
+    unrecognizedCount,
+    data
+  };
+});
+
+/**
+ * Initialize optimization from pending data
+ */
+ipcMain.handle('init-optimization-from-pending', async () => {
+  if (!global.pendingOptimizationData) {
+    return { success: false, error: 'Keine Optimierungsdaten verfügbar' };
+  }
+
+  // Start the optimization session with the pending data
+  const result = await (async () => {
+    const data = global.pendingOptimizationData;
+    const { transcriptionId, audioFilePath, utterances, speakerMapping } = data;
+
+    const unrecognizedSpeakers = [];
+
+    for (const [speakerId, label] of Object.entries(speakerMapping)) {
+      if (label.startsWith('Sprecher ')) {
+        const speakerUtterances = utterances.filter(u => u.speaker === speakerId);
+        const totalDuration = speakerUtterances.reduce(
+          (sum, u) => sum + (u.end - u.start), 0
+        );
+
+        unrecognizedSpeakers.push({
+          speakerId,
+          label,
+          utterances: speakerUtterances,
+          totalDuration,
+          inferredRole: null
+        });
+      }
+    }
+
+    optimizationSession = {
+      transcriptionId,
+      audioFilePath,
+      utterances,
+      speakerMapping,
+      unrecognizedSpeakers,
+      createdAt: Date.now()
+    };
+
+    debugLog(`[SpeakerOptimization] Session initialized from pending data with ${unrecognizedSpeakers.length} unrecognized speakers`);
+
+    return {
+      success: true,
+      unrecognizedSpeakers: unrecognizedSpeakers.map(s => ({
+        speakerId: s.speakerId,
+        label: s.label,
+        totalDuration: s.totalDuration,
+        inferredRole: s.inferredRole,
+        utteranceCount: s.utterances.length
+      }))
+    };
+  })();
+
+  return result;
+});
+
+// Open speaker optimization modal in dashboard
+ipcMain.on('open-speaker-optimization-modal', () => {
+  // Show/focus dashboard and trigger optimization modal
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.show();
+    dashboardWindow.focus();
+
+    // Prepare data for the modal
+    if (optimizationSession) {
+      const modalData = {
+        unrecognizedSpeakers: optimizationSession.unrecognizedSpeakers.map(s => ({
+          speakerId: s.speakerId,
+          label: s.label,
+          utteranceCount: s.utterances?.length || 0,
+          totalDurationMs: s.totalDuration || 0
+        })),
+        speakerMapping: Object.entries(optimizationSession.speakerMapping || {}).map(
+          ([speakerId, displayLabel]) => ({ speakerId, displayLabel })
+        )
+      };
+      // Send message with data to open the optimization modal
+      dashboardWindow.webContents.send('show-speaker-optimization-modal', modalData);
+    } else {
+      console.warn('[SpeakerOptimization] No optimization session available');
+    }
+  }
 });
 
 // Open Windows sound settings

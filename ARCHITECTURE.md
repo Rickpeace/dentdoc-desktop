@@ -772,6 +772,8 @@ node_modules/ffmpeg-static/
 
 ## Speaker Recognition
 
+> **Detaillierte Dokumentation:** Siehe [SPEAKER-RECOGNITION.md](SPEAKER-RECOGNITION.md) für das vollständige Datenmodell, Staged Embeddings, Optimierungs-Flow und Sicherheitsregeln.
+
 Lokale Sprechererkennung mit Sherpa-ONNX (439 Zeilen).
 
 ### ML-Modell
@@ -1605,3 +1607,8 @@ npm run build:win
 
 **Aktuelle Version:** 1.4.2
 **Letztes Update dieser Dokumentation:** 2025-01-15
+
+
+
+SPEICHER TRANSCTIP ALLES und nicht nur das was es jetzzt giobt 
+gepeicehrtes audio is in web.. warum nciuht wave ...
