@@ -1109,7 +1109,8 @@ ipcRenderer.on('iphone-test-level', (event, level) => {
   const levelEl = document.getElementById('settingsIphoneTestLevel');
   if (levelEl) {
     // Convert 0-1 to percentage (amplified for visibility)
-    const percent = Math.min(100, level * 500);
+    // Typical speech RMS is 0.01-0.1, so multiply by 1000 for visible bar
+    const percent = Math.min(100, level * 1000);
     levelEl.style.width = `${percent}%`;
   }
 });

@@ -3433,7 +3433,10 @@ ipcMain.handle('iphone-audio-test', async (event) => {
             global.lastTestLevelUpdate = now;
             // Use current packet's RMS for live visualization
             const packetRms = Math.sqrt(packetSumSquares / int16.length);
-            event.sender.send('iphone-test-level', packetRms);
+            // Send to dashboard window directly (event.sender may not work reliably)
+            if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+              dashboardWindow.webContents.send('iphone-test-level', packetRms);
+            }
           }
         }
       });
