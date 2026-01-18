@@ -6,6 +6,28 @@ const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Noti
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
+
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  const timestamp = new Date().toISOString();
+  const logPath = path.join(os.tmpdir(), 'dentdoc-crash.log');
+  const msg = `[${timestamp}] UNCAUGHT EXCEPTION: ${error.message}\nStack: ${error.stack}\n\n`;
+  try {
+    fs.appendFileSync(logPath, msg);
+  } catch (e) { /* ignore */ }
+  console.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  const timestamp = new Date().toISOString();
+  const logPath = path.join(os.tmpdir(), 'dentdoc-crash.log');
+  const msg = `[${timestamp}] UNHANDLED REJECTION: ${reason}\n\n`;
+  try {
+    fs.appendFileSync(logPath, msg);
+  } catch (e) { /* ignore */ }
+  console.error('Unhandled Rejection:', reason);
+});
+
 const Store = require('electron-store');
 const audioRecorder = require('./src/audioRecorderFFmpeg');
 const apiClient = require('./src/apiClient');

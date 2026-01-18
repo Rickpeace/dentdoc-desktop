@@ -58,19 +58,32 @@ function getFFmpegPath() {
  * Get model directory path
  */
 function getModelDir() {
-  const possiblePaths = [
+  // In packaged app, models are in app.asar.unpacked
+  const possiblePaths = [];
+
+  // For packaged app: use resourcesPath
+  if (app.isPackaged) {
+    possiblePaths.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'models'));
+  }
+
+  // Development paths
+  possiblePaths.push(
     path.join(__dirname, '..', '..', 'models'),
     path.join(process.cwd(), 'models'),
     path.join(__dirname, '..', '..', '..', 'app.asar.unpacked', 'models')
-  ];
+  );
+
+  console.log('[VAD] Searching for models in:', possiblePaths);
 
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) {
+      console.log('[VAD] Found models at:', p);
       return p;
     }
   }
 
   const defaultPath = path.join(__dirname, '..', '..', 'models');
+  console.log('[VAD] No models found, using default:', defaultPath);
   fs.mkdirSync(defaultPath, { recursive: true });
   return defaultPath;
 }
@@ -121,18 +134,95 @@ function initializeVAD() {
     return sherpa;
   }
 
-  sherpa = require('sherpa-onnx-node');
-  return sherpa;
+  try {
+    console.log('[VAD] Loading sherpa-onnx-node...');
+    console.log('[VAD] app.isPackaged:', app.isPackaged);
+
+    // In packaged app, we need to load from the unpacked location
+    if (app.isPackaged) {
+      const unpackedPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules');
+      console.log('[VAD] Unpacked node_modules path:', unpackedPath);
+
+      // Load the native addon from unpacked location
+      const addonPath = path.join(unpackedPath, 'sherpa-onnx-win-x64', 'sherpa-onnx.node');
+      console.log('[VAD] Loading native addon from:', addonPath);
+
+      if (!fs.existsSync(addonPath)) {
+        throw new Error(`Native addon not found at: ${addonPath}`);
+      }
+
+      // Load the native addon
+      const addon = require(addonPath);
+
+      // Create Vad class wrapper (same as sherpa-onnx-node/vad.js but using our addon)
+      class Vad {
+        constructor(config, bufferSizeInSeconds) {
+          this.handle = addon.createVoiceActivityDetector(config, bufferSizeInSeconds);
+          this.config = config;
+        }
+
+        acceptWaveform(samples) {
+          addon.voiceActivityDetectorAcceptWaveform(this.handle, samples);
+        }
+
+        isEmpty() {
+          return addon.voiceActivityDetectorIsEmpty(this.handle);
+        }
+
+        isDetected() {
+          return addon.voiceActivityDetectorIsDetected(this.handle);
+        }
+
+        pop() {
+          addon.voiceActivityDetectorPop(this.handle);
+        }
+
+        clear() {
+          addon.voiceActivityDetectorClear(this.handle);
+        }
+
+        front(enableExternalBuffer = true) {
+          return addon.voiceActivityDetectorFront(this.handle, enableExternalBuffer);
+        }
+
+        reset() {
+          addon.voiceActivityDetectorReset(this.handle);
+        }
+
+        flush() {
+          addon.voiceActivityDetectorFlush(this.handle);
+        }
+      }
+
+      sherpa = { Vad };
+      console.log('[VAD] sherpa-onnx-node loaded from unpacked location');
+    } else {
+      sherpa = require('sherpa-onnx-node');
+      console.log('[VAD] sherpa-onnx-node loaded from node_modules');
+    }
+
+    return sherpa;
+  } catch (err) {
+    console.error('[VAD] Failed to load sherpa-onnx-node:', err.message);
+    console.error('[VAD] Stack:', err.stack);
+    throw new Error(`VAD initialization failed: ${err.message}`);
+  }
 }
 
 /**
  * Create VAD instance
  */
 function createVAD() {
+  console.log('[VAD] Creating VAD instance...');
+
   const sherpaLib = initializeVAD();
 
   const modelDir = getModelDir();
   const modelPath = path.join(modelDir, 'silero_vad.onnx');
+
+  console.log('[VAD] Model dir:', modelDir);
+  console.log('[VAD] Model path:', modelPath);
+  console.log('[VAD] Model exists:', fs.existsSync(modelPath));
 
   if (!fs.existsSync(modelPath)) {
     throw new Error('Silero VAD model not found. Please run the app once to download it.');
@@ -151,8 +241,15 @@ function createVAD() {
     debug: false
   };
 
-  const vad = new sherpaLib.Vad(vadConfig, CONFIG.sampleRate);
-  return vad;
+  try {
+    const vad = new sherpaLib.Vad(vadConfig, CONFIG.sampleRate);
+    console.log('[VAD] VAD instance created successfully');
+    return vad;
+  } catch (err) {
+    console.error('[VAD] Failed to create VAD instance:', err.message);
+    console.error('[VAD] Stack:', err.stack);
+    throw err;
+  }
 }
 
 /**

@@ -42,8 +42,14 @@ async function renderSpeechOnlyFromSegments(segments, outputPath = null) {
  * @returns {Promise<Array>} VAD segments
  */
 async function runOfflineVAD(audioPath, onProgress = () => {}) {
-  const offlineVad = require('./offlineVad');
-  return await offlineVad.runOfflineVAD(audioPath, onProgress);
+  try {
+    const offlineVad = require('./offlineVad');
+    return await offlineVad.runOfflineVAD(audioPath, onProgress);
+  } catch (err) {
+    console.error('[Pipeline] VAD failed:', err.message);
+    console.error('[Pipeline] Stack:', err.stack);
+    throw new Error(`VAD-Verarbeitung fehlgeschlagen: ${err.message}`);
+  }
 }
 
 /**
