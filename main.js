@@ -3260,7 +3260,20 @@ function cleanupIphoneTestFiles(keepPath = null) {
   }
 }
 
-// iPhone Audio Test - records 3 seconds of audio and returns stats + file path
+// Global reference to current audio test (for cancellation)
+let currentAudioTest = null;
+
+// Cancel any running audio test
+ipcMain.handle('iphone-audio-test-cancel', async () => {
+  if (currentAudioTest && currentAudioTest.cleanup) {
+    console.log('[iPhone Test] Cancelling test...');
+    currentAudioTest.cleanup();
+    currentAudioTest = null;
+  }
+  return { success: true };
+});
+
+// iPhone Audio Test - records 10 seconds of audio and returns stats + file path
 ipcMain.handle('iphone-audio-test', async (event) => {
   console.log('[iPhone] ========== Audio Test Start ==========');
 
@@ -3312,9 +3325,11 @@ ipcMain.handle('iphone-audio-test', async (event) => {
     let testStopping = false; // Flag to prevent writes after cleanup starts
     let testTimeout = null;
     let connectionTimeout = null;
+    let resolved = false;
 
     const cleanup = () => {
       testStopping = true; // Set flag FIRST to stop any new writes
+      currentAudioTest = null;
 
       if (connectionTimeout) clearTimeout(connectionTimeout);
       if (testTimeout) clearTimeout(testTimeout);
@@ -3336,11 +3351,57 @@ ipcMain.handle('iphone-audio-test', async (event) => {
       }, 100);
     };
 
+    // Store reference for cancellation
+    currentAudioTest = { cleanup };
+
+    // Helper to start the recording timer
+    const startRecordingTimer = () => {
+      if (testStarted) return;
+      testStarted = true;
+      clearTimeout(connectionTimeout);
+      console.log('[iPhone Test] Recording for 10 seconds...');
+
+      // End test after 10 seconds
+      testTimeout = setTimeout(() => {
+        if (resolved) return;
+        console.log('[iPhone Test] Test complete');
+        cleanup();
+
+        // Wait for FFmpeg to finish
+        testFfmpeg.on('close', () => {
+          if (resolved) return;
+          resolved = true;
+
+          // Calculate RMS
+          const rmsLevel = totalSamples > 0 ? Math.sqrt(sumSquares / totalSamples) : 0;
+          const rmsDb = rmsLevel > 0 ? 20 * Math.log10(rmsLevel) : -100;
+          const peakDb = peakLevel > 0 ? 20 * Math.log10(peakLevel) : -100;
+
+          console.log('[iPhone Test] Results:');
+          console.log(`  Packets: ${packetsReceived}`);
+          console.log(`  RMS: ${rmsDb.toFixed(1)} dB`);
+          console.log(`  Peak: ${peakDb.toFixed(1)} dB`);
+          console.log(`  File: ${testWavPath}`);
+
+          resolve({
+            success: true,
+            packetsReceived,
+            rmsDb: rmsDb.toFixed(1),
+            peakDb: peakDb.toFixed(1),
+            wavPath: testWavPath,
+            duration: TEST_DURATION_MS
+          });
+        });
+      }, TEST_DURATION_MS);
+    };
+
     // Connection timeout
     connectionTimeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
       cleanup();
       resolve({ success: false, error: 'iPhone antwortet nicht. Bitte Safari öffnen.' });
-    }, 10000);
+    }, 15000);
 
     try {
       testWs = new WebSocket(`${relayUrl}/stream?device=${iphoneDeviceId}&role=desktop&token=${token}`);
@@ -3357,48 +3418,13 @@ ipcMain.handle('iphone-audio-test', async (event) => {
             console.log('[iPhone Test] Control message:', msg.type);
 
             if (msg.type === 'IPHONE_CONNECTED') {
-              clearTimeout(connectionTimeout);
               console.log('[iPhone Test] iPhone connected, sending TEST_START');
               testWs.send(JSON.stringify({ type: 'TEST_START' }));
+              // Start timer - don't wait for READY, start when first audio arrives
             }
 
             if (msg.type === 'TEST_READY' || msg.type === 'IPHONE_READY') {
-              if (!testStarted) {
-                testStarted = true;
-                console.log('[iPhone Test] Recording for 10 seconds...');
-
-                // Send progress updates
-                event.sender.send('iphone-test-progress', { stage: 'recording', percent: 0 });
-
-                // End test after 3 seconds
-                testTimeout = setTimeout(() => {
-                  console.log('[iPhone Test] Test complete');
-                  cleanup();
-
-                  // Wait for FFmpeg to finish
-                  testFfmpeg.on('close', () => {
-                    // Calculate RMS
-                    const rmsLevel = totalSamples > 0 ? Math.sqrt(sumSquares / totalSamples) : 0;
-                    const rmsDb = rmsLevel > 0 ? 20 * Math.log10(rmsLevel) : -100;
-                    const peakDb = peakLevel > 0 ? 20 * Math.log10(peakLevel) : -100;
-
-                    console.log('[iPhone Test] Results:');
-                    console.log(`  Packets: ${packetsReceived}`);
-                    console.log(`  RMS: ${rmsDb.toFixed(1)} dB`);
-                    console.log(`  Peak: ${peakDb.toFixed(1)} dB`);
-                    console.log(`  File: ${testWavPath}`);
-
-                    resolve({
-                      success: true,
-                      packetsReceived,
-                      rmsDb: rmsDb.toFixed(1),
-                      peakDb: peakDb.toFixed(1),
-                      wavPath: testWavPath,
-                      duration: TEST_DURATION_MS
-                    });
-                  });
-                }, TEST_DURATION_MS);
-              }
+              startRecordingTimer();
             }
 
             return;
@@ -3407,8 +3433,13 @@ ipcMain.handle('iphone-audio-test', async (event) => {
           }
         }
 
-        // Binary PCM audio data
-        if (Buffer.isBuffer(data) && data.length > 0 && testStarted && !testStopping) {
+        // Binary PCM audio data - start timer on first audio packet!
+        if (Buffer.isBuffer(data) && data.length > 0 && data[0] !== 0x7b && !testStopping) {
+          // First audio packet starts the recording timer
+          if (!testStarted) {
+            startRecordingTimer();
+          }
+
           packetsReceived++;
 
           // Write to FFmpeg (check testStopping again to avoid race condition)
@@ -3433,7 +3464,7 @@ ipcMain.handle('iphone-audio-test', async (event) => {
             global.lastTestLevelUpdate = now;
             // Use current packet's RMS for live visualization
             const packetRms = Math.sqrt(packetSumSquares / int16.length);
-            // Send to dashboard window directly (event.sender may not work reliably)
+            // Send to dashboard window directly
             if (dashboardWindow && !dashboardWindow.isDestroyed()) {
               dashboardWindow.webContents.send('iphone-test-level', packetRms);
             }

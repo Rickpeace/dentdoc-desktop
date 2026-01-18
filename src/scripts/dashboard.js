@@ -19,6 +19,14 @@ function switchView(viewName) {
   ipcRenderer.invoke('cleanup-mic-test');
   document.getElementById('settingsMicPlayback').style.display = 'none';
 
+  // Cancel any running iPhone audio test when leaving settings
+  ipcRenderer.invoke('iphone-audio-test-cancel');
+  // Hide iPhone test UI elements
+  const iphoneTestProgress = document.getElementById('settingsIphoneTestProgress');
+  const iphoneTestResult = document.getElementById('settingsIphoneTestResult');
+  if (iphoneTestProgress) iphoneTestProgress.style.display = 'none';
+  if (iphoneTestResult) iphoneTestResult.style.display = 'none';
+
   // Cancel any running voice enrollment when leaving profiles view
   if (profilesIsRecording) {
     console.log('Cancelling voice enrollment - user navigated away');
