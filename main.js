@@ -3235,6 +3235,31 @@ ipcMain.handle('iphone-test-connection', async () => {
   }
 });
 
+// Clean up old iPhone test files (keeps only the most recent one)
+function cleanupIphoneTestFiles(keepPath = null) {
+  try {
+    const tempDir = path.join(app.getPath('temp'), 'dentdoc', 'tests');
+    if (!fs.existsSync(tempDir)) return;
+
+    const files = fs.readdirSync(tempDir)
+      .filter(f => f.startsWith('iphone_test_') && f.endsWith('.wav'))
+      .map(f => path.join(tempDir, f));
+
+    for (const file of files) {
+      if (file !== keepPath) {
+        try {
+          fs.unlinkSync(file);
+          console.log('[iPhone Test] Deleted old test file:', path.basename(file));
+        } catch (e) {
+          // File might be in use, ignore
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[iPhone Test] Cleanup error:', e.message);
+  }
+}
+
 // iPhone Audio Test - records 3 seconds of audio and returns stats + file path
 ipcMain.handle('iphone-audio-test', async (event) => {
   console.log('[iPhone] ========== Audio Test Start ==========');
@@ -3255,6 +3280,10 @@ ipcMain.handle('iphone-audio-test', async (event) => {
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
   }
+
+  // Clean up old test files before creating new one
+  cleanupIphoneTestFiles();
+
   const testWavPath = path.join(tempDir, `iphone_test_${Date.now()}.wav`);
 
   // Start FFmpeg
