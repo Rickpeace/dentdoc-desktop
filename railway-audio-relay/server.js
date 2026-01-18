@@ -195,24 +195,40 @@ fastify.register(async function (fastify) {
     socket.on('message', (data, isBinary) => {
       const partner = role === 'iphone' ? pair.desktop : pair.iphone;
 
-      if (!partner || partner.readyState !== 1) {
-        // Partner not connected, drop message silently
-        return;
-      }
-
       try {
         if (isBinary) {
           // Binary data (PCM audio from iPhone) - forward as-is
-          partner.send(data, { binary: true });
-        } else {
-          // Text/JSON message - parse and forward
-          try {
-            const msg = JSON.parse(data.toString());
-            fastify.log.info('[%s → %s] %s', role.toUpperCase(), role === 'iphone' ? 'DESKTOP' : 'IPHONE', msg.type);
-          } catch (_) {
-            // Not JSON, that's fine
+          if (partner && partner.readyState === 1) {
+            partner.send(data, { binary: true });
           }
-          partner.send(data.toString());
+        } else {
+          // Text/JSON message - parse and check for PING
+          let msg;
+          try {
+            msg = JSON.parse(data.toString());
+          } catch (_) {
+            // Not JSON, forward anyway
+            if (partner && partner.readyState === 1) {
+              partner.send(data.toString());
+            }
+            return;
+          }
+
+          // Handle PING - respond with PONG (keep-alive)
+          if (msg.type === 'PING') {
+            try {
+              socket.send(JSON.stringify({ type: 'PONG' }));
+            } catch (e) {
+              fastify.log.warn('Failed to send PONG: %s', e.message);
+            }
+            return; // Don't forward PING to partner
+          }
+
+          // Log and forward other messages
+          fastify.log.info('[%s → %s] %s', role.toUpperCase(), role === 'iphone' ? 'DESKTOP' : 'IPHONE', msg.type);
+          if (partner && partner.readyState === 1) {
+            partner.send(data.toString());
+          }
         }
       } catch (e) {
         fastify.log.warn('Failed to forward message: %s', e.message);

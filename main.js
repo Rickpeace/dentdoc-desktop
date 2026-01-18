@@ -3,11 +3,13 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env.local'), override: true });
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, dialog, shell } = require('electron');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const Store = require('electron-store');
 const audioRecorder = require('./src/audioRecorderFFmpeg');
 const apiClient = require('./src/apiClient');
+const vadController = require('./src/vad-controller');
 
 // Early debug logging
 const DEBUG_LOG = path.join(os.tmpdir(), 'dentdoc-main-debug.log');
@@ -22,8 +24,8 @@ function debugLog(message) {
 }
 
 debugLog('=== DentDoc Starting ===');
-debugLog(`App path: ${app.getAppPath()}`);
-debugLog(`Is packaged: ${app.isPackaged}`);
+debugLog(`App path: ${app && app.getAppPath ? app.getAppPath() : 'N/A (app not ready)'}`);
+debugLog(`Is packaged: ${app && typeof app.isPackaged !== 'undefined' ? app.isPackaged : 'N/A (app not ready)'}`);
 debugLog(`Temp dir: ${os.tmpdir()}`);
 debugLog(`Debug log path: ${DEBUG_LOG}`);
 
@@ -97,6 +99,7 @@ function createDashboardWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+      nodeIntegrationInWorker: true,  // Required for VAD Worker (Sherpa-ONNX)
       backgroundThrottling: false  // Keep renderer running when hidden (for F9 audio monitoring)
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
@@ -203,16 +206,29 @@ function createDashboardWindow() {
 }
 
 
+// Debounce flag to prevent rapid F9 presses
+let shortcutLocked = false;
+
 function registerShortcut(shortcut) {
   // Unregister old shortcut
   globalShortcut.unregisterAll();
 
   // Register new shortcut
-  const registered = globalShortcut.register(shortcut, () => {
+  const registered = globalShortcut.register(shortcut, async () => {
+    // Prevent rapid repeated presses
+    if (shortcutLocked) {
+      console.log('[Shortcut] Ignoring rapid press - locked');
+      return;
+    }
+    shortcutLocked = true;
+    setTimeout(() => { shortcutLocked = false; }, 2000);  // 2 second cooldown
+
+    console.log('[Shortcut] F9 pressed, isRecording:', isRecording);
+
     if (isRecording) {
-      stopRecording();
+      await stopRecording();
     } else {
-      startRecording();
+      await startRecording();
     }
   });
 
@@ -226,11 +242,15 @@ function registerShortcut(shortcut) {
     // Try to re-register old shortcut
     const oldShortcut = store.get('shortcut') || 'F9';
     if (oldShortcut !== shortcut) {
-      globalShortcut.register(oldShortcut, () => {
+      globalShortcut.register(oldShortcut, async () => {
+        if (shortcutLocked) return;
+        shortcutLocked = true;
+        setTimeout(() => { shortcutLocked = false; }, 2000);
+
         if (isRecording) {
-          stopRecording();
+          await stopRecording();
         } else {
-          startRecording();
+          await startRecording();
         }
       });
     }
@@ -471,40 +491,39 @@ ${transcript}
     if (saveTranscript) {
       const transcriptPath = path.join(folderPath, `${baseFilename}.txt`);
       fs.writeFileSync(transcriptPath, content, 'utf8');
-      console.log('Transcript saved to:', transcriptPath);
     }
 
     // Save audio if enabled and source exists
-    if (saveAudio) {
-      console.log('saveAudio is true, tempAudioPath:', tempAudioPath);
-      if (tempAudioPath) {
-        console.log('tempAudioPath exists check:', fs.existsSync(tempAudioPath));
-        if (fs.existsSync(tempAudioPath)) {
-          // Use actual file extension from source (wav, webm, etc.)
-          const audioExt = path.extname(tempAudioPath) || '.wav';
-          const audioPath = path.join(folderPath, `${baseFilename}${audioExt}`);
-          fs.copyFileSync(tempAudioPath, audioPath);
-          console.log('Audio saved to:', audioPath);
-        } else {
-          console.log('Audio file does not exist at:', tempAudioPath);
-        }
-      } else {
-        console.log('tempAudioPath is null or undefined');
-      }
-    } else {
-      console.log('saveAudio is false, skipping audio save');
+    if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) {
+      const audioExt = path.extname(tempAudioPath) || '.wav';
+      const audioPath = path.join(folderPath, `${baseFilename}${audioExt}`);
+      fs.copyFileSync(tempAudioPath, audioPath);
     }
   });
 
+  // Nice formatted log for saved files
+  const savedItems = [];
+  if (saveTranscript) savedItems.push('Transkript');
+  if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) savedItems.push('Audio');
+  if (savedItems.length > 0) {
+    const folderName = path.basename(targetFolders[0]);
+    console.log('');
+    console.log('///// DATEIEN GESPEICHERT /////');
+    console.log(`  Ordner:  ${folderName}/`);
+    savedItems.forEach(item => {
+      console.log(`  [x] ${item}`);
+    });
+    console.log('///////////////////////////////');
+    console.log('');
+  }
+
   // Delete backup audio from "Fehlgeschlagen" folder after successful transcription
-  // This happens regardless of saveAudio setting - backup is always cleaned up on success
   if (savedAudioPathInBackup && fs.existsSync(savedAudioPathInBackup)) {
     try {
       fs.unlinkSync(savedAudioPathInBackup);
-      console.log('Deleted backup audio from Fehlgeschlagen folder:', savedAudioPathInBackup);
       savedAudioPathInBackup = null;
     } catch (err) {
-      console.error('Failed to delete backup audio:', err);
+      // Ignore cleanup errors
     }
   }
 }
@@ -782,6 +801,19 @@ async function processAudioFile(audioFilePath) {
   const processingIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
   tray.setImage(processingIconPath);
   tray.setToolTip('DentDoc - Verarbeitung...');
+
+  // Check if VAD is enabled for silence removal
+  const vadEnabled = store.get('vadEnabled', false);
+
+  if (vadEnabled) {
+    // Use VAD pipeline to remove silence, then send to AssemblyAI
+    console.log('[processAudioFile] VAD enabled - removing silence before transcription');
+    await processFileWithVAD(audioFilePath, token);
+    return;
+  }
+
+  // Standard AssemblyAI flow (no VAD)
+  console.log('[processAudioFile] Using standard AssemblyAI flow');
 
   updateStatusOverlay('Verarbeitung...', 'Audio wird gesendet...', 'processing', { step: 1, uploadProgress: 0 });
 
@@ -1093,6 +1125,232 @@ async function processAudioFile(audioFilePath) {
   }
 }
 
+/**
+ * Process an uploaded audio file with VAD for silence removal
+ * Then sends the speech-only audio to AssemblyAI
+ */
+async function processFileWithVAD(audioFilePath, token) {
+  console.log('');
+  console.log('========================================');
+  console.log('       VERARBEITUNG GESTARTET');
+  console.log('========================================');
+  console.log(`  Datei: ${path.basename(audioFilePath)}`);
+  console.log('');
+
+  updateStatusOverlay('Verarbeitung...', 'VAD wird gestartet...', 'processing', { step: 1 });
+
+  try {
+    const pipeline = require('./src/pipeline');
+
+    console.log('///// SCHRITT 1: VAD /////');
+    console.log('  Stille wird erkannt und entfernt...');
+
+    // Run VAD on the file to get speech-only audio
+    const { wavPath } = await pipeline.processFileWithVAD(audioFilePath, {
+      onProgress: (progress) => {
+        updateStatusOverlay('Verarbeitung...', progress.message, 'processing', { step: 1 });
+      }
+    });
+
+    // Now send the speech-only file to AssemblyAI
+    console.log('///// SCHRITT 2: UPLOAD /////');
+    console.log('  Audio wird an AssemblyAI gesendet...');
+    updateStatusOverlay('Verarbeitung...', 'Audio wird gesendet...', 'processing', { step: 1, uploadProgress: 0 });
+
+    // Upload audio with progress tracking
+    const onProgress = (progressInfo) => {
+      if (progressInfo.phase === 'upload') {
+        updateStatusOverlay(
+          'Verarbeitung...',
+          `Audio wird hochgeladen... ${progressInfo.percent}%`,
+          'processing',
+          { step: 1, uploadProgress: progressInfo.percent }
+        );
+      } else if (progressInfo.phase === 'submit') {
+        updateStatusOverlay(
+          'Verarbeitung...',
+          'Transkription wird gestartet...',
+          'processing',
+          { step: 1, uploadProgress: 100 }
+        );
+      } else if (progressInfo.phase === 'submitted') {
+        updateStatusOverlay(
+          'Verarbeitung...',
+          'Audio übermittelt',
+          'processing',
+          { step: 1, uploadProgress: 100 }
+        );
+      }
+    };
+
+    // Upload the speech-only file (not the original)
+    const transcriptionId = await apiClient.uploadAudio(wavPath, token, onProgress);
+
+    // Poll for real transcription status from AssemblyAI
+    let transcriptionResult;
+    let attempts = 0;
+    const maxAttempts = 180; // 3 minutes max
+    let lastStatus = '';
+
+    while (attempts < maxAttempts) {
+      transcriptionResult = await apiClient.getTranscriptionStatus(transcriptionId, token);
+
+      if (transcriptionResult.status !== lastStatus) {
+        lastStatus = transcriptionResult.status;
+
+        if (transcriptionResult.status === 'queued') {
+          updateStatusOverlay('Verarbeitung...', 'Warte auf Verarbeitung...', 'processing', { step: 2 });
+        } else if (transcriptionResult.status === 'processing') {
+          updateStatusOverlay('Verarbeitung...', 'Sprache wird erkannt...', 'processing', { step: 2 });
+        }
+      }
+
+      if (transcriptionResult.status === 'completed') {
+        updateStatusOverlay('Verarbeitung...', 'Sprache erkannt', 'processing', { step: 2 });
+        break;
+      } else if (transcriptionResult.status === 'error') {
+        throw new Error(transcriptionResult.error || 'Transkription fehlgeschlagen');
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      attempts++;
+    }
+
+    if (attempts >= maxAttempts) {
+      throw new Error('Zeitüberschreitung bei der Transkription');
+    }
+
+    console.log('///// SCHRITT 3: TRANSKRIPTION /////');
+    console.log('  AssemblyAI Transkription abgeschlossen');
+
+    const transcript = transcriptionResult.transcriptText;
+    const utterances = typeof transcriptionResult.utterances === 'string'
+      ? JSON.parse(transcriptionResult.utterances)
+      : transcriptionResult.utterances;
+
+    if (!utterances || utterances.length === 0) {
+      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+    }
+
+    console.log(`  Utterances: ${utterances.length}`);
+    console.log('');
+
+    // Speaker recognition
+    console.log('///// SCHRITT 4: SPEAKER /////');
+    console.log('  Sprecher werden identifiziert...');
+    let currentSpeakerMapping = null;
+    updateStatusOverlay('Sprecher werden erkannt...', 'Stimmen werden analysiert...', 'processing', { step: 3 });
+
+    try {
+      if (speakerRecognition && utterances && utterances.length > 0) {
+        currentSpeakerMapping = await speakerRecognition.identifySpeakersFromUtterances(
+          wavPath,
+          utterances
+        );
+
+        // Update backend with speaker mapping
+        await apiClient.updateSpeakerMapping(transcriptionId, currentSpeakerMapping, token);
+      }
+    } catch (speakerError) {
+      console.log('  [!] Fehler bei Sprechererkennung');
+    }
+
+    // Generate documentation
+    console.log('///// SCHRITT 5: DOKUMENTATION /////');
+    console.log('  KI erstellt Dokumentation...');
+    updateStatusOverlay('Verarbeitung...', 'Dokumentation wird erstellt...', 'processing', { step: 4 });
+
+    const docMode = store.get('docMode', 'single');
+    let docResponse;
+
+    if (docMode === 'agent-chain') {
+      const bausteine = bausteineManager.getAllBausteine();
+      docResponse = await apiClient.getDocumentationV2(transcriptionId, token, bausteine);
+    } else if (docMode === 'hybrid-v1.2') {
+      docResponse = await apiClient.getDocumentationV1_2(transcriptionId, token);
+    } else if (docMode === 'single-v1.1') {
+      docResponse = await apiClient.getDocumentationV1_1(transcriptionId, token);
+    } else if (docMode === 'megaprompt') {
+      docResponse = await apiClient.getDocumentationMegaprompt(transcriptionId, token);
+    } else {
+      docResponse = await apiClient.getDocumentation(transcriptionId, token);
+    }
+
+    const documentation = docResponse.documentation;
+    const finalTranscript = docResponse.transcript || transcript;  // Use formatted transcript with speaker labels
+    const shortenings = docResponse.shortenings || [];
+
+    // Store for potential retry/copy
+    lastDocumentation = documentation;
+    lastTranscript = finalTranscript;
+    lastShortenings = shortenings;
+    store.set('lastDocumentationTime', new Date().toISOString());
+
+    // Copy to clipboard
+    clipboard.writeText(documentation);
+
+    // Auto-save if enabled
+    const autoExport = store.get('autoExport', true);
+    const keepAudio = store.get('keepAudio', false);
+    const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
+    const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
+
+    console.log('  Dokumentation erstellt!');
+    console.log('');
+
+    if ((autoExport || keepAudio) && finalTranscript) {
+      console.log('///// SCHRITT 6: SPEICHERN /////');
+      try {
+        saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
+          tempAudioPath: wavPath,
+          saveTranscript: autoExport,
+          saveAudio: keepAudio,
+          shortenings: shortenings
+        });
+      } catch (error) {
+        console.log('  [!] Fehler beim Speichern:', error.message);
+      }
+    }
+
+    // Show success
+    console.log('========================================');
+    console.log('       VERARBEITUNG ABGESCHLOSSEN');
+    console.log('========================================');
+    console.log('  Dokumentation in Zwischenablage!');
+    console.log('');
+
+    const autoClose = store.get('autoCloseOverlay', false);
+    updateStatusOverlay(
+      'Fertig!',
+      'Dokumentation in Zwischenablage kopiert (Strg+V)',
+      'success',
+      { documentation, transcript: finalTranscript, shortenings, autoClose }
+    );
+
+    // Reset tray
+    const normalIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(normalIconPath);
+    tray.setToolTip('DentDoc - Bereit');
+
+  } catch (error) {
+    console.log('');
+    console.log('!!!!! FEHLER !!!!!');
+    console.log(`  ${error.message}`);
+    console.log('!!!!!!!!!!!!!!!!!!');
+
+    updateStatusOverlay('Fehler', error.message, 'error');
+    showCustomNotification('Fehler', error.message, 'error');
+
+    const normalIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(normalIconPath);
+    tray.setToolTip('DentDoc - Bereit');
+
+  } finally {
+    isProcessing = false;
+    updateTrayMenu();
+  }
+}
+
 async function startRecording() {
   const token = store.get('authToken');
   if (!token) {
@@ -1129,6 +1387,28 @@ async function startRecording() {
 
   if (isTrialUser && minutesRemaining <= 0 && !hasActiveSubscription) {
     updateStatusOverlay('Testphase beendet', 'Bitte abonnieren Sie DentDoc Pro um fortzufahren.', 'error');
+    return;
+  }
+
+  // Check if iPhone microphone is enabled
+  const microphoneSource = store.get('microphoneSource', 'desktop');
+  if (microphoneSource === 'iphone') {
+    console.log('[Recording] iPhone mode - starting iPhone recording');
+    startRecordingWithIphone().catch(err => {
+      console.error('[Recording] iPhone start failed:', err);
+      updateStatusOverlay('iPhone Fehler', err.message, 'error');
+    });
+    return;
+  }
+
+  // Check if VAD mode is enabled
+  const vadEnabled = store.get('vadEnabled', false);
+  if (vadEnabled) {
+    console.log('[Recording] VAD mode enabled - starting VAD session');
+    startRecordingWithVAD().catch(err => {
+      console.error('[Recording] VAD start failed:', err);
+      updateStatusOverlay('VAD Fehler', err.message, 'error');
+    });
     return;
   }
 
@@ -1179,8 +1459,428 @@ async function startRecording() {
   }
 }
 
+// ============================================================================
+// iPhone Recording Mode
+// ============================================================================
+const WebSocket = require('ws');
+
+let isIphoneSession = false;
+let iphoneRelayWs = null;
+let iphoneFfmpegProcess = null;
+let iphoneRecordingPath = null;
+let iphoneHeartbeatInterval = null;
+
+async function startRecordingWithIphone() {
+  console.log('[iPhone] ========== Start Recording (iPhone Mode) ==========');
+
+  const iphoneDeviceId = store.get('iphoneDeviceId');
+  const token = store.get('authToken');
+
+  if (!iphoneDeviceId) {
+    throw new Error('Kein iPhone gekoppelt. Bitte erst in Einstellungen koppeln.');
+  }
+
+  try {
+    isRecording = true;
+    isIphoneSession = true;
+    updateTrayMenu();
+
+    // Change tray icon to recording state
+    const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
+    tray.setImage(recordingIconPath);
+    tray.setToolTip('DentDoc - iPhone-Aufnahme wird vorbereitet...');
+
+    // Create output path for WAV
+    const tempDir = path.join(app.getPath('temp'), 'dentdoc');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    iphoneRecordingPath = path.join(tempDir, `iphone_${Date.now()}.wav`);
+
+    // Start FFmpeg - reads from stdin, writes WAV
+    const ffmpegPath = audioRecorder.getFFmpegPath();
+    iphoneFfmpegProcess = spawn(ffmpegPath, [
+      '-f', 's16le',           // Input: signed 16-bit little-endian PCM
+      '-ar', '16000',          // Sample rate: 16kHz
+      '-ac', '1',              // Channels: mono
+      '-i', 'pipe:0',          // Input: stdin
+      '-acodec', 'pcm_s16le',  // Output codec
+      '-y',                    // Overwrite
+      iphoneRecordingPath
+    ]);
+
+    iphoneFfmpegProcess.stderr.on('data', (data) => {
+      // FFmpeg logs to stderr
+      console.log('[iPhone FFmpeg]', data.toString().trim());
+    });
+
+    iphoneFfmpegProcess.on('error', (err) => {
+      console.error('[iPhone FFmpeg] Process error:', err);
+    });
+
+    // Connect to Relay
+    const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-desktop-production-a7a1.up.railway.app';
+    console.log('[iPhone] Connecting to relay:', relayUrl);
+
+    iphoneRelayWs = new WebSocket(`${relayUrl}/stream?device=${iphoneDeviceId}&role=desktop&token=${token}`);
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('iPhone antwortet nicht. Bitte Safari-Seite auf iPhone öffnen.'));
+      }, 15000);
+
+      iphoneRelayWs.on('open', () => {
+        console.log('[iPhone] Connected to relay, waiting for iPhone...');
+        tray.setToolTip('DentDoc - Warte auf iPhone...');
+
+        // Start heartbeat to keep connection alive
+        if (iphoneHeartbeatInterval) {
+          clearInterval(iphoneHeartbeatInterval);
+        }
+        iphoneHeartbeatInterval = setInterval(() => {
+          if (iphoneRelayWs && iphoneRelayWs.readyState === WebSocket.OPEN) {
+            iphoneRelayWs.send(JSON.stringify({ type: 'PING' }));
+          }
+        }, 10000); // Every 10 seconds
+      });
+
+      iphoneRelayWs.on('message', (data) => {
+        // Check if JSON (control message) or binary (audio)
+        if (Buffer.isBuffer(data) && data.length > 0) {
+          // Try to parse as JSON first
+          if (data[0] === 0x7b) { // '{'
+            try {
+              const msg = JSON.parse(data.toString());
+              handleIphoneControlMessage(msg, timeout, resolve);
+              return;
+            } catch (e) {
+              // Not JSON, must be audio data
+            }
+          }
+
+          // Binary PCM audio data - write to FFmpeg (only if still recording)
+          if (isIphoneSession && iphoneFfmpegProcess && iphoneFfmpegProcess.stdin && !iphoneFfmpegProcess.stdin.destroyed) {
+            try {
+              iphoneFfmpegProcess.stdin.write(data);
+            } catch (e) {
+              // Ignore write errors during shutdown
+              console.warn('[iPhone] Write error (likely during shutdown):', e.message);
+            }
+          }
+        } else if (typeof data === 'string') {
+          try {
+            const msg = JSON.parse(data);
+            handleIphoneControlMessage(msg, timeout, resolve);
+          } catch (e) {
+            console.warn('[iPhone] Invalid message:', data);
+          }
+        }
+      });
+
+      iphoneRelayWs.on('error', (err) => {
+        clearTimeout(timeout);
+        reject(new Error(`Relay-Verbindung fehlgeschlagen: ${err.message}`));
+      });
+
+      iphoneRelayWs.on('close', (code, reason) => {
+        console.log('[iPhone] WebSocket closed:', code, reason?.toString());
+        if (isIphoneSession && isRecording) {
+          console.warn('[iPhone] Connection lost during recording!');
+          // Could show warning to user here
+        }
+      });
+    });
+
+    console.log('[iPhone] ========== Recording Started ==========');
+
+  } catch (error) {
+    console.error('[iPhone] Start error:', error);
+
+    // Cleanup on error
+    if (iphoneHeartbeatInterval) {
+      clearInterval(iphoneHeartbeatInterval);
+      iphoneHeartbeatInterval = null;
+    }
+    if (iphoneFfmpegProcess) {
+      iphoneFfmpegProcess.kill();
+      iphoneFfmpegProcess = null;
+    }
+    if (iphoneRelayWs) {
+      iphoneRelayWs.close();
+      iphoneRelayWs = null;
+    }
+
+    isRecording = false;
+    isIphoneSession = false;
+    updateTrayMenu();
+
+    // Reset tray
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+
+    throw error;
+  }
+}
+
+function handleIphoneControlMessage(msg, timeout, resolve) {
+  console.log('[iPhone] Control message:', msg.type);
+
+  if (msg.type === 'IPHONE_CONNECTED') {
+    clearTimeout(timeout);
+    console.log('[iPhone] iPhone connected, sending START');
+    tray.setToolTip('DentDoc - iPhone verbunden, starte Aufnahme...');
+    iphoneRelayWs.send(JSON.stringify({ type: 'START' }));
+  }
+
+  if (msg.type === 'IPHONE_READY') {
+    console.log('[iPhone] Recording started on iPhone');
+    tray.setToolTip('DentDoc - 🔴 iPhone-Aufnahme läuft...');
+
+    const shortcut = store.get('shortcut') || 'F9';
+    updateStatusOverlay('iPhone-Aufnahme...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
+
+    resolve();
+  }
+
+  if (msg.type === 'IPHONE_DISCONNECTED') {
+    console.warn('[iPhone] iPhone disconnected during recording!');
+    // Show warning but DON'T stop recording - doctor keeps control
+    // Recording continues (with silence), doctor can still stop with F9
+
+    // Show warning overlay
+    updateStatusOverlay(
+      '⚠️ iPhone getrennt',
+      'Aufnahme läuft weiter. F9 zum Stoppen.',
+      'warning'
+    );
+
+    // Notify dashboard
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('iphone-connection-status', { connected: false });
+    }
+  }
+
+  // Handle PONG from relay (heartbeat response) - just log
+  if (msg.type === 'PONG') {
+    // Heartbeat response - connection is alive
+  }
+}
+
+async function stopRecordingWithIphone() {
+  console.log('[iPhone] ========== Stop Recording (iPhone Mode) ==========');
+
+  // IMPORTANT: Set isIphoneSession to false FIRST to stop accepting new audio data
+  isIphoneSession = false;
+
+  try {
+    tray.setToolTip('DentDoc - Stoppe iPhone-Aufnahme...');
+
+    // Stop heartbeat
+    if (iphoneHeartbeatInterval) {
+      clearInterval(iphoneHeartbeatInterval);
+      iphoneHeartbeatInterval = null;
+    }
+
+    // Send STOP to iPhone via Relay
+    if (iphoneRelayWs && iphoneRelayWs.readyState === WebSocket.OPEN) {
+      console.log('[iPhone] Sending STOP to iPhone');
+      iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
+    }
+
+    // Close WebSocket FIRST to stop receiving data
+    if (iphoneRelayWs) {
+      console.log('[iPhone] Closing WebSocket');
+      iphoneRelayWs.close();
+      iphoneRelayWs = null;
+    }
+
+    // Small delay to let any in-flight writes complete
+    await new Promise(r => setTimeout(r, 100));
+
+    // Close FFmpeg stdin -> FFmpeg writes WAV header and exits
+    if (iphoneFfmpegProcess && iphoneFfmpegProcess.stdin && !iphoneFfmpegProcess.stdin.destroyed) {
+      console.log('[iPhone] Closing FFmpeg stdin');
+      iphoneFfmpegProcess.stdin.end();
+    }
+
+    // Wait for FFmpeg to finish
+    if (iphoneFfmpegProcess) {
+      await new Promise((resolve) => {
+        iphoneFfmpegProcess.on('close', (code) => {
+          console.log('[iPhone] FFmpeg exited with code:', code);
+          resolve();
+        });
+        // Timeout fallback
+        setTimeout(resolve, 5000);
+      });
+    }
+
+    // Get recording path
+    const recordingPath = iphoneRecordingPath;
+
+    // Reset state
+    iphoneFfmpegProcess = null;
+    iphoneRecordingPath = null;
+    isRecording = false;
+    updateTrayMenu();
+
+    // Reset tray
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+
+    console.log('[iPhone] Recording stopped, file:', recordingPath);
+    console.log('[iPhone] ========== Recording Stopped ==========');
+
+    // Return path for processing
+    return recordingPath;
+
+  } catch (error) {
+    console.error('[iPhone] Stop error:', error);
+
+    // Force cleanup
+    if (iphoneHeartbeatInterval) {
+      clearInterval(iphoneHeartbeatInterval);
+      iphoneHeartbeatInterval = null;
+    }
+    if (iphoneFfmpegProcess) {
+      iphoneFfmpegProcess.kill('SIGKILL');
+      iphoneFfmpegProcess = null;
+    }
+    if (iphoneRelayWs) {
+      iphoneRelayWs.close();
+      iphoneRelayWs = null;
+    }
+
+    isIphoneSession = false;
+    isRecording = false;
+    updateTrayMenu();
+
+    throw error;
+  }
+}
+
+// ============================================================================
+// VAD Recording Mode (Post-Processing - wie Upload)
+// ============================================================================
+let isVadSession = false;
+
+async function startRecordingWithVAD() {
+  // VAD-Modus: Normale Aufnahme, danach Offline-VAD Analyse (wie bei File Upload)
+  console.log('[VAD] ========== Start Recording (Offline-VAD Mode) ==========');
+  try {
+    const microphoneId = store.get('microphoneId') || null;
+    const deleteAudio = store.get('deleteAudio', true);
+    console.log('[VAD] microphoneId:', microphoneId);
+
+    isRecording = true;
+    isVadSession = true;
+    updateTrayMenu();
+
+    // Change tray icon to recording state
+    const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
+    tray.setImage(recordingIconPath);
+    tray.setToolTip('DentDoc - 🔴 Aufnahme läuft (VAD)...');
+
+    // Start normale FFmpeg Aufnahme (wie im Standard-Modus)
+    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneId);
+    console.log('[VAD] Recording started:', currentRecordingPath);
+
+    const shortcut = store.get('shortcut') || 'F9';
+    updateStatusOverlay('🎤 Aufnahme läuft', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
+
+    // Notify dashboard to start audio monitoring (for level display)
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('recording-started', { microphoneId });
+    }
+
+    console.log('[VAD] ========== Recording Started ==========');
+
+  } catch (error) {
+    console.error('[VAD] Start error:', error);
+    updateStatusOverlay('Fehler', 'Aufnahme konnte nicht gestartet werden', 'error');
+    isRecording = false;
+    isVadSession = false;
+    updateTrayMenu();
+  }
+}
+
+async function stopRecordingWithVAD() {
+  // VAD-Modus: Aufnahme stoppen, dann Offline-VAD analysieren (wie File Upload)
+  console.log('[VAD] ========== Stop Recording (Offline-VAD Mode) ==========');
+  try {
+    tray.setToolTip('DentDoc - Stoppe Aufnahme...');
+
+    // Notify dashboard to stop audio monitoring
+    console.log('[VAD] Sending recording-stopped to dashboard');
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('recording-stopped');
+    }
+
+    // Stop FFmpeg recording
+    await audioRecorder.stopRecording();
+    console.log('[VAD] Recording stopped:', currentRecordingPath);
+
+    isRecording = false;
+    isVadSession = false;
+    updateTrayMenu();
+
+    // Reset tray icon
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+
+    // Save audio immediately (before VAD processing)
+    saveAudioImmediately(currentRecordingPath);
+
+    // Process with Offline-VAD (same flow as file upload)
+    // This will: 1) Run VAD 2) Remove silence 3) Send to AssemblyAI
+    const token = store.get('authToken');
+    await processFileWithVAD(currentRecordingPath, token);
+
+  } catch (error) {
+    console.error('[VAD] Stop error:', error);
+
+    // Reset state on error
+    isRecording = false;
+    isVadSession = false;
+    updateTrayMenu();
+
+    // Reset tray icon
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+
+    updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht verarbeitet werden', 'error');
+  }
+}
+
 async function stopRecording() {
+  // Check if we're in iPhone mode
+  if (isIphoneSession) {
+    console.log('[Recording] iPhone mode active - stopping iPhone session');
+    try {
+      const recordingPath = await stopRecordingWithIphone();
+      // Save audio immediately
+      saveAudioImmediately(recordingPath);
+      // Process the recorded audio (same pipeline as normal recording)
+      await processAudioFile(recordingPath);
+    } catch (error) {
+      console.error('[iPhone] Stop error:', error);
+      updateStatusOverlay('iPhone Fehler', error.message, 'error');
+    }
+    return;
+  }
+
+  // Check if we're in VAD mode
+  if (isVadSession) {
+    console.log('[Recording] VAD mode active - stopping VAD session');
+    await stopRecordingWithVAD();
+    return;
+  }
+
   // Notify dashboard to stop audio monitoring immediately
+  console.log('[MAIN] Sending recording-stopped to dashboard (from stopRecording - normal mode)');
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     dashboardWindow.webContents.send('recording-stopped');
   }
@@ -2196,13 +2896,17 @@ ipcMain.handle('get-settings', async () => {
   return {
     shortcut: store.get('shortcut') || 'F9',
     microphoneId: store.get('microphoneId') || null,      // Browser device ID (WebRTC)
+    microphoneSource: store.get('microphoneSource', 'desktop'),  // 'desktop' | 'iphone'
+    iphoneDeviceId: store.get('iphoneDeviceId') || null,
+    iphoneDeviceName: store.get('iphoneDeviceName') || null,
     transcriptPath: storedTranscriptPath !== undefined && storedTranscriptPath !== '' ? storedTranscriptPath : defaultTranscriptPath,
     profilesPath: storedProfilesPath !== undefined && storedProfilesPath !== '' ? storedProfilesPath : defaultProfilesPath,
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', false),
     docMode: store.get('docMode', 'single'),
-    theme: store.get('theme', 'dark')
+    theme: store.get('theme', 'dark'),
+    vadEnabled: store.get('vadEnabled', false)
   };
 });
 
@@ -2257,6 +2961,18 @@ ipcMain.handle('save-settings', async (event, settings) => {
     store.set('theme', settings.theme);
   }
 
+  // Save VAD enabled setting
+  if (settings.vadEnabled !== undefined) {
+    store.set('vadEnabled', settings.vadEnabled);
+    console.log('Saved vadEnabled:', settings.vadEnabled);
+  }
+
+  // Save microphone source (desktop/iphone)
+  if (settings.microphoneSource !== undefined) {
+    store.set('microphoneSource', settings.microphoneSource);
+    console.log('Saved microphoneSource:', settings.microphoneSource);
+  }
+
   // Register new shortcut
   if (settings.shortcut) {
     const success = registerShortcut(settings.shortcut);
@@ -2274,6 +2990,108 @@ ipcMain.handle('save-profiles-path', async (event, profilesPath) => {
   // Reload voice profiles with new path
   const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
   voiceProfiles.setStorePath(profilesPath);
+  return { success: true };
+});
+
+// ===========================================
+// iPhone Microphone Pairing IPC Handlers
+// ===========================================
+
+let pendingPairingId = null;
+
+// Start iPhone pairing - request from backend
+ipcMain.handle('iphone-pair-start', async () => {
+  console.log('[iPhone] Starting pairing process...');
+
+  const token = store.get('authToken');
+  if (!token) {
+    return { success: false, error: 'Nicht angemeldet' };
+  }
+
+  try {
+    const apiClient = require('./src/apiClient');
+    const result = await apiClient.iphonePairStart(token);
+
+    if (result.pairingId) {
+      pendingPairingId = result.pairingId;
+      console.log('[iPhone] Pairing started, ID:', result.pairingId);
+
+      return {
+        success: true,
+        pairingId: result.pairingId,
+        pairingUrl: result.pairingUrl
+      };
+    } else {
+      return { success: false, error: 'Keine Pairing-ID erhalten' };
+    }
+  } catch (error) {
+    console.error('[iPhone] Pairing start error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Check pairing status
+ipcMain.handle('iphone-pair-status', async (event, pairingId) => {
+  const token = store.get('authToken');
+  if (!token) {
+    return { paired: false, error: 'Nicht angemeldet' };
+  }
+
+  try {
+    const apiClient = require('./src/apiClient');
+    const status = await apiClient.iphonePairStatus(pairingId, token);
+
+    if (status.paired || status.status === 'paired') {
+      // Store iPhone credentials (only set if value exists)
+      if (status.iphoneDeviceId) {
+        store.set('iphoneDeviceId', status.iphoneDeviceId);
+      }
+      if (status.deviceName) {
+        store.set('iphoneDeviceName', status.deviceName);
+      }
+      store.set('microphoneSource', 'iphone');
+
+      console.log('[iPhone] Pairing confirmed! Device:', status.deviceName);
+      pendingPairingId = null;
+    }
+
+    return status;
+  } catch (error) {
+    console.error('[iPhone] Status check error:', error);
+    return { paired: false, error: error.message };
+  }
+});
+
+// Cancel pairing
+ipcMain.handle('iphone-pair-cancel', async () => {
+  console.log('[iPhone] Cancelling pairing...');
+  pendingPairingId = null;
+  return { success: true };
+});
+
+// Unpair iPhone
+ipcMain.handle('iphone-unpair', async () => {
+  console.log('[iPhone] Unpairing device...');
+
+  const token = store.get('authToken');
+  const iphoneDeviceId = store.get('iphoneDeviceId');
+
+  // Clear local store first
+  store.delete('iphoneDeviceId');
+  store.delete('iphoneDeviceName');
+  store.delete('iphoneAuthToken');
+  store.set('microphoneSource', 'desktop');
+
+  // Notify backend (if possible)
+  if (token && iphoneDeviceId) {
+    try {
+      const apiClient = require('./src/apiClient');
+      await apiClient.iphoneUnpair(token);
+    } catch (error) {
+      console.warn('[iPhone] Backend unpair failed (ignored):', error.message);
+    }
+  }
+
   return { success: true };
 });
 
@@ -2900,6 +3718,82 @@ ipcMain.on('audio-level-update', (event, level) => {
   }
 });
 
+// ============================================================================
+// VAD (Voice Activity Detection) IPC Handlers
+// ============================================================================
+
+// VAD events from Renderer (handled by vadController.initialize())
+// - 'vad-event' with { type: 'speech-start' | 'speech-end', timestamp, ... }
+
+// Start VAD session
+ipcMain.handle('vad-start-session', async (event, options = {}) => {
+  try {
+    const microphoneId = options.microphoneId || store.get('selectedMicrophone');
+
+    const success = vadController.startSession({
+      microphoneId,
+      onSegmentReady: (segment) => {
+        console.log('[VAD] Segment ready:', segment.index, segment.duration + 'ms');
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('vad-segment-ready', segment);
+        }
+      },
+      onStateChange: (oldState, newState) => {
+        console.log('[VAD] State:', oldState, '->', newState);
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('vad-state-change', { oldState, newState });
+        }
+        if (statusOverlay && !statusOverlay.isDestroyed()) {
+          statusOverlay.webContents.send('vad-state-change', { oldState, newState });
+        }
+      },
+      onError: (error) => {
+        console.error('[VAD] Error:', error);
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('vad-error', { message: error.message });
+        }
+      }
+    });
+
+    return { success };
+  } catch (error) {
+    console.error('[VAD] Failed to start session:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Stop VAD session and get segments
+ipcMain.handle('vad-stop-session', async () => {
+  try {
+    const segments = await vadController.stopSession();
+    return { success: true, segments };
+  } catch (error) {
+    console.error('[VAD] Failed to stop session:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get VAD state
+ipcMain.handle('vad-get-state', () => {
+  return vadController.getState();
+});
+
+// Get VAD segments
+ipcMain.handle('vad-get-segments', () => {
+  return vadController.getSegments();
+});
+
+// Concatenate VAD segments into single file
+ipcMain.handle('vad-concatenate-segments', async (event, outputPath) => {
+  try {
+    const result = await vadController.concatenateSegments(outputPath);
+    return { success: true, path: result };
+  } catch (error) {
+    console.error('[VAD] Failed to concatenate segments:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Mic test recording state
 let micTestPath = null;
 
@@ -3489,6 +4383,10 @@ ipcMain.handle('get-app-version', () => {
 
 app.whenReady().then(() => {
   createTray();
+
+  // Initialize VAD Controller
+  vadController.initialize();
+  console.log('[App] VAD Controller initialized');
 
   // Initialize voice profiles path (use stored path or default)
   const storedProfilesPath = store.get('profilesPath');
