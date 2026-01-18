@@ -471,13 +471,40 @@
                   <p class="helper-text pairing-url" id="settingsIphoneMicUrl" style="font-size: 11px;"></p>
                 </div>
 
-                <!-- iPhone Test Button -->
+                <!-- iPhone Audio Test -->
                 <button id="settingsIphoneTestBtn" class="btn btn-secondary" style="margin-top: 12px; width: 100%;">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
                     <polygon points="5 3 19 12 5 21 5 3"/>
                   </svg>
-                  iPhone testen
+                  Audio-Test (3 Sek.)
                 </button>
+
+                <!-- Test Progress -->
+                <div id="settingsIphoneTestProgress" style="display: none; margin-top: 12px;">
+                  <div class="test-level-bar" style="height: 8px; background: var(--bg-tertiary); border-radius: 4px; overflow: hidden;">
+                    <div id="settingsIphoneTestLevel" style="height: 100%; width: 0%; background: var(--primary); transition: width 0.1s;"></div>
+                  </div>
+                  <p class="helper-text" style="text-align: center; margin-top: 4px;">Aufnahme läuft...</p>
+                </div>
+
+                <!-- Test Result -->
+                <div id="settingsIphoneTestResult" style="display: none; margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <span>RMS:</span>
+                    <span id="settingsIphoneTestRms" style="font-weight: 600;">-</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <span>Peak:</span>
+                    <span id="settingsIphoneTestPeak" style="font-weight: 600;">-</span>
+                  </div>
+                  <button id="settingsIphonePlayBtn" class="btn btn-primary" style="width: 100%;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                      <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    Aufnahme abspielen
+                  </button>
+                </div>
+
                 <div id="settingsIphoneTestStatus" class="status-message" style="margin-top: 8px;"></div>
               </div>
             </div>

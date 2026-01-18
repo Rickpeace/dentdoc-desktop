@@ -3235,6 +3235,205 @@ ipcMain.handle('iphone-test-connection', async () => {
   }
 });
 
+// iPhone Audio Test - records 3 seconds of audio and returns stats + file path
+ipcMain.handle('iphone-audio-test', async (event) => {
+  console.log('[iPhone] ========== Audio Test Start ==========');
+
+  const iphoneDeviceId = store.get('iphoneDeviceId');
+  const token = store.get('authToken');
+
+  if (!iphoneDeviceId) {
+    return { success: false, error: 'Kein iPhone gekoppelt' };
+  }
+
+  if (!token) {
+    return { success: false, error: 'Nicht angemeldet' };
+  }
+
+  // Create temp file for test recording
+  const tempDir = path.join(app.getPath('temp'), 'dentdoc', 'tests');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  const testWavPath = path.join(tempDir, `iphone_test_${Date.now()}.wav`);
+
+  // Start FFmpeg
+  const ffmpegPath = audioRecorder.getFFmpegPath();
+  const testFfmpeg = spawn(ffmpegPath, [
+    '-f', 's16le',
+    '-ar', '16000',
+    '-ac', '1',
+    '-i', 'pipe:0',
+    '-acodec', 'pcm_s16le',
+    '-y',
+    testWavPath
+  ]);
+
+  // Connect to relay
+  const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-desktop-production-a7a1.up.railway.app';
+  let testWs = null;
+  let peakLevel = 0;
+  let totalSamples = 0;
+  let sumSquares = 0;
+  let packetsReceived = 0;
+
+  return new Promise((resolve) => {
+    const TEST_DURATION_MS = 3000;
+    let testStarted = false;
+    let testTimeout = null;
+    let connectionTimeout = null;
+
+    const cleanup = () => {
+      if (connectionTimeout) clearTimeout(connectionTimeout);
+      if (testTimeout) clearTimeout(testTimeout);
+
+      // Stop test on iPhone
+      if (testWs && testWs.readyState === WebSocket.OPEN) {
+        try {
+          testWs.send(JSON.stringify({ type: 'TEST_STOP' }));
+          testWs.close();
+        } catch (e) {}
+      }
+      testWs = null;
+
+      // Close FFmpeg
+      if (testFfmpeg && testFfmpeg.stdin && !testFfmpeg.stdin.destroyed) {
+        testFfmpeg.stdin.end();
+      }
+    };
+
+    // Connection timeout
+    connectionTimeout = setTimeout(() => {
+      cleanup();
+      resolve({ success: false, error: 'iPhone antwortet nicht. Bitte Safari öffnen.' });
+    }, 10000);
+
+    try {
+      testWs = new WebSocket(`${relayUrl}/stream?device=${iphoneDeviceId}&role=desktop&token=${token}`);
+
+      testWs.on('open', () => {
+        console.log('[iPhone Test] Connected to relay');
+      });
+
+      testWs.on('message', (data) => {
+        // JSON control message
+        if (Buffer.isBuffer(data) && data.length > 0 && data[0] === 0x7b) {
+          try {
+            const msg = JSON.parse(data.toString());
+            console.log('[iPhone Test] Control message:', msg.type);
+
+            if (msg.type === 'IPHONE_CONNECTED') {
+              clearTimeout(connectionTimeout);
+              console.log('[iPhone Test] iPhone connected, sending TEST_START');
+              testWs.send(JSON.stringify({ type: 'TEST_START' }));
+            }
+
+            if (msg.type === 'TEST_READY' || msg.type === 'IPHONE_READY') {
+              if (!testStarted) {
+                testStarted = true;
+                console.log('[iPhone Test] Recording for 3 seconds...');
+
+                // Send progress updates
+                event.sender.send('iphone-test-progress', { stage: 'recording', percent: 0 });
+
+                // End test after 3 seconds
+                testTimeout = setTimeout(() => {
+                  console.log('[iPhone Test] Test complete');
+                  cleanup();
+
+                  // Wait for FFmpeg to finish
+                  testFfmpeg.on('close', () => {
+                    // Calculate RMS
+                    const rmsLevel = totalSamples > 0 ? Math.sqrt(sumSquares / totalSamples) : 0;
+                    const rmsDb = rmsLevel > 0 ? 20 * Math.log10(rmsLevel) : -100;
+                    const peakDb = peakLevel > 0 ? 20 * Math.log10(peakLevel) : -100;
+
+                    console.log('[iPhone Test] Results:');
+                    console.log(`  Packets: ${packetsReceived}`);
+                    console.log(`  RMS: ${rmsDb.toFixed(1)} dB`);
+                    console.log(`  Peak: ${peakDb.toFixed(1)} dB`);
+                    console.log(`  File: ${testWavPath}`);
+
+                    resolve({
+                      success: true,
+                      packetsReceived,
+                      rmsDb: rmsDb.toFixed(1),
+                      peakDb: peakDb.toFixed(1),
+                      wavPath: testWavPath,
+                      duration: TEST_DURATION_MS
+                    });
+                  });
+                }, TEST_DURATION_MS);
+              }
+            }
+
+            return;
+          } catch (e) {
+            // Not JSON, treat as audio
+          }
+        }
+
+        // Binary PCM audio data
+        if (Buffer.isBuffer(data) && data.length > 0 && testStarted) {
+          packetsReceived++;
+
+          // Write to FFmpeg
+          if (testFfmpeg.stdin && !testFfmpeg.stdin.destroyed) {
+            testFfmpeg.stdin.write(data);
+          }
+
+          // Calculate levels
+          const int16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
+          for (let i = 0; i < int16.length; i++) {
+            const sample = Math.abs(int16[i]) / 32768;
+            sumSquares += sample * sample;
+            totalSamples++;
+            if (sample > peakLevel) peakLevel = sample;
+          }
+
+          // Send level to UI (throttled)
+          const now = Date.now();
+          if (!global.lastTestLevelUpdate || now - global.lastTestLevelUpdate > 100) {
+            global.lastTestLevelUpdate = now;
+            const currentRms = Math.sqrt(sumSquares / totalSamples);
+            event.sender.send('iphone-test-level', currentRms);
+          }
+        }
+      });
+
+      testWs.on('error', (err) => {
+        console.error('[iPhone Test] WebSocket error:', err.message);
+        cleanup();
+        resolve({ success: false, error: 'Verbindung zum Relay fehlgeschlagen' });
+      });
+
+      testWs.on('close', () => {
+        console.log('[iPhone Test] WebSocket closed');
+      });
+
+    } catch (err) {
+      cleanup();
+      resolve({ success: false, error: err.message });
+    }
+  });
+});
+
+// Play test audio file
+ipcMain.handle('iphone-play-test-audio', async (event, wavPath) => {
+  if (!wavPath || !fs.existsSync(wavPath)) {
+    return { success: false, error: 'Datei nicht gefunden' };
+  }
+
+  try {
+    // On Windows, use the default audio player
+    const { shell } = require('electron');
+    await shell.openPath(wavPath);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // Open any folder in explorer
 ipcMain.handle('open-folder', async (event, folderPath) => {
   if (!folderPath) {

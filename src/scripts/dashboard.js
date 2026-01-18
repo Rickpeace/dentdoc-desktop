@@ -1034,41 +1034,120 @@ async function generateMicQRCode() {
   }
 }
 
-// Test iPhone microphone connection
+// Test iPhone microphone - records 3 seconds and shows levels
+let iphoneTestWavPath = null;
+
 async function testIphoneMic() {
   const statusEl = document.getElementById('settingsIphoneTestStatus');
   const testBtn = document.getElementById('settingsIphoneTestBtn');
+  const progressEl = document.getElementById('settingsIphoneTestProgress');
+  const levelEl = document.getElementById('settingsIphoneTestLevel');
+  const resultEl = document.getElementById('settingsIphoneTestResult');
+  const rmsEl = document.getElementById('settingsIphoneTestRms');
+  const peakEl = document.getElementById('settingsIphoneTestPeak');
+  const playBtn = document.getElementById('settingsIphonePlayBtn');
 
   if (!statusEl || !testBtn) return;
+
+  // Hide previous results
+  if (resultEl) resultEl.style.display = 'none';
+  if (progressEl) progressEl.style.display = 'none';
 
   testBtn.disabled = true;
   statusEl.className = 'status-message';
   statusEl.textContent = 'Verbindung wird geprüft...';
 
   try {
-    // Check if iPhone is connected via relay
-    const result = await ipcRenderer.invoke('iphone-test-connection');
+    // First check if iPhone is connected
+    const connectionCheck = await ipcRenderer.invoke('iphone-test-connection');
 
-    if (result.connected) {
-      statusEl.className = 'status-message success';
-      statusEl.textContent = `Verbunden! Latenz: ${result.latency || '?'}ms`;
+    if (!connectionCheck.connected) {
+      statusEl.className = 'status-message error';
+      statusEl.textContent = connectionCheck.error || 'iPhone nicht verbunden. Bitte Safari öffnen.';
+      testBtn.disabled = false;
+      return;
+    }
+
+    // iPhone is connected - start audio test
+    statusEl.textContent = 'Starte Audio-Test...';
+    if (progressEl) {
+      progressEl.style.display = 'block';
+      if (levelEl) levelEl.style.width = '0%';
+    }
+
+    // Run the audio test
+    const result = await ipcRenderer.invoke('iphone-audio-test');
+
+    // Hide progress
+    if (progressEl) progressEl.style.display = 'none';
+
+    if (result.success) {
+      iphoneTestWavPath = result.wavPath;
+
+      // Show results
+      if (resultEl) {
+        resultEl.style.display = 'block';
+        if (rmsEl) rmsEl.textContent = `${result.rmsDb} dB`;
+        if (peakEl) peakEl.textContent = `${result.peakDb} dB`;
+      }
+
+      // Evaluate quality
+      const rmsDb = parseFloat(result.rmsDb);
+      let quality = '';
+      if (rmsDb > -30) {
+        quality = 'Sehr gut!';
+        statusEl.className = 'status-message success';
+      } else if (rmsDb > -45) {
+        quality = 'OK';
+        statusEl.className = 'status-message success';
+      } else if (rmsDb > -60) {
+        quality = 'Leise - näher sprechen';
+        statusEl.className = 'status-message warning';
+      } else {
+        quality = 'Zu leise!';
+        statusEl.className = 'status-message error';
+      }
+
+      statusEl.textContent = `${result.packetsReceived} Pakete empfangen. ${quality}`;
     } else {
       statusEl.className = 'status-message error';
-      statusEl.textContent = result.error || 'iPhone nicht verbunden. Bitte Safari öffnen.';
+      statusEl.textContent = result.error || 'Audio-Test fehlgeschlagen';
     }
   } catch (error) {
+    if (progressEl) progressEl.style.display = 'none';
     statusEl.className = 'status-message error';
     statusEl.textContent = 'Fehler: ' + error.message;
   }
 
   testBtn.disabled = false;
-
-  // Clear message after 5 seconds
-  setTimeout(() => {
-    statusEl.textContent = '';
-    statusEl.className = 'status-message';
-  }, 5000);
 }
+
+// Listen for test level updates
+ipcRenderer.on('iphone-test-level', (event, level) => {
+  const levelEl = document.getElementById('settingsIphoneTestLevel');
+  if (levelEl) {
+    // Convert 0-1 to percentage (amplified for visibility)
+    const percent = Math.min(100, level * 500);
+    levelEl.style.width = `${percent}%`;
+  }
+});
+
+// Play test audio
+async function playIphoneTestAudio() {
+  if (!iphoneTestWavPath) {
+    console.warn('No test audio to play');
+    return;
+  }
+
+  try {
+    await ipcRenderer.invoke('iphone-play-test-audio', iphoneTestWavPath);
+  } catch (error) {
+    console.error('Error playing test audio:', error);
+  }
+}
+
+// Setup play button listener
+document.getElementById('settingsIphonePlayBtn')?.addEventListener('click', playIphoneTestAudio);
 
 // Load iPhone Dashboard Section on Home View
 async function loadIphoneDashboardSection(shortcut) {

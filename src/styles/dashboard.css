@@ -1409,6 +1409,12 @@ kbd {
   border-color: rgba(239, 68, 68, 0.3);
 }
 
+.status-message.warning {
+  background: rgba(234, 179, 8, 0.1);
+  color: #ca8a04;
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
 .status-message.info {
   background: rgba(249, 115, 22, 0.1);
   color: var(--primary-500);
