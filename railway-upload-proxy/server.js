@@ -4,7 +4,7 @@
  */
 
 const fastify = require('fastify')({ logger: true });
-const fetch = require('node-fetch');
+// Node 18+ hat natives fetch - kein node-fetch nötig
 
 // 🔑 DAS IST DER MAGISCHE TEIL
 fastify.addContentTypeParser(
