@@ -854,7 +854,7 @@ async function loadSettingsView() {
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
   document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
   document.getElementById('settingsDocModeSelect').value = settings.docMode || 'single';
-  document.getElementById('settingsVadEnabled').checked = settings.vadEnabled || false;
+  document.getElementById('settingsVadEnabled').checked = settings.vadEnabled !== false;
 
   // iPhone microphone settings
   const microphoneSource = settings.microphoneSource || 'desktop';
@@ -883,7 +883,7 @@ async function loadSettingsView() {
     keepAudio: settings.keepAudio || false,
     docMode: settings.docMode || 'single',
     theme: settings.theme || 'dark',
-    vadEnabled: settings.vadEnabled || false
+    vadEnabled: settings.vadEnabled !== false
   };
 }
 

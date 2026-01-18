@@ -803,7 +803,7 @@ async function processAudioFile(audioFilePath) {
   tray.setToolTip('DentDoc - Verarbeitung...');
 
   // Check if VAD is enabled for silence removal
-  const vadEnabled = store.get('vadEnabled', false);
+  const vadEnabled = store.get('vadEnabled', true);
 
   if (vadEnabled) {
     // Use VAD pipeline to remove silence, then send to AssemblyAI
@@ -1402,7 +1402,7 @@ async function startRecording() {
   }
 
   // Check if VAD mode is enabled
-  const vadEnabled = store.get('vadEnabled', false);
+  const vadEnabled = store.get('vadEnabled', true);
   if (vadEnabled) {
     console.log('[Recording] VAD mode enabled - starting VAD session');
     startRecordingWithVAD().catch(err => {
@@ -2926,7 +2926,7 @@ ipcMain.handle('get-settings', async () => {
     keepAudio: store.get('keepAudio', false),
     docMode: store.get('docMode', 'single'),
     theme: store.get('theme', 'dark'),
-    vadEnabled: store.get('vadEnabled', false)
+    vadEnabled: store.get('vadEnabled', true)
   };
 });
 
