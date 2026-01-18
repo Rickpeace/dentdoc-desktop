@@ -1529,6 +1529,7 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
   const settings = {
     shortcut: settingsNewShortcut || document.getElementById('settingsShortcutDisplay').textContent,
     microphoneId: document.getElementById('settingsMicSelect').value,
+    microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
     profilesPath: document.getElementById('settingsProfilesPath').value,
     autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,

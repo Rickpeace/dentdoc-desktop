@@ -878,6 +878,76 @@ ffmpeg -i input.wav \
   -f wav output_assemblyai.wav
 ```
 
+### Auto-Level (Quellenbasierte Lautstärke-Optimierung)
+
+**Aktualisiert Januar 2025** - Quellenbasierte Lautstärke-Anpassung mit unterschiedlichen Strategien für iPhone und Desktop Mic.
+
+#### Grundprinzip
+
+Alle Audio-Optimierung passiert NACH der Aufnahme auf dem Desktop. iPhone & Mic liefern Rohmaterial – die Pipeline macht es gut.
+
+```
+RAW AUDIO → Auto-Level (quellenabhängig) → VAD → speech_only.wav → Bandpass → AssemblyAI
+```
+
+#### Funktionen
+
+| Funktion | Beschreibung |
+|----------|--------------|
+| `analyzeAudio(filePath)` | Misst RMS und Peak in dBFS via FFmpeg astats |
+| `autoLevel(inputPath, outputPath, { source })` | Wendet quellenabhängigen Filter an |
+
+#### Zwei Profile
+
+**Profil A: iPhone (`source='iphone'`)**
+- IMMER `loudnorm` (I=-16, LRA=11, TP=-1.5)
+- Kein RMS-Branching - maximale Konsistenz
+- iPhone AudioWorklet liefert RAW PCM (kein Gain!)
+
+**Profil B: Desktop Mic (`source='mic'`)**
+- RMS-basierte Entscheidung:
+
+```
+┌──────────────────┬─────────────────────────────────────────────────┐
+│ Input RMS        │ Strategie / Filter                              │
+├──────────────────┼─────────────────────────────────────────────────┤
+│ < -50 dB         │ loudnorm (I=-16, LRA=9, TP=-1.5)               │
+│ -50 bis -28 dB   │ mild_gain (volume=6dB)                          │
+│ > -28 dB         │ none (passthrough)                              │
+└──────────────────┴─────────────────────────────────────────────────┘
+```
+
+#### Entscheidungs-Matrix (Support)
+
+| Quelle | RMS | Strategie |
+|--------|-----|-----------|
+| iPhone | egal | loudnorm |
+| USB Mic | < -50 | loudnorm |
+| USB Mic | -50 … -28 | mild_gain |
+| USB Mic | > -28 | none |
+
+#### Logging
+
+```
+[AutoLevel] Source: iphone
+[AutoLevel] Input RMS: -68.1 dB
+[AutoLevel] Strategy: loudnorm (iPhone - always)
+```
+
+#### Integration in Pipeline
+
+Auto-Level läuft **VOR** VAD im `src/pipeline/index.js`:
+
+```javascript
+// Pipeline erhält source von processAudioFile()
+const { wavPath } = await pipeline.processFileWithVAD(audioPath, {
+  source: 'iphone',  // oder 'mic'
+  onProgress: ...
+});
+```
+
+Dies verbessert die VAD-Erkennung bei leisen Aufnahmen signifikant.
+
 ### Upload-Flow mit Temp-Datei
 
 ```
@@ -918,6 +988,53 @@ app.asar.unpacked/node_modules/ffmpeg-static/
 // Entwicklung
 node_modules/ffmpeg-static/
 ```
+
+---
+
+## Audio-Level Visualisierung (Status-Overlay)
+
+**Neu seit Januar 2025** - Der Recording-Button im Status-Overlay zeigt eine pulsierende Glow-Animation basierend auf dem Audio-Level.
+
+### Quellen der Audio-Level
+
+| Quelle | IPC-Channel | Wo berechnet |
+|--------|-------------|--------------|
+| iPhone Mic | `iphone-audio-level` | `main.js` - RMS aus PCM-Chunks |
+| Lokales Mic (ohne VAD) | `audio-level` | `dashboard.js` - F9 Monitoring |
+| Lokales Mic (mit VAD) | `audio-level` | `vad-controller.js` - Audio-Batches |
+
+### RMS-Berechnung
+
+```javascript
+function calculateRMS(samples) {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    sum += samples[i] * samples[i];
+  }
+  return Math.sqrt(sum / samples.length);
+}
+```
+
+### Visualisierung (status-overlay.html)
+
+```javascript
+function updateAudioLevel(level) {
+  const amplified = Math.pow(level * 5, 0.6);
+  const clamped = Math.min(1, amplified);
+
+  // Scale: 1.0 (silent) to 1.6 (loud)
+  icon.style.transform = `scale(${1 + clamped * 0.6})`;
+
+  // Color shift: red → orange → yellow-white
+  const g = Math.round(68 + clamped * 150);
+  const b = Math.round(68 + clamped * 100);
+  icon.style.boxShadow = `0 0 ${20 + clamped * 40}px rgba(239, ${g}, ${b}, ${0.4 + clamped * 0.6})`;
+}
+```
+
+### Throttling
+
+Audio-Level Updates sind auf ~10 pro Sekunde gedrosselt (100ms Intervall), um Performance zu gewährleisten.
 
 ---
 
@@ -1939,6 +2056,62 @@ npm run build:win
 ---
 
 ## Changelog
+
+### Version 1.5.0 (2025-01-18)
+
+**Audio-Optimierung Refactoring (Quellenbasierte Strategie):**
+
+1. **iPhone Gain entfernt:**
+   - `public/audio-worklet-processor.js`: Kein Gain mehr im AudioWorklet
+   - iPhone liefert RAW PCM ohne Verstärkung
+   - Alle Audio-Optimierung passiert zentral auf dem Desktop
+
+2. **Quellenbasiertes Auto-Level:**
+   - `autoLevel()` akzeptiert jetzt `{ source: 'iphone' | 'mic' }`
+   - iPhone: IMMER `loudnorm` (I=-16, LRA=11, TP=-1.5) - keine RMS-Entscheidung
+   - Mic: RMS-basierte Strategie (loudnorm < -50dB, mild_gain -50 bis -28dB, none > -28dB)
+
+3. **Filter vereinfacht:**
+   - `convertToWav16k()`: highpass/alimiter Filter entfernt
+   - Nur noch Auto-Level (zentral, quellenabhängig)
+   - Bandpass (200-3000 Hz) nur vor AssemblyAI
+
+4. **Pipeline-Integration:**
+   - `processFileWithVAD()` und `processAudioFile()` geben `source` weiter
+   - iPhone-Aufnahmen werden mit `source: 'iphone'` verarbeitet
+
+**Ergebnis:**
+- ✅ iPhone klingt IMMER verständlich (loudnorm)
+- ✅ Gute Mics bleiben unangetastet (none)
+- ✅ Support & Debugging trivial (klares Logging)
+
+### Version 1.4.9 (2025-01-18)
+
+**Audio-Level Visualisierung:**
+- Glow-Animation für alle Aufnahme-Modi (iPhone, lokales Mic mit/ohne VAD)
+- RMS-Berechnung in vad-controller.js für VAD-Aufnahmen
+
+**Bugfixes:**
+- microphoneSource wird jetzt korrekt in Settings gespeichert
+
+**Audio-Level Visualisierung:**
+- Recording-Button im Status-Overlay zeigt pulsierende Glow-Animation
+- Funktioniert jetzt für alle Aufnahme-Modi:
+  - iPhone: `iphone-audio-level` aus main.js
+  - Lokales Mic ohne VAD: `audio-level` aus dashboard.js
+  - Lokales Mic mit VAD: `audio-level` aus vad-controller.js (NEU!)
+- Throttling auf 10 Updates/Sekunde
+
+**VAD standardmäßig aktiviert:**
+- `vadEnabled` Default von `false` auf `true` geändert
+
+**Bugfixes:**
+- `microphoneSource` fehlte beim Speichern der Einstellungen - jetzt wird sie korrekt gespeichert
+- Status-Icon Reset: `background` und `boxShadow` Styles werden bei Status-Wechsel zurückgesetzt
+
+**iPhone Web Page:**
+- "Zum Home-Bildschirm hinzufügen" Prompt für iOS (einmalig bei 'ready' Status)
+- Verbessert Stabilität da Safari im PWA-Modus länger im Hintergrund aktiv bleibt
 
 ### Version 1.4.8 (2025-01-18)
 

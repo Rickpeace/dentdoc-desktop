@@ -66,6 +66,10 @@ let callbacks = {
   onError: null
 };
 
+// Audio level throttling (send ~10 updates per second)
+let lastAudioLevelSend = 0;
+const AUDIO_LEVEL_INTERVAL_MS = 100;
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -326,6 +330,36 @@ function notifyRenderer(channel, data) {
   }
 }
 
+/**
+ * Calculate RMS (Root Mean Square) from Float32 audio samples
+ * Returns value 0-1 representing audio level
+ */
+function calculateRMS(samples) {
+  if (!samples || samples.length === 0) return 0;
+
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    sum += samples[i] * samples[i];
+  }
+
+  return Math.sqrt(sum / samples.length);
+}
+
+/**
+ * Send audio level to status overlay (throttled)
+ */
+function sendAudioLevel(samples) {
+  const now = Date.now();
+  if (now - lastAudioLevelSend < AUDIO_LEVEL_INTERVAL_MS) {
+    return; // Throttle - don't send too often
+  }
+  lastAudioLevelSend = now;
+
+  const rms = calculateRMS(samples);
+  // Notify all windows (status overlay listens for 'audio-level')
+  notifyRenderer('audio-level', rms);
+}
+
 // ============================================================================
 // PUBLIC API
 // ============================================================================
@@ -345,6 +379,9 @@ function initialize() {
 
     if (state.sessionActive && vadWorkerInitialized) {
       processAudioBatch(data.samples, data.timestamp);
+
+      // Send audio level to status overlay for cool glow animation
+      sendAudioLevel(data.samples);
     }
   });
 

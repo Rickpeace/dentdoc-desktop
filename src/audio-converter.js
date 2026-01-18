@@ -33,6 +33,9 @@ function initFFmpegPath() {
 
 /**
  * Convert WebM audio to WAV 16kHz mono
+ * KEINE Filter hier - nur Format-Konvertierung!
+ * Audio-Optimierung passiert in autoLevel() (nach Aufnahme, vor VAD)
+ *
  * @param {string} inputPath - Path to input WebM file
  * @param {string} outputPath - Path to output WAV file (optional)
  * @returns {Promise<string>} Path to converted WAV file
@@ -52,10 +55,7 @@ function convertToWav16k(inputPath, outputPath = null) {
       .audioFrequency(16000)  // 16kHz sample rate
       .audioChannels(1)        // Mono
       .audioCodec('pcm_s16le') // 16-bit PCM
-      .audioFilters([
-        'highpass=f=90',        // Remove rumble (chair, footsteps) below 90Hz
-        'alimiter=limit=0.97'   // Prevent clipping at -0.26 dBFS
-      ])
+      // KEINE Filter! Optimierung passiert in autoLevel()
       .format('wav')
       .on('end', () => {
         resolve(outputPath);
@@ -165,22 +165,31 @@ function analyzeAudio(filePath) {
 }
 
 /**
- * Auto-level audio based on RMS measurement
- * Applies appropriate gain/normalization based on input level
+ * Auto-level audio based on source profile and RMS measurement
  *
- * Strategy:
- * - RMS < -24 dB: Very quiet → full loudnorm normalization
- * - RMS -24 to -18 dB: Quiet → gentle volume boost (1.3x)
- * - RMS -18 to -14 dB: Good → minimal boost (1.1x)
- * - RMS > -14 dB: Loud → limiter only (prevent clipping)
+ * ZWEI PROFILE:
+ *
+ * 1. iPhone/Web (source='iphone'):
+ *    - IMMER loudnorm (I=-16, LRA=11, TP=-1.5)
+ *    - Kein RMS-Branching - Konsistenz wichtiger als Performance
+ *    - Leise, variabler Abstand, kein echtes AGC
+ *
+ * 2. Desktop Mic (source='mic'):
+ *    - RMS < -50 dB: Very quiet → loudnorm (I=-16, LRA=9, TP=-1.5)
+ *    - RMS -50 to -28 dB: Quiet → mild_gain (+6dB)
+ *    - RMS > -28 dB: Good → none (bereits gut eingepegelt)
  *
  * @param {string} inputPath - Path to input audio file
  * @param {string} outputPath - Path to output audio file (optional)
- * @returns {Promise<{outputPath: string, rms: number|null, filter: string}>}
+ * @param {Object} options - Options
+ * @param {string} options.source - 'iphone' | 'mic' (default: 'mic')
+ * @returns {Promise<{outputPath: string, rms: number|null, strategy: string, source: string}>}
  */
-async function autoLevel(inputPath, outputPath = null) {
+async function autoLevel(inputPath, outputPath = null, options = {}) {
   // Initialize ffmpeg path on first use
   initFFmpegPath();
+
+  const source = options.source || 'mic';
 
   // Generate output path if not provided
   if (!outputPath) {
@@ -190,34 +199,59 @@ async function autoLevel(inputPath, outputPath = null) {
 
   // Analyze audio first
   const { rms } = await analyzeAudio(inputPath);
+  console.log('');
+  console.log('///// AUTO-LEVEL /////');
+  console.log(`[AutoLevel] Source: ${source}`);
   console.log(`[AutoLevel] Input RMS: ${rms !== null ? rms.toFixed(1) + ' dB' : 'unknown'}`);
 
   let filter;
-  let filterName;
+  let strategy;
 
-  if (rms === null) {
-    // Fallback if analysis failed
-    filter = 'volume=1.2';
-    filterName = 'fallback (1.2x)';
-  } else if (rms < -24) {
-    // Very quiet → full normalization
+  if (source === 'iphone') {
+    // iPhone: IMMER loudnorm - keine Entscheidung, maximale Konsistenz
     filter = 'loudnorm=I=-16:LRA=11:TP=-1.5';
-    filterName = 'loudnorm (very quiet)';
-  } else if (rms < -18) {
-    // Quiet → gentle boost
-    filter = 'volume=1.3';
-    filterName = 'volume 1.3x (quiet)';
-  } else if (rms < -14) {
-    // Good → minimal boost
-    filter = 'volume=1.1';
-    filterName = 'volume 1.1x (good)';
+    strategy = 'loudnorm';
+    console.log(`[AutoLevel] Strategy: loudnorm (iPhone - always)`);
+    console.log(`[AutoLevel] Filter: ${filter}`);
   } else {
-    // Loud → just limit to prevent clipping
-    filter = 'alimiter=limit=-1.5dB';
-    filterName = 'limiter only (loud)';
-  }
+    // Desktop Mic: RMS-basierte Entscheidung
+    if (rms === null || rms < -50) {
+      // Very quiet or unknown → full normalization (tighter LRA for direct speech)
+      filter = 'loudnorm=I=-16:LRA=9:TP=-1.5';
+      strategy = 'loudnorm';
+      console.log(`[AutoLevel] Strategy: loudnorm (very quiet, RMS < -50dB)`);
+      console.log(`[AutoLevel] Filter: ${filter}`);
+    } else if (rms < -28) {
+      // Quiet → mild gain boost (+6dB)
+      filter = 'volume=6dB';
+      strategy = 'mild_gain';
+      console.log(`[AutoLevel] Strategy: mild_gain (quiet, -50dB < RMS < -28dB)`);
+      console.log(`[AutoLevel] Filter: ${filter}`);
+    } else {
+      // Good level → no processing needed
+      // Just copy the file (pass-through)
+      console.log(`[AutoLevel] Strategy: none (good level, RMS > -28dB)`);
+      console.log(`[AutoLevel] Filter: (passthrough - no filter)`);
 
-  console.log(`[AutoLevel] Applying: ${filterName}`);
+      // For 'none' strategy, just copy without processing
+      return new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+          .audioFrequency(16000)
+          .audioChannels(1)
+          .audioCodec('pcm_s16le')
+          .format('wav')
+          .on('end', () => {
+            console.log(`[AutoLevel] Output saved: ${outputPath} (passthrough)`);
+            resolve({ outputPath, rms, strategy: 'none', source });
+          })
+          .on('error', (err) => {
+            console.error(`[AutoLevel] Error: ${err.message}`);
+            reject(new Error(`Auto-level failed: ${err.message}`));
+          })
+          .save(outputPath);
+      });
+    }
+  }
 
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
@@ -228,7 +262,7 @@ async function autoLevel(inputPath, outputPath = null) {
       .format('wav')
       .on('end', () => {
         console.log(`[AutoLevel] Output saved: ${outputPath}`);
-        resolve({ outputPath, rms, filter: filterName });
+        resolve({ outputPath, rms, strategy, source });
       })
       .on('error', (err) => {
         console.error(`[AutoLevel] Error: ${err.message}`);

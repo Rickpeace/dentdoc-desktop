@@ -1389,6 +1389,176 @@ if (isNewPairingCode) {
 
 ---
 
+## Audio-Optimierung (Quellenbasierte Strategie)
+
+**Grundprinzip:** Alle Audio-Optimierung passiert NACH der Aufnahme auf dem Desktop. iPhone & Mic liefern Rohmaterial – die Pipeline macht es gut.
+
+```
+RAW AUDIO (WAV 16 kHz, mono)
+   ↓
+Auto-Level (quellenabhängig)
+   ↓
+VAD (Silero) → speech_only.wav
+   ↓
+Bandpass (200–3000 Hz)
+   ↓
+AssemblyAI
+```
+
+### Zwei Profile
+
+#### Profil A: iPhone (source='iphone')
+
+**Charakteristik:**
+- Leise, variabler Abstand, unzuverlässiger Pegel
+- Kein echtes AGC auf iOS
+
+**Strategie:** IMMER `loudnorm` – keine RMS-Entscheidung!
+
+```javascript
+// iPhone: IMMER loudnorm - maximale Konsistenz
+filter = 'loudnorm=I=-16:LRA=11:TP=-1.5';
+strategy = 'loudnorm';
+```
+
+**Wichtig:**
+- ❌ Kein Gain im AudioWorklet (entfernt!)
+- ❌ Kein RMS-Branching
+- ❌ Kein `none` oder `mild_gain`
+- ✅ IMMER `loudnorm` auf Desktop
+
+#### Profil B: Desktop Mic (source='mic')
+
+**Charakteristik:**
+- Nah, konsistent, oft schon gut eingepegelt
+
+**Strategie:** RMS-basierte Entscheidung
+
+| RMS | Strategie | Filter |
+|-----|-----------|--------|
+| < -50 dB | `loudnorm` | `loudnorm=I=-16:LRA=9:TP=-1.5` |
+| -50 bis -28 dB | `mild_gain` | `volume=6dB` |
+| > -28 dB | `none` | (passthrough) |
+
+```javascript
+if (rms < -50) {
+  strategy = 'loudnorm';
+} else if (rms < -28) {
+  strategy = 'mild_gain';
+} else {
+  strategy = 'none';
+}
+```
+
+### Entscheidungs-Matrix (Support-Gold)
+
+| Quelle | RMS | Strategie |
+|--------|-----|-----------|
+| iPhone | egal | loudnorm |
+| USB Mic | < -50 | loudnorm |
+| USB Mic | -50 … -28 | mild_gain |
+| USB Mic | > -28 | none |
+
+### Pfade
+
+**Pfad:** `src/audio-converter.js`
+
+```javascript
+async function autoLevel(inputPath, outputPath, options = {}) {
+  const source = options.source || 'mic';  // 'iphone' | 'mic'
+  const { rms } = await analyzeAudio(inputPath);
+
+  console.log(`[AutoLevel] Source: ${source}`);
+  console.log(`[AutoLevel] Input RMS: ${rms?.toFixed(1)} dB`);
+
+  if (source === 'iphone') {
+    // iPhone: IMMER loudnorm
+    filter = 'loudnorm=I=-16:LRA=11:TP=-1.5';
+    strategy = 'loudnorm';
+  } else {
+    // Desktop Mic: RMS-basiert
+    if (rms < -50) { strategy = 'loudnorm'; }
+    else if (rms < -28) { strategy = 'mild_gain'; }
+    else { strategy = 'none'; }
+  }
+
+  console.log(`[AutoLevel] Strategy: ${strategy}`);
+}
+```
+
+**Pfad:** `public/audio-worklet-processor.js`
+
+```javascript
+// KEIN GAIN! iPhone liefert RAW PCM → Desktop macht Auto-Level
+const s = Math.max(-1, Math.min(1, float32[i]));  // Kein * GAIN
+int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+```
+
+### Pipeline-Integration
+
+**Pfad:** `src/pipeline/index.js`
+
+Auto-Level läuft **VOR** VAD für bessere Spracherkennung:
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────┐    ┌─────────────┐
+│ WAV-Datei   │ → │ Auto-Level  │ → │   VAD   │ → │ speech_only │
+│ (RAW)       │    │ (source)    │    │ Silero  │    │    .wav     │
+└─────────────┘    └─────────────┘    └─────────┘    └─────────────┘
+```
+
+### Logging (Pflicht!)
+
+```
+[AutoLevel] Source: iphone
+[AutoLevel] Input RMS: -68.1 dB
+[AutoLevel] Strategy: loudnorm (iPhone - always)
+```
+
+oder
+
+```
+[AutoLevel] Source: mic
+[AutoLevel] Input RMS: -24.3 dB
+[AutoLevel] Strategy: none (good level)
+```
+
+---
+
+## Audio-Level Visualisierung (Glow-Animation)
+
+Der Recording-Button im Status-Overlay zeigt eine pulsierende Glow-Animation basierend auf dem Audio-Level.
+
+### Quellen der Audio-Level:
+
+| Quelle | IPC-Channel | Beschreibung |
+|--------|-------------|--------------|
+| iPhone | `iphone-audio-level` | RMS aus PCM-Chunks in main.js |
+| Lokales Mic (ohne VAD) | `audio-level` | Von dashboard.js Renderer |
+| Lokales Mic (mit VAD) | `audio-level` | Von vad-controller.js |
+
+### Visualisierung
+
+**Pfad:** `src/status-overlay.html`
+
+```javascript
+function updateAudioLevel(level) {
+  // Amplify for visible effect
+  const amplified = Math.pow(level * 5, 0.6);
+  const clamped = Math.min(1, amplified);
+
+  // Scale: 1.0 (silent) to 1.6 (loud)
+  icon.style.transform = `scale(${1 + clamped * 0.6})`;
+
+  // Color shift: red → orange → yellow-white
+  const g = Math.round(68 + clamped * 150);
+  const b = Math.round(68 + clamped * 100);
+  icon.style.boxShadow = `0 0 ${20 + clamped * 40}px rgba(239, ${g}, ${b}, ${0.4 + clamped * 0.6})`;
+}
+```
+
+---
+
 ## Audio-Format
 
 - **Sample Rate:** 16000 Hz (16 kHz)
@@ -1396,10 +1566,11 @@ if (isNewPairingCode) {
 - **Bit Depth:** 16-bit signed integer (s16le)
 - **Endianness:** Little-endian
 - **Format:** Raw PCM über WebSocket, WAV auf Desktop
+- **Gain:** KEIN Gain auf iPhone (RAW), Auto-Level auf Desktop
 
-**Konvertierung im AudioWorklet:**
+**Konvertierung im AudioWorklet (KEIN GAIN!):**
 ```javascript
-// Float32 [-1, 1] → Int16 [-32768, 32767]
+// Float32 [-1, 1] → Int16 [-32768, 32767] - RAW, kein Gain
 const s = Math.max(-1, Math.min(1, float32[i]));
 int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
 ```
@@ -1531,3 +1702,49 @@ git push
 
 Erstellt: Januar 2025
 Letzte Aktualisierung: 18. Januar 2025
+
+---
+
+## Changelog
+
+### 18. Januar 2025 (v2) - Audio-Optimierung Refactoring
+
+**Grundlegende Änderung der Audio-Strategie:**
+
+1. **iPhone Gain entfernt**
+   - `public/audio-worklet-processor.js`: GAIN = 1.25 entfernt
+   - iPhone liefert jetzt RAW PCM ohne Verstärkung
+   - Alle Audio-Optimierung passiert auf dem Desktop
+
+2. **Quellenbasiertes Auto-Level**
+   - `src/audio-converter.js`: `autoLevel()` akzeptiert jetzt `{ source: 'iphone' | 'mic' }`
+   - iPhone: IMMER `loudnorm` (I=-16, LRA=11, TP=-1.5)
+   - Mic: RMS-basierte Entscheidung (loudnorm / mild_gain / none)
+
+3. **Pipeline-Integration**
+   - `src/pipeline/index.js`: `processFileWithVAD()` akzeptiert jetzt `{ source }`
+   - `main.js`: `processAudioFile()` und `processFileWithVAD()` geben Quelle weiter
+   - iPhone-Aufnahmen werden mit `source: 'iphone'` verarbeitet
+
+4. **Filter vereinfacht**
+   - `src/audio-converter.js`: `convertToWav16k()` hat keine Filter mehr (highpass/alimiter entfernt)
+   - Nur noch Auto-Level (zentral, quellenabhängig)
+   - Bandpass (200-3000 Hz) nur vor AssemblyAI
+
+**Ergebnis:**
+- ✅ iPhone klingt IMMER verständlich (loudnorm)
+- ✅ Gute Mics bleiben unangetastet (none bei RMS > -28)
+- ✅ Schlechte Aufnahmen werden gerettet (loudnorm/mild_gain)
+- ✅ Support & Debugging trivial (klares Logging)
+
+### 18. Januar 2025 (v1)
+
+1. **"Zum Home-Bildschirm hinzufügen" Prompt**
+   - Overlay auf iOS beim ersten "Bereit"-Status
+   - Verbessert Stabilität (PWA-Modus)
+
+2. **Mikrofonquelle in Settings speichern (Bugfix)**
+   - `microphoneSource` wird jetzt korrekt persistiert
+
+3. **Audio-Level für VAD-Aufnahmen**
+   - Glow-Animation im Status-Overlay für alle Aufnahme-Modi

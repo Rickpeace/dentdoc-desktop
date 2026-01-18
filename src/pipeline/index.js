@@ -52,10 +52,11 @@ async function runOfflineVAD(audioPath, onProgress = () => {}) {
  * @param {string} audioPath - Path to uploaded audio file
  * @param {Object} options - Options
  * @param {Function} options.onProgress - Progress callback
+ * @param {string} options.source - Audio source: 'iphone' | 'mic' (default: 'mic')
  * @returns {Promise<{wavPath: string, speechMap: Array, segments: Array}>}
  */
 async function processFileWithVAD(audioPath, options = {}) {
-  const { onProgress = () => {} } = options;
+  const { onProgress = () => {}, source = 'mic' } = options;
   const audioConverter = require('../audio-converter');
 
   // Setup output directory
@@ -64,10 +65,16 @@ async function processFileWithVAD(audioPath, options = {}) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
-  // Log temp folder location
+  // Log temp folder location and source strategy
   console.log('');
   console.log('///// TEMP DATEIEN /////');
   console.log(`  Ordner: ${outputDir}`);
+  console.log(`  Quelle: ${source}`);
+  if (source === 'iphone') {
+    console.log(`  >>> Auto-Level Strategie: IMMER loudnorm (iPhone)`);
+  } else {
+    console.log(`  >>> Auto-Level Strategie: RMS-basiert (loudnorm < -50dB | mild_gain -50 bis -28dB | none > -28dB)`);
+  }
 
   // Check if file needs conversion (not already WAV)
   const ext = path.extname(audioPath).toLowerCase();
@@ -85,13 +92,14 @@ async function processFileWithVAD(audioPath, options = {}) {
   }
 
   // Auto-Level: Measure RMS and apply appropriate gain/normalization
+  // Strategy depends on source: iPhone = always loudnorm, Mic = RMS-based
   onProgress({ stage: 'autolevel', percent: 3, message: 'Audio wird optimiert...' });
 
   const leveledPath = path.join(outputDir, `leveled_${Date.now()}.wav`);
 
   try {
-    const levelResult = await audioConverter.autoLevel(processPath, leveledPath);
-    console.log(`  [TEMP] Erstellt: ${path.basename(leveledPath)} (Auto-Level: ${levelResult.filter})`);
+    const levelResult = await audioConverter.autoLevel(processPath, leveledPath, { source });
+    console.log(`  [TEMP] Erstellt: ${path.basename(leveledPath)} (Auto-Level: ${levelResult.strategy})`);
     processPath = levelResult.outputPath;
   } catch (err) {
     console.warn(`  [AutoLevel] Übersprungen: ${err.message}`);

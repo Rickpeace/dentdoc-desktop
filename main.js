@@ -791,7 +791,11 @@ async function selectAndTranscribeAudioFile() {
 }
 
 // Process an audio file (shared by recording and file selection)
-async function processAudioFile(audioFilePath) {
+// @param {string} audioFilePath - Path to audio file
+// @param {Object} options - Options
+// @param {string} options.source - Audio source: 'iphone' | 'mic' (default: 'mic')
+async function processAudioFile(audioFilePath, options = {}) {
+  const { source = 'mic' } = options;
   const token = store.get('authToken');
 
   isProcessing = true;
@@ -807,8 +811,9 @@ async function processAudioFile(audioFilePath) {
 
   if (vadEnabled) {
     // Use VAD pipeline to remove silence, then send to AssemblyAI
-    console.log('[processAudioFile] VAD enabled - removing silence before transcription');
-    await processFileWithVAD(audioFilePath, token);
+    // Pass source for correct Auto-Level strategy (iPhone = always loudnorm)
+    console.log(`[processAudioFile] VAD enabled - source: ${source}`);
+    await processFileWithVAD(audioFilePath, token, { source });
     return;
   }
 
@@ -1128,13 +1133,21 @@ async function processAudioFile(audioFilePath) {
 /**
  * Process an uploaded audio file with VAD for silence removal
  * Then sends the speech-only audio to AssemblyAI
+ *
+ * @param {string} audioFilePath - Path to audio file
+ * @param {string} token - Auth token
+ * @param {Object} options - Options
+ * @param {string} options.source - Audio source: 'iphone' | 'mic' (default: 'mic')
  */
-async function processFileWithVAD(audioFilePath, token) {
+async function processFileWithVAD(audioFilePath, token, options = {}) {
+  const { source = 'mic' } = options;
+
   console.log('');
   console.log('========================================');
   console.log('       VERARBEITUNG GESTARTET');
   console.log('========================================');
   console.log(`  Datei: ${path.basename(audioFilePath)}`);
+  console.log(`  Quelle: ${source}`);
   console.log('');
 
   updateStatusOverlay('Verarbeitung...', 'VAD wird gestartet...', 'processing', { step: 1 });
@@ -1146,7 +1159,9 @@ async function processFileWithVAD(audioFilePath, token) {
     console.log('  Stille wird erkannt und entfernt...');
 
     // Run VAD on the file to get speech-only audio
+    // Pass source for correct Auto-Level strategy (iPhone = always loudnorm)
     const { wavPath } = await pipeline.processFileWithVAD(audioFilePath, {
+      source,
       onProgress: (progress) => {
         updateStatusOverlay('Verarbeitung...', progress.message, 'processing', { step: 1 });
       }
@@ -1855,8 +1870,10 @@ async function stopRecordingWithVAD() {
 
     // Process with Offline-VAD (same flow as file upload)
     // This will: 1) Run VAD 2) Remove silence 3) Send to AssemblyAI
+    // source='mic' for RMS-based Auto-Level strategy
+    console.log('[Recording] >>> Processing with source: mic (RMS-based: loudnorm < -50dB, mild_gain -50 to -28dB, none > -28dB)');
     const token = store.get('authToken');
-    await processFileWithVAD(currentRecordingPath, token);
+    await processFileWithVAD(currentRecordingPath, token, { source: 'mic' });
 
   } catch (error) {
     console.error('[VAD] Stop error:', error);
@@ -1879,12 +1896,13 @@ async function stopRecording() {
   // Check if we're in iPhone mode
   if (isIphoneSession) {
     console.log('[Recording] iPhone mode active - stopping iPhone session');
+    console.log('[Recording] >>> Processing with source: iphone (will use loudnorm always)');
     try {
       const recordingPath = await stopRecordingWithIphone();
       // Save audio immediately
       saveAudioImmediately(recordingPath);
-      // Process the recorded audio (same pipeline as normal recording)
-      await processAudioFile(recordingPath);
+      // Process the recorded audio - source='iphone' for correct Auto-Level (always loudnorm)
+      await processAudioFile(recordingPath, { source: 'iphone' });
     } catch (error) {
       console.error('[iPhone] Stop error:', error);
       updateStatusOverlay('iPhone Fehler', error.message, 'error');
