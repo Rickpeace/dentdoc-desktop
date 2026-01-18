@@ -27,6 +27,11 @@ const fastify = require('fastify')({
   }
 });
 
+// Content-Type akzeptieren aber NICHT parsen - wir nutzen req.raw direkt
+fastify.addContentTypeParser('application/octet-stream', function (request, payload, done) {
+  done(null); // Nichts parsen, einfach durchlassen
+});
+
 // Environment Variables
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const DENTDOC_AUTH_TOKEN = process.env.DENTDOC_AUTH_TOKEN;
