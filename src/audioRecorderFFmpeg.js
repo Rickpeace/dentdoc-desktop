@@ -20,36 +20,42 @@ const fs = require('fs');
 const { app, ipcMain } = require('electron');
 
 // Get ffmpeg path - prefer full build with WASAPI support, fallback to ffmpeg-static
-let ffmpegPath;
+// Initialized lazily to avoid app.isPackaged being undefined during module load
+let ffmpegPath = null;
 
-// First, try to use bundled full FFmpeg with WASAPI support
-const bundledFFmpegPath = path.join(__dirname, '..', 'bin', 'ffmpeg.exe');
-const bundledFFmpegPathPacked = app.isPackaged
-  ? path.join(process.resourcesPath, 'bin', 'ffmpeg.exe')
-  : bundledFFmpegPath;
+function getFFmpegPath() {
+  if (ffmpegPath) return ffmpegPath;
 
-if (fs.existsSync(bundledFFmpegPathPacked)) {
-  ffmpegPath = bundledFFmpegPathPacked;
-  console.log('Using bundled FFmpeg with WASAPI support:', ffmpegPath);
-} else if (fs.existsSync(bundledFFmpegPath)) {
-  ffmpegPath = bundledFFmpegPath;
-  console.log('Using bundled FFmpeg with WASAPI support:', ffmpegPath);
-} else {
-  // Fallback to ffmpeg-static (no WASAPI support)
-  try {
-    const ffmpegStaticPath = require('ffmpeg-static');
+  // First, try to use bundled full FFmpeg with WASAPI support
+  const bundledFFmpegPath = path.join(__dirname, '..', 'bin', 'ffmpeg.exe');
+  const bundledFFmpegPathPacked = app.isPackaged
+    ? path.join(process.resourcesPath, 'bin', 'ffmpeg.exe')
+    : bundledFFmpegPath;
 
-    if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
-      ffmpegPath = ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
-    } else {
-      ffmpegPath = ffmpegStaticPath;
+  if (fs.existsSync(bundledFFmpegPathPacked)) {
+    ffmpegPath = bundledFFmpegPathPacked;
+    console.log('Using bundled FFmpeg with WASAPI support:', ffmpegPath);
+  } else if (fs.existsSync(bundledFFmpegPath)) {
+    ffmpegPath = bundledFFmpegPath;
+    console.log('Using bundled FFmpeg with WASAPI support:', ffmpegPath);
+  } else {
+    // Fallback to ffmpeg-static (no WASAPI support)
+    try {
+      const ffmpegStaticPath = require('ffmpeg-static');
+
+      if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
+        ffmpegPath = ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
+      } else {
+        ffmpegPath = ffmpegStaticPath;
+      }
+      // ffmpeg-static doesn't support WASAPI, will use DirectShow instead
+    } catch (error) {
+      console.error('Error loading ffmpeg-static:', error);
+      throw error;
     }
-    console.log('Using ffmpeg-static (no WASAPI support):', ffmpegPath);
-    console.warn('WARNING: ffmpeg-static does not support WASAPI. Wireless headsets may not work.');
-  } catch (error) {
-    console.error('Error loading ffmpeg-static:', error);
-    throw error;
   }
+
+  return ffmpegPath;
 }
 
 // ============================================================================
@@ -82,12 +88,10 @@ async function listAudioDevices() {
 
   // If WASAPI found devices, use those
   if (wasapiDevices.length > 0) {
-    console.log('Using WASAPI devices');
     return wasapiDevices;
   }
 
   // Fallback to DirectShow
-  console.log('WASAPI found no devices, falling back to DirectShow');
   return listDevicesWithBackend('dshow');
 }
 
@@ -96,7 +100,7 @@ async function listAudioDevices() {
  */
 function listDevicesWithBackend(backend) {
   return new Promise((resolve, reject) => {
-    const ffmpeg = spawn(ffmpegPath, [
+    const ffmpeg = spawn(getFFmpegPath(), [
       '-list_devices', 'true',
       '-f', backend,
       '-i', 'dummy'
@@ -109,9 +113,7 @@ function listDevicesWithBackend(backend) {
     });
 
     ffmpeg.on('close', () => {
-      console.log('FFmpeg device list raw output:');
-      console.log(output);
-
+      // Parse FFmpeg device list output (don't log raw output - too verbose)
       const audioDevices = [];
       const lines = output.split(/\r?\n/);  // Handle both \n and \r\n
 
@@ -155,7 +157,6 @@ function listDevicesWithBackend(backend) {
           // Method 1: Line ends with (audio) or (video)
           if (lowerLine.includes('(audio)')) {
             audioDevices.push({ id: deviceName, name: deviceName, backend });
-            console.log(`Found audio device (${backend}, by tag):`, deviceName);
             continue;
           }
           if (lowerLine.includes('(video)')) {
@@ -165,7 +166,6 @@ function listDevicesWithBackend(backend) {
           // Method 2: We're in the audio section
           if (inAudioSection && !inVideoSection) {
             audioDevices.push({ id: deviceName, name: deviceName, backend });
-            console.log(`Found audio device (${backend}, by section):`, deviceName);
           }
         }
       }
@@ -175,7 +175,6 @@ function listDevicesWithBackend(backend) {
         index === self.findIndex(d => d.name === device.name)
       );
 
-      console.log(`Final ${backend} audio devices list:`, uniqueDevices);
       resolve(uniqueDevices);
     });
 
@@ -204,7 +203,7 @@ function cleanupOldRecordings(tempDir) {
         const filePath = path.join(tempDir, file);
         try {
           fs.unlinkSync(filePath);
-          console.log('Cleaned up old recording:', filePath);
+          // Old recording cleaned up
         } catch (e) {
           console.warn('Could not delete file (may be in use):', filePath, e.message);
         }
@@ -225,7 +224,7 @@ function cleanupOldRecordings(tempDir) {
  * @param {string} deviceName - Windows audio device name (optional)
  * @returns {Promise<string>} Path to the output WAV file
  */
-function startRecording(deleteAudio = false, deviceName = null) {
+function startRecording(deleteAudio = false, deviceName = null, customOutputPath = null) {
   return new Promise(async (resolve, reject) => {
     // ========================================================================
     // STATE GUARD - Only start if idle
@@ -239,7 +238,7 @@ function startRecording(deleteAudio = false, deviceName = null) {
     try {
       // Transition to 'starting' state
       recordingState = 'starting';
-      console.log('[Recorder] idle -> starting');
+      // Starting recording...
 
       // Create temp directory if it doesn't exist
       const tempDir = path.join(app.getPath('temp'), 'dentdoc');
@@ -256,9 +255,19 @@ function startRecording(deleteAudio = false, deviceName = null) {
         recordingState = prevState;
       }
 
-      // Generate unique filename - directly as WAV!
-      const timestamp = Date.now();
-      currentFilePath = path.join(tempDir, `recording-${timestamp}.wav`);
+      // Use custom output path if provided (for VAD segments), otherwise generate one
+      if (customOutputPath) {
+        currentFilePath = customOutputPath;
+        // Ensure parent directory exists
+        const parentDir = path.dirname(customOutputPath);
+        if (!fs.existsSync(parentDir)) {
+          fs.mkdirSync(parentDir, { recursive: true });
+        }
+      } else {
+        // Generate unique filename - directly as WAV!
+        const timestamp = Date.now();
+        currentFilePath = path.join(tempDir, `recording-${timestamp}.wav`);
+      }
 
       // Get device and backend info
       const devices = await listAudioDevices();
@@ -278,13 +287,14 @@ function startRecording(deleteAudio = false, deviceName = null) {
       if (matchedDevice) {
         audioDevice = matchedDevice.name;
         backend = matchedDevice.backend;
-        console.log('Using matched audio device:', audioDevice, 'backend:', backend);
       } else {
         // Use first available device (default)
         audioDevice = devices[0].name;
         backend = devices[0].backend;
-        console.log('Using default audio device:', audioDevice, 'backend:', backend);
       }
+
+      // Log which microphone is being used
+      console.log(`[Recorder] Mikrofon: ${audioDevice}`);
 
       currentAudioBackend = backend;
 
@@ -301,11 +311,8 @@ function startRecording(deleteAudio = false, deviceName = null) {
         currentFilePath
       ];
 
-      console.log('Starting FFmpeg recording:', ffmpegPath, ffmpegArgs.join(' '));
-      console.log('Audio backend:', backend);
-
       // Spawn FFmpeg directly (not via cmd.exe to avoid quote issues)
-      ffmpegProcess = spawn(ffmpegPath, ffmpegArgs);
+      ffmpegProcess = spawn(getFFmpegPath(), ffmpegArgs);
 
       let started = false;
       let startTimeout = null;
@@ -314,7 +321,7 @@ function startRecording(deleteAudio = false, deviceName = null) {
       // EVENT: FFmpeg successfully spawned
       // ======================================================================
       ffmpegProcess.once('spawn', () => {
-        console.log('FFmpeg process spawned');
+        // FFmpeg spawned - waiting for first audio data
       });
 
       // ======================================================================
@@ -322,7 +329,6 @@ function startRecording(deleteAudio = false, deviceName = null) {
       // ======================================================================
       ffmpegProcess.stderr.on('data', (data) => {
         const output = data.toString();
-        console.log('FFmpeg output:', output.trim());
 
         // FFmpeg outputs progress info to stderr
         if (output.includes('size=') || output.includes('time=')) {
@@ -332,19 +338,15 @@ function startRecording(deleteAudio = false, deviceName = null) {
 
             // Transition to 'recording' state
             recordingState = 'recording';
-            console.log('[Recorder] starting -> recording');
             console.log('[Recorder] Recording started:', currentFilePath);
-
-            // Audio level monitoring is handled by Dashboard via getUserMedia + WebAudio API
-            // Dashboard sends levels to main process via IPC, which forwards to status overlay
 
             resolve(currentFilePath);
           }
         }
 
-        // Log errors explicitly
-        if (output.includes('Error') || output.includes('error') || output.includes('Could not')) {
-          console.error('FFmpeg error:', output);
+        // Only log errors - not normal progress output
+        if (output.includes('Error') || output.includes('Could not')) {
+          console.error('[Recorder] FFmpeg error:', output.trim());
         }
       });
 
@@ -352,11 +354,10 @@ function startRecording(deleteAudio = false, deviceName = null) {
       // EVENT: FFmpeg process error
       // ======================================================================
       ffmpegProcess.on('error', (err) => {
-        console.error('FFmpeg process error:', err);
+        console.error('[Recorder] FFmpeg error:', err);
         if (startTimeout) clearTimeout(startTimeout);
         ffmpegProcess = null;
         recordingState = 'idle';
-        console.log('[Recorder] -> idle (error)');
 
         if (!started) {
           reject(new Error(`Aufnahme konnte nicht gestartet werden: ${err.message}`));
@@ -366,16 +367,13 @@ function startRecording(deleteAudio = false, deviceName = null) {
       // ======================================================================
       // EVENT: FFmpeg process closed
       // ======================================================================
-      ffmpegProcess.once('close', (code) => {
-        console.log('FFmpeg process closed with code:', code);
+      ffmpegProcess.once('close', () => {
         if (startTimeout) clearTimeout(startTimeout);
         ffmpegProcess = null;
 
         // Only transition to idle if we're not already idle
-        // (stopRecording handles its own state transition)
         if (recordingState !== 'idle') {
           recordingState = 'idle';
-          console.log('[Recorder] -> idle (process closed)');
         }
       });
 
@@ -385,14 +383,12 @@ function startRecording(deleteAudio = false, deviceName = null) {
       startTimeout = setTimeout(() => {
         // Also abort if stopRecording() was called during startup
         if (recordingState === 'stopping' || recordingState === 'idle') {
-          console.log('[Recorder] startTimeout aborted - state changed to:', recordingState);
+          // Timeout aborted - state changed
           return;
         }
         if (!started && ffmpegProcess && recordingState === 'starting') {
-          console.warn('[Recorder] FFmpeg produced no progress output, using timeout fallback');
           started = true;
           recordingState = 'recording';
-          console.log('[Recorder] starting -> recording (timeout)');
           // Audio level monitoring handled by Dashboard
           resolve(currentFilePath);
         }
@@ -401,7 +397,7 @@ function startRecording(deleteAudio = false, deviceName = null) {
     } catch (error) {
       console.error('Start recording error:', error);
       recordingState = 'idle';
-      console.log('[Recorder] -> idle (catch)');
+      // Error during start
       reject(error);
     }
   });
@@ -436,7 +432,7 @@ function stopRecording() {
 
     // Transition to 'stopping' state
     recordingState = 'stopping';
-    console.log('[Recorder] recording -> stopping');
+    // Stopping recording...
 
     const filePath = currentFilePath;
     const process = ffmpegProcess;
@@ -462,7 +458,7 @@ function stopRecording() {
       resolved = true;
       cleanup();
       recordingState = 'idle';
-      console.log('[Recorder] stopping -> idle (reject)');
+      // Stop failed
       reject(error);
     };
 
@@ -470,10 +466,9 @@ function stopRecording() {
     // STEP 1: Send 'q' to FFmpeg (graceful stop)
     // ========================================================================
     try {
-      console.log('Sending quit signal to FFmpeg...');
       process.stdin.write('q');
     } catch (e) {
-      console.warn('Could not send quit signal to FFmpeg:', e.message);
+      // Ignore - will fall back to SIGTERM
     }
 
     // ========================================================================
@@ -481,11 +476,10 @@ function stopRecording() {
     // ========================================================================
     timeoutId = setTimeout(() => {
       if (process && !resolved) {
-        console.log('FFmpeg not responding to quit, sending SIGTERM');
         try {
           process.kill('SIGTERM');
         } catch (e) {
-          console.warn('Could not send SIGTERM:', e.message);
+          // Ignore
         }
 
         // ==================================================================
@@ -493,16 +487,14 @@ function stopRecording() {
         // ==================================================================
         secondTimeoutId = setTimeout(() => {
           if (process && !resolved) {
-            console.log('FFmpeg still running, force killing');
             try {
               process.kill('SIGKILL');
             } catch (e) {
-              console.warn('Could not send SIGKILL:', e.message);
+              // Ignore
             }
 
             // Force resolve with file if it exists
             recordingState = 'idle';
-            console.log('[Recorder] stopping -> idle (force kill)');
 
             if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
               resolveOnce(filePath);
@@ -518,15 +510,14 @@ function stopRecording() {
     // EVENT: FFmpeg process closed
     // ========================================================================
     process.once('close', () => {
-      console.log('FFmpeg process closed during stop');
       ffmpegProcess = null;
       recordingState = 'idle';
-      console.log('[Recorder] stopping -> idle (close)');
 
       // Verify the file exists and has content
       if (fs.existsSync(filePath)) {
         const stats = fs.statSync(filePath);
-        console.log('[Recorder] Recording saved:', filePath, 'Size:', stats.size, 'bytes');
+        const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+        console.log(`[Recorder] Recording saved: ${sizeMB} MB`);
 
         if (stats.size > 0) {
           resolveOnce(filePath);
@@ -592,7 +583,7 @@ async function forceStop() {
   }
 
   recordingState = 'idle';
-  console.log('[Recorder] FORCE STOP complete, state: idle');
+  // Force stop complete
 }
 
 /**
@@ -609,5 +600,6 @@ module.exports = {
   stopRecording,
   forceStop,
   isRecording,
-  getState
+  getState,
+  getFFmpegPath
 };

@@ -4,27 +4,31 @@ const fs = require('fs');
 const { app } = require('electron');
 
 // Get ffmpeg path - handle both dev and production (unpacked from asar)
-let ffmpegPath;
-try {
-  // In production, ffmpeg-static needs to be in unpacked location
-  const ffmpegStaticPath = require('ffmpeg-static');
+// Initialized lazily to avoid app.isPackaged being undefined during module load
+let ffmpegPath = null;
+let ffmpegPathInitialized = false;
 
-  // If we're in an ASAR archive, replace path with unpacked version
-  if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
-    ffmpegPath = ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
-  } else {
-    ffmpegPath = ffmpegStaticPath;
+function initFFmpegPath() {
+  if (ffmpegPathInitialized) return;
+
+  try {
+    // In production, ffmpeg-static needs to be in unpacked location
+    const ffmpegStaticPath = require('ffmpeg-static');
+
+    // If we're in an ASAR archive, replace path with unpacked version
+    if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
+      ffmpegPath = ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
+    } else {
+      ffmpegPath = ffmpegStaticPath;
+    }
+
+    // Set ffmpeg path for fluent-ffmpeg
+    ffmpeg.setFfmpegPath(ffmpegPath);
+    ffmpegPathInitialized = true;
+  } catch (error) {
+    throw error;
   }
-
-  console.log('FFmpeg path:', ffmpegPath);
-  console.log('FFmpeg exists:', fs.existsSync(ffmpegPath));
-} catch (error) {
-  console.error('Error loading ffmpeg-static:', error);
-  throw error;
 }
-
-// Set ffmpeg path
-ffmpeg.setFfmpegPath(ffmpegPath);
 
 /**
  * Convert WebM audio to WAV 16kHz mono
@@ -33,14 +37,15 @@ ffmpeg.setFfmpegPath(ffmpegPath);
  * @returns {Promise<string>} Path to converted WAV file
  */
 function convertToWav16k(inputPath, outputPath = null) {
+  // Initialize ffmpeg path on first use
+  initFFmpegPath();
+
   return new Promise((resolve, reject) => {
     // Generate output path if not provided
     if (!outputPath) {
       const parsedPath = path.parse(inputPath);
       outputPath = path.join(parsedPath.dir, `${parsedPath.name}_16k.wav`);
     }
-
-    console.log(`Converting ${inputPath} to 16kHz WAV...`);
 
     ffmpeg(inputPath)
       .audioFrequency(16000)  // 16kHz sample rate
@@ -51,21 +56,48 @@ function convertToWav16k(inputPath, outputPath = null) {
         'alimiter=limit=0.97'   // Prevent clipping at -0.26 dBFS
       ])
       .format('wav')
-      .on('start', (commandLine) => {
-        console.log('FFmpeg command:', commandLine);
-      })
-      .on('progress', (progress) => {
-        if (progress.percent) {
-          console.log(`Conversion progress: ${Math.round(progress.percent)}%`);
-        }
-      })
       .on('end', () => {
-        console.log(`Conversion completed: ${outputPath}`);
         resolve(outputPath);
       })
       .on('error', (err) => {
-        console.error('FFmpeg conversion error:', err);
         reject(new Error(`Audio conversion failed: ${err.message}`));
+      })
+      .save(outputPath);
+  });
+}
+
+/**
+ * Convert audio optimized for AssemblyAI transcription
+ * Uses AssemblyAI's recommended filters (more aggressive than speaker recognition)
+ * @param {string} inputPath - Path to input audio file
+ * @param {string} outputPath - Path to output WAV file (optional)
+ * @returns {Promise<string>} Path to converted WAV file
+ */
+function convertForAssemblyAI(inputPath, outputPath = null) {
+  // Initialize ffmpeg path on first use
+  initFFmpegPath();
+
+  return new Promise((resolve, reject) => {
+    // Generate output path if not provided
+    if (!outputPath) {
+      const parsedPath = path.parse(inputPath);
+      outputPath = path.join(parsedPath.dir, `${parsedPath.name}_assemblyai.wav`);
+    }
+
+    ffmpeg(inputPath)
+      .audioFrequency(16000)  // 16kHz sample rate (AssemblyAI recommendation)
+      .audioChannels(1)        // Mono (AssemblyAI recommendation)
+      .audioCodec('pcm_s16le') // 16-bit PCM
+      .audioFilters([
+        'highpass=f=200',       // AssemblyAI: remove low frequencies below 200Hz
+        'lowpass=f=3000'        // AssemblyAI: remove high frequencies above 3kHz
+      ])
+      .format('wav')
+      .on('end', () => {
+        resolve(outputPath);
+      })
+      .on('error', (err) => {
+        reject(new Error(`AssemblyAI audio conversion failed: ${err.message}`));
       })
       .save(outputPath);
   });
@@ -93,5 +125,6 @@ async function convertAndReplace(webmPath) {
 
 module.exports = {
   convertToWav16k,
+  convertForAssemblyAI,
   convertAndReplace
 };

@@ -205,14 +205,323 @@ function stopF9AudioMonitoring() {
 
 // Listen for F9 recording start/stop from main process
 ipcRenderer.on('recording-started', async (event, options) => {
-  console.log('F9 recording started, starting audio monitoring...');
-  await startF9AudioMonitoring(options?.microphoneId);
+  console.log('F9 recording started, options:', options);
+
+  // If VAD mode, ONLY start VAD integration - skip F9 audio monitoring!
+  // VAD has its own audio capture and they conflict with each other.
+  if (options?.vadMode) {
+    console.log('[VAD] VAD mode - skipping F9 audio monitoring, starting VAD integration only...');
+    startVADIntegration(options?.microphoneId).catch(err => {
+      console.error('[VAD] startVADIntegration error:', err);
+    });
+  } else {
+    // Normal recording mode - use F9 audio monitoring for level display
+    console.log('[F9] Normal mode - starting audio monitoring...');
+    await startF9AudioMonitoring(options?.microphoneId);
+  }
 });
 
 ipcRenderer.on('recording-stopped', () => {
-  console.log('F9 recording stopped, stopping audio monitoring...');
-  stopF9AudioMonitoring();
+  console.log('!!!!!!! recording-stopped EVENT RECEIVED !!!!!!!');
+  console.log('vadIsActive:', vadIsActive, 'vadIsStarting:', vadIsStarting);
+  console.log('Stack trace:', new Error().stack);
+
+  // Only stop F9 audio monitoring if VAD is not active/starting
+  // VAD manages its own audio capture
+  if (!vadIsActive && !vadIsStarting) {
+    console.log('[F9] Stopping F9 audio monitoring...');
+    stopF9AudioMonitoring();
+  } else {
+    console.log('[VAD] VAD active/starting - skipping F9 audio monitoring stop');
+  }
+
+  // Only stop VAD if it's actually active (not starting)
+  if (vadIsActive && !vadIsStarting) {
+    console.log('[VAD] Stopping VAD integration...');
+    stopVADIntegration();
+  } else if (vadIsStarting) {
+    console.log('[VAD] VAD is still starting - NOT stopping now');
+  }
 });
+
+// ===== VAD Integration =====
+// VAD processing runs in Main Process (Node WorkerThread with Sherpa-ONNX)
+// Dashboard captures audio and sends batches to Main Process via IPC
+
+let vadAudioContext = null;
+let vadMediaStream = null;
+let vadWorkletNode = null;
+let vadIsActive = false;
+let vadIsStarting = false;  // Prevents stop during async start
+let vadStartPromise = null;  // Promise to wait for start completion
+let vadIsSpeech = false;
+
+// Listen for VAD state changes from main process
+ipcRenderer.on('vad-state-change', (event, data) => {
+  console.log('[VAD] State change:', data.oldState, '->', data.newState);
+});
+
+ipcRenderer.on('vad-segment-ready', (event, segment) => {
+  console.log('[VAD] Segment ready:', segment.index, segment.duration + 'ms');
+});
+
+ipcRenderer.on('vad-session-started', () => {
+  console.log('[VAD] Session started');
+});
+
+ipcRenderer.on('vad-session-stopped', (event, data) => {
+  console.log('[VAD] Session stopped, segments:', data?.segments?.length || 0);
+});
+
+// Listen for speech detection from main process
+ipcRenderer.on('vad-speech-detected', (event, data) => {
+  vadIsSpeech = data.isSpeech;
+  console.log('[VAD] Speech detected:', vadIsSpeech);
+  // Could update UI here if needed (e.g., visual indicator)
+});
+
+/**
+ * Start VAD audio capture and send batches to Main Process
+ * Uses 16kHz AudioContext with AudioWorklet for frame batching
+ */
+async function startVADIntegration(microphoneId) {
+  if (vadIsActive || vadIsStarting) {
+    console.log('[VAD] Already active or starting, vadIsActive:', vadIsActive, 'vadIsStarting:', vadIsStarting);
+    return;
+  }
+
+  vadIsStarting = true;
+  console.log('[VAD] ========== STARTING VAD INTEGRATION (LOCKED) ==========');
+  console.log('[VAD] microphoneId:', microphoneId);
+
+  // WICHTIG: Cleanup vorher - aber NUR wenn nicht gerade gestartet wird
+  // Da wir vadIsStarting bereits gesetzt haben, kann kein anderer Code mehr aufräumen
+  if (vadAudioContext || vadMediaStream || vadWorkletNode) {
+    console.log('[VAD] Cleaning up leftover resources from previous attempt...');
+    // Manuelles Cleanup ohne cleanupVADResources() zu rufen (das könnte Race Conditions haben)
+    if (vadWorkletNode) {
+      try { vadWorkletNode.disconnect(); } catch (e) { /* ignore */ }
+      vadWorkletNode = null;
+    }
+    if (vadMediaStream) {
+      try { vadMediaStream.getTracks().forEach(track => track.stop()); } catch (e) { /* ignore */ }
+      vadMediaStream = null;
+    }
+    if (vadAudioContext) {
+      try { vadAudioContext.close(); } catch (e) { /* ignore */ }
+      vadAudioContext = null;
+    }
+  }
+
+  // Lokale Variablen für atomares Setup - werden erst am Ende den globalen zugewiesen
+  let localAudioContext = null;
+  let localMediaStream = null;
+  let localWorkletNode = null;
+
+  try {
+    // First, ensure VAD worker is initialized in main process
+    console.log('[VAD] Step 1: Initializing VAD worker...');
+    const initResult = await ipcRenderer.invoke('vad-initialize');
+    if (!initResult.success) {
+      console.error('[VAD] Failed to initialize VAD worker:', initResult.error);
+      vadIsStarting = false;
+      return;
+    }
+    console.log('[VAD] Worker initialized in main process');
+
+    // Create AudioContext with 16kHz sample rate (required by Sherpa-ONNX)
+    console.log('[VAD] Step 2: Creating AudioContext...');
+    localAudioContext = new AudioContext({ sampleRate: 16000 });
+    console.log('[VAD] AudioContext created, state:', localAudioContext.state, 'sampleRate:', localAudioContext.sampleRate);
+
+    // CRITICAL: Resume AudioContext if suspended (required before addModule in Electron!)
+    if (localAudioContext.state !== 'running') {
+      console.log('[VAD] AudioContext is suspended, resuming...');
+      await localAudioContext.resume();
+      console.log('[VAD] AudioContext resumed, state:', localAudioContext.state);
+    }
+
+    // Get microphone stream
+    console.log('[VAD] Step 3: Getting microphone stream...');
+    const constraints = {
+      audio: {
+        deviceId: microphoneId ? { ideal: microphoneId } : undefined,
+        sampleRate: { ideal: 16000 },
+        channelCount: { exact: 1 },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    };
+
+    localMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    console.log('[VAD] Media stream acquired');
+
+    // Nochmal prüfen ob AudioContext noch running ist
+    console.log('[VAD] Step 4: Loading AudioWorklet...');
+    console.log('[VAD] AudioContext state before addModule:', localAudioContext.state);
+    if (localAudioContext.state !== 'running') {
+      console.log('[VAD] AudioContext not running, resuming again...');
+      await localAudioContext.resume();
+      console.log('[VAD] After resume, state:', localAudioContext.state);
+    }
+
+    // Load AudioWorklet using Blob URL (more reliable in Electron)
+    // Note: __dirname in Electron renderer can vary - try multiple paths
+    const pathModule = require('path');
+    const fs = require('fs');
+
+    let workletPath = pathModule.join(__dirname, '..', 'vad', 'vad-worklet.js');
+    console.log('[VAD] Initial worklet path:', workletPath, 'exists:', fs.existsSync(workletPath));
+
+    // If path doesn't exist, try alternative paths
+    if (!fs.existsSync(workletPath)) {
+      const altPaths = [
+        pathModule.join(__dirname, 'src', 'vad', 'vad-worklet.js'),
+        pathModule.join(__dirname, '..', '..', 'src', 'vad', 'vad-worklet.js'),
+        pathModule.join(process.cwd(), 'src', 'vad', 'vad-worklet.js')
+      ];
+      for (const alt of altPaths) {
+        console.log('[VAD] Trying alternative path:', alt, 'exists:', fs.existsSync(alt));
+        if (fs.existsSync(alt)) {
+          workletPath = alt;
+          break;
+        }
+      }
+    }
+    console.log('[VAD] Final worklet path:', workletPath);
+
+    const workletCode = fs.readFileSync(workletPath, 'utf8');
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const workletUrl = URL.createObjectURL(blob);
+
+    console.log('[VAD] Calling addModule with Blob URL...');
+    await localAudioContext.audioWorklet.addModule(workletUrl);
+    URL.revokeObjectURL(workletUrl);  // Cleanup Blob URL
+    console.log('[VAD] AudioWorklet loaded successfully');
+
+    // Create AudioWorklet node - pass ACTUAL sample rate from AudioContext
+    console.log('[VAD] Step 5: Creating AudioWorkletNode...');
+    localWorkletNode = new AudioWorkletNode(localAudioContext, 'vad-processor', {
+      processorOptions: {
+        sampleRate: localAudioContext.sampleRate,
+        frameMs: 20,
+        batchFrames: 5  // 100ms batches
+      }
+    });
+
+    // Forward audio batches from worklet to main process
+    localWorkletNode.port.onmessage = (event) => {
+      if (event.data.type === 'audio-batch') {
+        // Send Float32Array DIRECTLY - Electron IPC supports structured clone
+        ipcRenderer.send('vad-audio-batch', {
+          samples: event.data.samples,
+          timestamp: event.data.timestamp
+        });
+      } else if (event.data.type === 'debug') {
+        console.log('[VAD] Worklet batch size:', event.data.batchSize);
+      }
+    };
+
+    // Connect audio graph: microphone -> worklet
+    console.log('[VAD] Step 6: Connecting audio graph...');
+    const source = localAudioContext.createMediaStreamSource(localMediaStream);
+    source.connect(localWorkletNode);
+
+    // ERFOLG! Jetzt erst die globalen Variablen zuweisen (atomares Commit)
+    vadAudioContext = localAudioContext;
+    vadMediaStream = localMediaStream;
+    vadWorkletNode = localWorkletNode;
+    vadIsActive = true;
+    vadIsStarting = false;
+
+    console.log('[VAD] ========== VAD AUDIO CAPTURE ACTIVE ==========');
+    console.log('[VAD] AudioContext state:', vadAudioContext.state);
+    console.log('[VAD] AudioContext sampleRate:', vadAudioContext.sampleRate);
+
+  } catch (error) {
+    console.error('[VAD] ========== FAILED TO START ==========');
+    console.error('[VAD] Error:', error);
+    console.error('[VAD] Error stack:', error.stack);
+
+    // Cleanup lokale Ressourcen bei Fehler
+    if (localWorkletNode) {
+      try { localWorkletNode.disconnect(); } catch (e) { /* ignore */ }
+    }
+    if (localMediaStream) {
+      try { localMediaStream.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ }
+    }
+    if (localAudioContext) {
+      try { localAudioContext.close(); } catch (e) { /* ignore */ }
+    }
+
+    vadIsStarting = false;
+  }
+}
+
+/**
+ * Clean up VAD resources without sending IPC messages
+ * Used during error recovery
+ */
+function cleanupVADResources() {
+  // CRITICAL: Never cleanup while starting - this causes DOMException!
+  if (vadIsStarting) {
+    console.log('[VAD] cleanupVADResources BLOCKED - start in progress');
+    return;
+  }
+
+  console.log('[VAD] Cleaning up VAD resources...');
+
+  if (vadWorkletNode) {
+    try {
+      vadWorkletNode.port.postMessage({ type: 'stop' });
+      vadWorkletNode.disconnect();
+    } catch (e) { /* ignore */ }
+    vadWorkletNode = null;
+  }
+
+  if (vadMediaStream) {
+    try {
+      vadMediaStream.getTracks().forEach(track => track.stop());
+    } catch (e) { /* ignore */ }
+    vadMediaStream = null;
+  }
+
+  if (vadAudioContext) {
+    try {
+      vadAudioContext.close();
+    } catch (e) { /* ignore */ }
+    vadAudioContext = null;
+  }
+
+  vadIsActive = false;
+  vadIsSpeech = false;
+}
+
+/**
+ * Stop VAD audio capture
+ */
+function stopVADIntegration() {
+  console.log('[VAD] ========== STOPPING VAD INTEGRATION ==========');
+  console.log('[VAD] vadIsActive:', vadIsActive, 'vadIsStarting:', vadIsStarting);
+
+  // If currently starting, just mark that we should stop
+  // The start function will handle cleanup
+  if (vadIsStarting) {
+    console.log('[VAD] Start in progress, cleanup will happen after start completes or fails');
+    // Don't send stop IPC - the start is still running
+    return;
+  }
+
+  // Only send stop if we were actually active
+  if (vadIsActive) {
+    // Tell main process audio is stopping - allows VAD to flush buffers
+    ipcRenderer.send('vad-audio-stop');
+  }
+
+  cleanupVADResources();
+  console.log('[VAD] Audio capture stopped');
+}
 
 // Listen for subscription status refresh (triggered from main.js on window focus)
 ipcRenderer.on('refresh-subscription-status', async () => {
@@ -545,6 +854,14 @@ async function loadSettingsView() {
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
   document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
   document.getElementById('settingsDocModeSelect').value = settings.docMode || 'single';
+  document.getElementById('settingsVadEnabled').checked = settings.vadEnabled || false;
+
+  // iPhone microphone settings
+  const microphoneSource = settings.microphoneSource || 'desktop';
+  document.getElementById('settingsMicSourceDesktop').checked = microphoneSource === 'desktop';
+  document.getElementById('settingsMicSourceIphone').checked = microphoneSource === 'iphone';
+  await loadIphonePairingStatus(settings);
+  updateMicSourceUI(microphoneSource);
 
   const bausteinePathValue = await ipcRenderer.invoke('get-bausteine-path');
   document.getElementById('settingsBausteinePath').value = bausteinePathValue || '';
@@ -557,6 +874,7 @@ async function loadSettingsView() {
   settingsInitialSettings = {
     shortcut: settings.shortcut || 'F9',
     microphoneId: settingsSelectedMicId,
+    microphoneSource: settings.microphoneSource || 'desktop',
     transcriptPath: settings.transcriptPath || '',
     profilesPath: settings.profilesPath || '',
     bausteinePath: bausteinePathValue || '',
@@ -564,7 +882,8 @@ async function loadSettingsView() {
     autoExport: settings.autoExport || false,
     keepAudio: settings.keepAudio || false,
     docMode: settings.docMode || 'single',
-    theme: settings.theme || 'dark'
+    theme: settings.theme || 'dark',
+    vadEnabled: settings.vadEnabled || false
   };
 }
 
@@ -606,6 +925,7 @@ function settingsCheckForChanges() {
   const currentSettings = {
     shortcut: settingsNewShortcut || document.getElementById('settingsShortcutDisplay').textContent,
     microphoneId: document.getElementById('settingsMicSelect').value,
+    microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
     profilesPath: document.getElementById('settingsProfilesPath').value,
     bausteinePath: document.getElementById('settingsBausteinePath').value,
@@ -613,7 +933,8 @@ function settingsCheckForChanges() {
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
     docMode: document.getElementById('settingsDocModeSelect').value,
-    theme: document.getElementById('settingsThemeSelect').value
+    theme: document.getElementById('settingsThemeSelect').value,
+    vadEnabled: document.getElementById('settingsVadEnabled').checked
   };
 
   settingsHasUnsavedChanges = JSON.stringify(currentSettings) !== JSON.stringify(settingsInitialSettings);
@@ -628,6 +949,211 @@ function settingsHideStatus(element) {
   element.textContent = '';
   element.className = 'status-message';
 }
+
+// ===========================================
+// iPhone Microphone Pairing
+// ===========================================
+
+let iphonePairingPollInterval = null;
+let iphonePairingTimeout = null;
+
+// Load iPhone pairing status from settings
+async function loadIphonePairingStatus(settings) {
+  const iphoneDeviceId = settings?.iphoneDeviceId || null;
+  const iphoneDeviceName = settings?.iphoneDeviceName || 'iPhone';
+
+  if (iphoneDeviceId) {
+    // iPhone is paired
+    document.getElementById('settingsIphoneUnpairedState').style.display = 'none';
+    document.getElementById('settingsIphoneQRState').style.display = 'none';
+    document.getElementById('settingsIphonePairedState').style.display = 'block';
+    document.getElementById('settingsIphoneDeviceName').textContent = iphoneDeviceName;
+    document.getElementById('settingsIphoneStatusText').textContent = 'Bereit';
+  } else {
+    // iPhone not paired
+    document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
+    document.getElementById('settingsIphoneQRState').style.display = 'none';
+    document.getElementById('settingsIphonePairedState').style.display = 'none';
+  }
+}
+
+// Update UI based on microphone source selection
+function updateMicSourceUI(source) {
+  const localMicSection = document.getElementById('settingsMicSelect').closest('.settings-section');
+  const micSelect = document.getElementById('settingsMicSelect');
+  const micTestBtn = document.getElementById('settingsTestMicBtn');
+  const iphoneSection = document.getElementById('settingsIphonePairingSection');
+
+  if (source === 'iphone') {
+    // Show iPhone pairing, hide local mic controls (but keep the section visible)
+    iphoneSection.style.display = 'block';
+    micSelect.disabled = true;
+    micSelect.style.opacity = '0.5';
+    micTestBtn.disabled = true;
+    micTestBtn.style.opacity = '0.5';
+  } else {
+    // Show local mic controls, hide iPhone pairing
+    iphoneSection.style.display = 'none';
+    micSelect.disabled = false;
+    micSelect.style.opacity = '1';
+    micTestBtn.disabled = false;
+    micTestBtn.style.opacity = '1';
+  }
+}
+
+// Start iPhone pairing process
+async function startIphonePairing() {
+  try {
+    // Show QR code state
+    document.getElementById('settingsIphoneUnpairedState').style.display = 'none';
+    document.getElementById('settingsIphoneQRState').style.display = 'block';
+    document.getElementById('settingsIphonePairedState').style.display = 'none';
+
+    // Request pairing from backend
+    const result = await ipcRenderer.invoke('iphone-pair-start');
+
+    if (!result.success) {
+      throw new Error(result.error || 'Pairing fehlgeschlagen');
+    }
+
+    // Generate QR code
+    const QRCode = require('qrcode');
+    const qrContainer = document.getElementById('settingsIphoneQRCode');
+    qrContainer.innerHTML = '';
+
+    const canvas = document.createElement('canvas');
+    await QRCode.toCanvas(canvas, result.pairingUrl, {
+      width: 200,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    qrContainer.appendChild(canvas);
+
+    // Show URL
+    document.getElementById('settingsIphonePairingUrl').textContent = result.pairingUrl;
+
+    // Start polling for pairing confirmation
+    startPairingPoll(result.pairingId);
+
+    // Set timeout (5 minutes)
+    iphonePairingTimeout = setTimeout(() => {
+      cancelIphonePairing();
+      alert('Kopplung abgelaufen. Bitte erneut versuchen.');
+    }, 5 * 60 * 1000);
+
+  } catch (error) {
+    console.error('iPhone pairing error:', error);
+    cancelIphonePairing();
+    alert('Fehler beim Starten der Kopplung: ' + error.message);
+  }
+}
+
+// Poll for pairing confirmation
+function startPairingPoll(pairingId) {
+  iphonePairingPollInterval = setInterval(async () => {
+    try {
+      const status = await ipcRenderer.invoke('iphone-pair-status', pairingId);
+
+      if (status.paired || status.status === 'paired') {
+        // Pairing successful!
+        clearInterval(iphonePairingPollInterval);
+        clearTimeout(iphonePairingTimeout);
+        iphonePairingPollInterval = null;
+        iphonePairingTimeout = null;
+
+        // Update UI
+        document.getElementById('settingsIphoneUnpairedState').style.display = 'none';
+        document.getElementById('settingsIphoneQRState').style.display = 'none';
+        document.getElementById('settingsIphonePairedState').style.display = 'block';
+        document.getElementById('settingsIphoneDeviceName').textContent = status.deviceName || 'iPhone';
+        document.getElementById('settingsIphoneStatusText').textContent = 'Bereit';
+
+        // Mark settings as changed
+        settingsCheckForChanges();
+      } else if (status.status === 'expired') {
+        // Pairing code expired
+        clearInterval(iphonePairingPollInterval);
+        clearTimeout(iphonePairingTimeout);
+        iphonePairingPollInterval = null;
+        iphonePairingTimeout = null;
+        cancelIphonePairing();
+        alert('Pairing-Code abgelaufen. Bitte erneut versuchen.');
+      }
+    } catch (error) {
+      console.error('Pairing poll error:', error);
+    }
+  }, 2000);
+}
+
+// Cancel iPhone pairing
+function cancelIphonePairing() {
+  if (iphonePairingPollInterval) {
+    clearInterval(iphonePairingPollInterval);
+    iphonePairingPollInterval = null;
+  }
+  if (iphonePairingTimeout) {
+    clearTimeout(iphonePairingTimeout);
+    iphonePairingTimeout = null;
+  }
+
+  // Reset UI to unpaired state
+  document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
+  document.getElementById('settingsIphoneQRState').style.display = 'none';
+  document.getElementById('settingsIphonePairedState').style.display = 'none';
+
+  // Cancel on backend
+  ipcRenderer.invoke('iphone-pair-cancel').catch(console.error);
+}
+
+// Unpair iPhone
+async function unpairIphone() {
+  const confirmed = confirm('Möchten Sie das iPhone wirklich entkoppeln?');
+  if (!confirmed) return;
+
+  try {
+    await ipcRenderer.invoke('iphone-unpair');
+
+    // Reset UI
+    document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
+    document.getElementById('settingsIphoneQRState').style.display = 'none';
+    document.getElementById('settingsIphonePairedState').style.display = 'none';
+
+    // Switch back to desktop mic
+    document.getElementById('settingsMicSourceDesktop').checked = true;
+    updateMicSourceUI('desktop');
+
+    settingsCheckForChanges();
+  } catch (error) {
+    console.error('Unpair error:', error);
+    alert('Fehler beim Entkoppeln: ' + error.message);
+  }
+}
+
+// Event Listeners for iPhone section
+document.querySelectorAll('input[name="micSource"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    updateMicSourceUI(e.target.value);
+    settingsCheckForChanges();
+  });
+});
+
+document.getElementById('settingsIphonePairBtn')?.addEventListener('click', startIphonePairing);
+document.getElementById('settingsIphoneCancelPairBtn')?.addEventListener('click', cancelIphonePairing);
+document.getElementById('settingsIphoneUnpairBtn')?.addEventListener('click', unpairIphone);
+
+// Listen for iPhone connection status updates from main process
+ipcRenderer.on('iphone-connection-status', (event, status) => {
+  const statusText = document.getElementById('settingsIphoneStatusText');
+  const statusContainer = document.getElementById('settingsIphoneConnectionStatus');
+
+  if (statusText && statusContainer) {
+    statusText.textContent = status.connected ? 'Verbunden' : 'Getrennt';
+    statusContainer.classList.toggle('disconnected', !status.connected);
+  }
+});
 
 // Settings Mic Test - uses real recorder logic for realistic testing
 // Audio monitoring variables
@@ -955,6 +1481,7 @@ document.getElementById('settingsAutoExportCheckbox').addEventListener('change',
 document.getElementById('settingsKeepAudioCheckbox').addEventListener('change', settingsCheckForChanges);
 document.getElementById('settingsAutoCloseCheckbox').addEventListener('change', settingsCheckForChanges);
 document.getElementById('settingsDocModeSelect').addEventListener('change', settingsCheckForChanges);
+document.getElementById('settingsVadEnabled').addEventListener('change', settingsCheckForChanges);
 
 // Settings Debug
 document.getElementById('settingsOpenLogBtn').addEventListener('click', async () => {
@@ -989,7 +1516,8 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
     docMode: document.getElementById('settingsDocModeSelect').value,
-    theme: document.getElementById('settingsThemeSelect').value
+    theme: document.getElementById('settingsThemeSelect').value,
+    vadEnabled: document.getElementById('settingsVadEnabled').checked
   };
 
   try {

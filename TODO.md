@@ -60,7 +60,11 @@ cleanup tsten für audio
 sprecherprofile
 kann man nicht unbennenn
 -----
-in der live app gehen die preznteualen update scrhitte nicht
+
+
+
+
+
 
 
 ----!!!!!!!!!!!!!!!

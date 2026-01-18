@@ -2,35 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const LOG_PATH = path.join(os.tmpdir(), 'dentdoc-debug.log');
-
-// Log module loading
-fs.appendFileSync(LOG_PATH, `\n\n[${new Date().toISOString()}] ============= SPEAKER RECOGNITION MODULE LOADING =============\n`);
-
-let sherpa;
-try {
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Loading sherpa-onnx-node...\n`);
-  sherpa = require('sherpa-onnx-node');
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] sherpa-onnx-node loaded successfully\n`);
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Available sherpa exports: ${Object.keys(sherpa).join(', ')}\n`);
-} catch (error) {
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ERROR loading sherpa-onnx-node: ${error.message}\n`);
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Stack: ${error.stack}\n`);
-  throw error;
-}
-
+const sherpa = require('sherpa-onnx-node');
 const { app } = require('electron');
-
-let voiceProfiles;
-try {
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Loading voice-profiles...\n`);
-  voiceProfiles = require('./voice-profiles');
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] voice-profiles loaded successfully\n`);
-} catch (error) {
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ERROR loading voice-profiles: ${error.message}\n`);
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Stack: ${error.stack}\n`);
-  throw error;
-}
+const voiceProfiles = require('./voice-profiles');
 
 let recognizer = null;
 let modelPath = null;
@@ -61,36 +35,25 @@ async function initialize() {
     throw new Error(`Model not found. Tried:\n${possiblePaths.join('\n')}`);
   }
 
-  console.log('Initializing Sherpa-ONNX with model:', modelPath);
-  fs.appendFileSync(LOG_PATH, `\n[${new Date().toISOString()}] Initializing Sherpa-ONNX with model: ${modelPath}\n`);
-
-  // Create recognizer config
+  // Create recognizer config - disable debug to reduce console output
   const config = {
     model: modelPath,
     numThreads: 2,
-    debug: true,
+    debug: false,
     provider: 'cpu'
   };
 
   try {
-    // Check what functions are available
-    console.log('Available Sherpa functions:', Object.keys(sherpa));
-
-    // Try different possible function names
     if (typeof sherpa.SpeakerEmbeddingExtractor === 'function') {
       recognizer = new sherpa.SpeakerEmbeddingExtractor(config);
     } else if (typeof sherpa.createSpeakerEmbeddingExtractor === 'function') {
       recognizer = sherpa.createSpeakerEmbeddingExtractor(config);
     } else {
-      throw new Error('No suitable Sherpa-ONNX function found. Available: ' + Object.keys(sherpa).join(', '));
+      throw new Error('No suitable Sherpa-ONNX function found');
     }
 
-    console.log('Sherpa-ONNX speaker recognition initialized');
-    fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] Sherpa-ONNX initialized successfully\n`);
     return recognizer;
   } catch (error) {
-    console.error('Failed to initialize Sherpa-ONNX:', error);
-    fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ERROR initializing Sherpa: ${error.message}\n${error.stack}\n`);
     throw new Error('Spracherkennung konnte nicht initialisiert werden: ' + error.message);
   }
 }
@@ -375,16 +338,22 @@ async function identifySpeakersFromUtterances(audioFilePath, utterances) {
       if (bestScore >= 0.7) {
         // Format as "Rolle - Name" (e.g., "Arzt - Dr. Notle")
         speakerMapping[speaker] = `${bestMatch.role || 'Arzt'} - ${bestMatch.name}`;
-        console.log(`Speaker ${speaker} identified as ${bestMatch.role || 'Arzt'} - ${bestMatch.name} (similarity: ${bestScore.toFixed(2)})`);
       } else {
         speakerMapping[speaker] = `Sprecher ${speaker}`;
-        console.log(`Speaker ${speaker} could not be identified`);
       }
     } catch (error) {
-      console.error(`Failed to identify speaker ${speaker}:`, error);
       speakerMapping[speaker] = `Sprecher ${speaker}`;
     }
   }
+
+  // Nice formatted log
+  console.log('');
+  console.log('///// SPRECHER ERKANNT /////');
+  Object.entries(speakerMapping).forEach(([key, value]) => {
+    console.log(`  ${key} --> ${value}`);
+  });
+  console.log('////////////////////////////');
+  console.log('');
 
   return speakerMapping;
 }
@@ -405,7 +374,6 @@ async function enrollSpeaker(name, audioFilePath, role = 'Arzt') {
   if (audioFilePath.toLowerCase().endsWith('.webm') ||
       audioFilePath.toLowerCase().endsWith('.mp3') ||
       audioFilePath.toLowerCase().endsWith('.m4a')) {
-    console.log('Converting audio to WAV 16kHz...');
     wavPath = await audioConverter.convertToWav16k(audioFilePath);
   }
 
@@ -414,8 +382,6 @@ async function enrollSpeaker(name, audioFilePath, role = 'Arzt') {
 
   // Save profile with role
   const profile = voiceProfiles.saveProfile(name, embedding, role);
-
-  console.log(`Enrolled speaker: ${name} (${role})`);
   return profile;
 }
 

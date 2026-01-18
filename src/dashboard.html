@@ -342,6 +342,86 @@
             </div>
             <div id="settingsMicStatus" class="status-message"></div>
             <button id="settingsOpenSoundBtn" class="btn btn-secondary w-full mt-4">Windows Sound-Einstellungen öffnen</button>
+
+            <!-- Mikrofonquelle Auswahl -->
+            <div class="mic-source-section" id="settingsMicSourceSection">
+              <label>Mikrofonquelle</label>
+              <div class="radio-group">
+                <label class="radio-option">
+                  <input type="radio" name="micSource" value="desktop" id="settingsMicSourceDesktop" checked>
+                  <span>Lokales Mikrofon</span>
+                </label>
+                <label class="radio-option">
+                  <input type="radio" name="micSource" value="iphone" id="settingsMicSourceIphone">
+                  <span>iPhone als Mikrofon</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- iPhone Kopplung Section -->
+            <div id="settingsIphonePairingSection" class="iphone-pairing-section" style="display: none;">
+              <!-- Nicht gekoppelt -->
+              <div id="settingsIphoneUnpairedState">
+                <p class="helper-text">Koppeln Sie Ihr iPhone einmalig als kabelloses Mikrofon.</p>
+                <button id="settingsIphonePairBtn" class="btn btn-primary">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                    <line x1="12" y1="18" x2="12.01" y2="18"/>
+                  </svg>
+                  iPhone koppeln
+                </button>
+              </div>
+
+              <!-- QR-Code Anzeige -->
+              <div id="settingsIphoneQRState" style="display: none;">
+                <p class="helper-text">Scannen Sie diesen QR-Code mit Ihrem iPhone:</p>
+                <div id="settingsIphoneQRCode" class="qr-code-container"></div>
+                <p class="helper-text pairing-url" id="settingsIphonePairingUrl"></p>
+                <button id="settingsIphoneCancelPairBtn" class="btn btn-secondary">Abbrechen</button>
+              </div>
+
+              <!-- Gekoppelt -->
+              <div id="settingsIphonePairedState" style="display: none;">
+                <div class="iphone-status-card">
+                  <div class="iphone-status-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                      <line x1="12" y1="18" x2="12.01" y2="18"/>
+                    </svg>
+                  </div>
+                  <div class="iphone-status-info">
+                    <span class="iphone-device-name" id="settingsIphoneDeviceName">iPhone</span>
+                    <span class="iphone-connection-status" id="settingsIphoneConnectionStatus">
+                      <span class="status-dot"></span>
+                      <span id="settingsIphoneStatusText">Bereit</span>
+                    </span>
+                  </div>
+                  <button id="settingsIphoneUnpairBtn" class="btn btn-ghost btn-sm">Entkoppeln</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- VAD Section -->
+          <div class="settings-section" id="settings-section-vad">
+            <div class="settings-section-header">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <circle cx="12" cy="12" r="10" stroke-dasharray="4 2" opacity="0.3"/>
+              </svg>
+              <h3>Voice Activity Detection (VAD)</h3>
+            </div>
+            <p class="helper-text" style="margin-bottom: 12px;">
+              VAD erkennt automatisch Sprache und pausiert die Aufnahme bei Stille (Bohrer, Sauger).
+              Spart bis zu 80% Transkriptionskosten.
+            </p>
+            <label class="checkbox-label">
+              <input type="checkbox" id="settingsVadEnabled">
+              <span>VAD aktivieren</span>
+            </label>
+            <div id="settingsVadStatus" class="status-message" style="margin-top: 8px;"></div>
           </div>
 
           <!-- Shortcut Section -->
