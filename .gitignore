@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 package-lock.json
+!railway-audio-relay/package-lock.json
 
 # Build output
 dist/
