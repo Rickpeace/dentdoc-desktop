@@ -87,13 +87,13 @@
 
     .icon.recording {
       background: linear-gradient(135deg, var(--error-500), #dc2626);
-      box-shadow: none;
-      animation: recordingPulse 1.5s ease-in-out infinite;
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+      /* Animation disabled - controlled by JS audio level */
     }
 
-    @keyframes recordingPulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
+    /* CSS variable for dynamic glow intensity - set by JS */
+    .icon.recording.audio-active {
+      /* Glow and background controlled by CSS custom properties */
     }
 
     .icon.processing {
@@ -738,14 +738,29 @@
       // level should be between 0 and 1
       const normalizedLevel = Math.max(0, Math.min(1, level));
 
-      // Amplify the level for more visible effect
-      // Apply a curve to make quiet sounds more visible
-      const amplified = Math.pow(normalizedLevel * 3, 0.7); // Amplify 3x, then compress
+      // Amplify the level MUCH more for visible effect
+      // Apply aggressive curve to make even quiet sounds visible
+      const amplified = Math.pow(normalizedLevel * 5, 0.6); // Amplify 5x, then compress more
       const clamped = Math.min(1, amplified);
 
-      // Scale: 1.0 (silent) to 1.5 (loud) - more dramatic effect
-      const scale = 1 + (clamped * 0.5);
+      // Scale: 1.0 (silent) to 1.6 (loud) - very dramatic effect
+      const scale = 1 + (clamped * 0.6);
       icon.style.transform = `scale(${scale})`;
+
+      // Dynamic glow effect - from subtle red to bright orange/yellow
+      const glowIntensity = 20 + (clamped * 40); // 20px to 60px blur
+      const glowOpacity = 0.4 + (clamped * 0.6); // 0.4 to 1.0 opacity
+
+      // Color shift: red (quiet) → orange (medium) → yellow-white (loud)
+      const r = 239;
+      const g = Math.round(68 + (clamped * 150)); // 68 → 218
+      const b = Math.round(68 + (clamped * 100)); // 68 → 168
+
+      icon.style.boxShadow = `0 0 ${glowIntensity}px rgba(${r}, ${g}, ${b}, ${glowOpacity})`;
+
+      // Also shift background gradient based on level
+      const bgG = Math.round(68 + (clamped * 80)); // Shift green component
+      icon.style.background = `radial-gradient(circle at center, rgba(255, ${bgG + 50}, 50, 1) 0%, rgba(239, ${bgG}, 68, 1) 50%, rgba(185, 28, 28, 1) 100%)`;
     }
 
     ipcRenderer.on('update-status', (event, data) => {
