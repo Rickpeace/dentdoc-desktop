@@ -47,22 +47,35 @@ fastify.register(async function (fastify) {
     const role = url.searchParams.get('role'); // 'iphone' or 'desktop'
     const token = url.searchParams.get('token');
 
+    // Helper to close socket (handles different WebSocket implementations)
+    const closeSocket = (ws, code, reason) => {
+      try {
+        if (typeof ws.close === 'function') {
+          ws.close(code, reason);
+        } else if (typeof ws.terminate === 'function') {
+          ws.terminate();
+        }
+      } catch (e) {
+        fastify.log.warn('Error closing socket: %s', e.message);
+      }
+    };
+
     // Validate parameters
     if (!deviceId || !role || !token) {
       fastify.log.warn('Missing parameters: device=%s, role=%s, token=%s', deviceId, role, !!token);
-      socket.close(4000, 'Missing required parameters: device, role, token');
+      closeSocket(socket, 4000, 'Missing required parameters: device, role, token');
       return;
     }
 
     if (role !== 'iphone' && role !== 'desktop') {
-      socket.close(4001, 'Invalid role. Must be "iphone" or "desktop"');
+      closeSocket(socket, 4001, 'Invalid role. Must be "iphone" or "desktop"');
       return;
     }
 
     // TODO: Validate token against backend API
     // For now, accept any non-empty token
     if (!token || token.length < 10) {
-      socket.close(4002, 'Invalid token');
+      closeSocket(socket, 4002, 'Invalid token');
       return;
     }
 
@@ -80,15 +93,7 @@ fastify.register(async function (fastify) {
       // Close existing iPhone connection if any
       if (pair.iphone && pair.iphone !== socket) {
         fastify.log.info('[IPHONE] Closing existing connection for device %s', deviceId);
-        try {
-          if (typeof pair.iphone.close === 'function') {
-            pair.iphone.close(4003, 'New iPhone connection');
-          } else if (typeof pair.iphone.terminate === 'function') {
-            pair.iphone.terminate();
-          }
-        } catch (e) {
-          fastify.log.warn('[IPHONE] Error closing old connection: %s', e.message);
-        }
+        closeSocket(pair.iphone, 4003, 'New iPhone connection');
       }
       pair.iphone = socket;
 
@@ -100,15 +105,7 @@ fastify.register(async function (fastify) {
       // Close existing Desktop connection if any
       if (pair.desktop && pair.desktop !== socket) {
         fastify.log.info('[DESKTOP] Closing existing connection for device %s', deviceId);
-        try {
-          if (typeof pair.desktop.close === 'function') {
-            pair.desktop.close(4003, 'New Desktop connection');
-          } else if (typeof pair.desktop.terminate === 'function') {
-            pair.desktop.terminate();
-          }
-        } catch (e) {
-          fastify.log.warn('[DESKTOP] Error closing old connection: %s', e.message);
-        }
+        closeSocket(pair.desktop, 4003, 'New Desktop connection');
       }
       pair.desktop = socket;
 
