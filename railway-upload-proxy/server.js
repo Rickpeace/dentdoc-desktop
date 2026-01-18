@@ -31,16 +31,14 @@ const fastify = require('fastify')({
   bodyLimit: 1024 * 1024 * 500 // 500MB max (AssemblyAI erlaubt bis 5GB)
 });
 
-// Content-Type Parser für application/octet-stream - gibt raw Buffer zurück
-fastify.addContentTypeParser('application/octet-stream', function (request, payload, done) {
-  // Wir sammeln die Chunks in einen Buffer
-  const chunks = [];
-  payload.on('data', chunk => chunks.push(chunk));
-  payload.on('end', () => {
-    done(null, Buffer.concat(chunks));
-  });
-  payload.on('error', done);
-});
+// Content-Type Parser für application/octet-stream - STREAM durchreichen (kein Buffer!)
+fastify.addContentTypeParser(
+  'application/octet-stream',
+  { parseAs: 'stream' },
+  (req, payload, done) => {
+    done(null, payload); // payload ist der raw Node.js Stream
+  }
+);
 
 // Environment Variables
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
@@ -92,26 +90,22 @@ fastify.post('/upload', {
     return { error: 'Content-Type must be application/octet-stream' };
   }
 
-  // 3. Body ist jetzt ein Buffer (durch unseren Content-Type Parser)
-  const audioBuffer = request.body;
+  // 3. Content-Length für AssemblyAI (optional aber hilfreich)
+  const contentLength = request.headers['content-length'];
 
-  if (!audioBuffer || audioBuffer.length === 0) {
-    reply.code(400);
-    return { error: 'Empty request body' };
-  }
-
-  console.log(`Upload received: ${(audioBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+  console.log(`Upload stream started: ${contentLength ? (contentLength / 1024 / 1024).toFixed(2) + ' MB' : 'unknown size'}`);
 
   try {
-    // 4. Buffer zu AssemblyAI weiterleiten
+    // 4. Stream direkt zu AssemblyAI durchreichen (KEIN Buffer, KEIN Speichern!)
     const assemblyResponse = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
       headers: {
         'Authorization': ASSEMBLYAI_API_KEY,
         'Content-Type': 'application/octet-stream',
-        'Content-Length': audioBuffer.length.toString()
+        ...(contentLength && { 'Content-Length': contentLength })
       },
-      body: audioBuffer
+      body: request.raw, // Raw Node.js Stream - wird direkt durchgereicht!
+      duplex: 'half'     // Erforderlich für Request-Body-Streaming in Node.js
     });
 
     // 5. AssemblyAI Response parsen
