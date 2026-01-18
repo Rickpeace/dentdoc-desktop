@@ -957,23 +957,42 @@ function settingsHideStatus(element) {
 let iphonePairingPollInterval = null;
 let iphonePairingTimeout = null;
 
-// Load iPhone pairing status from settings
+// Load iPhone pairing status - ALWAYS verify with backend (single source of truth)
 async function loadIphonePairingStatus(settings) {
-  const iphoneDeviceId = settings?.iphoneDeviceId || null;
-  const iphoneDeviceName = settings?.iphoneDeviceName || 'iPhone';
+  try {
+    // Ask backend for the real pairing status
+    const backendStatus = await ipcRenderer.invoke('iphone-get-status');
 
-  if (iphoneDeviceId) {
-    // iPhone is paired
-    document.getElementById('settingsIphoneUnpairedState').style.display = 'none';
-    document.getElementById('settingsIphoneQRState').style.display = 'none';
-    document.getElementById('settingsIphonePairedState').style.display = 'block';
-    document.getElementById('settingsIphoneDeviceName').textContent = iphoneDeviceName;
-    document.getElementById('settingsIphoneStatusText').textContent = 'Bereit';
-  } else {
-    // iPhone not paired
-    document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
-    document.getElementById('settingsIphoneQRState').style.display = 'none';
-    document.getElementById('settingsIphonePairedState').style.display = 'none';
+    if (backendStatus && backendStatus.paired) {
+      // Backend confirms: iPhone is paired
+      document.getElementById('settingsIphoneUnpairedState').style.display = 'none';
+      document.getElementById('settingsIphoneQRState').style.display = 'none';
+      document.getElementById('settingsIphonePairedState').style.display = 'block';
+      document.getElementById('settingsIphoneDeviceName').textContent = backendStatus.deviceName || 'iPhone';
+      document.getElementById('settingsIphoneStatusText').textContent = 'Bereit';
+    } else {
+      // Backend says: not paired (or error) - show unpaired state
+      document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
+      document.getElementById('settingsIphoneQRState').style.display = 'none';
+      document.getElementById('settingsIphonePairedState').style.display = 'none';
+    }
+  } catch (error) {
+    console.error('[iPhone] Failed to verify pairing status:', error);
+    // On error, fall back to local store (but show as potentially stale)
+    const iphoneDeviceId = settings?.iphoneDeviceId || null;
+    const iphoneDeviceName = settings?.iphoneDeviceName || 'iPhone';
+
+    if (iphoneDeviceId) {
+      document.getElementById('settingsIphoneUnpairedState').style.display = 'none';
+      document.getElementById('settingsIphoneQRState').style.display = 'none';
+      document.getElementById('settingsIphonePairedState').style.display = 'block';
+      document.getElementById('settingsIphoneDeviceName').textContent = iphoneDeviceName;
+      document.getElementById('settingsIphoneStatusText').textContent = 'Offline prüfen...';
+    } else {
+      document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
+      document.getElementById('settingsIphoneQRState').style.display = 'none';
+      document.getElementById('settingsIphonePairedState').style.display = 'none';
+    }
   }
 }
 

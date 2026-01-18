@@ -3069,6 +3069,39 @@ ipcMain.handle('iphone-pair-cancel', async () => {
   return { success: true };
 });
 
+// Get iPhone pairing status from backend (single source of truth)
+ipcMain.handle('iphone-get-status', async () => {
+  const token = store.get('authToken');
+  if (!token) {
+    return { paired: false, error: 'Nicht angemeldet' };
+  }
+
+  try {
+    const apiClient = require('./src/apiClient');
+    const status = await apiClient.iphoneStatus(token);
+
+    // Sync local store with backend truth
+    if (status.paired) {
+      if (status.iphoneDeviceId) {
+        store.set('iphoneDeviceId', status.iphoneDeviceId);
+      }
+      if (status.deviceName) {
+        store.set('iphoneDeviceName', status.deviceName);
+      }
+    } else {
+      // Backend says not paired - clear local store
+      store.delete('iphoneDeviceId');
+      store.delete('iphoneDeviceName');
+      // Don't change microphoneSource - user might want to keep it on 'iphone'
+    }
+
+    return status;
+  } catch (error) {
+    console.error('[iPhone] Status check error:', error);
+    return { paired: false, error: error.message };
+  }
+});
+
 // Unpair iPhone
 ipcMain.handle('iphone-unpair', async () => {
   console.log('[iPhone] Unpairing device...');
