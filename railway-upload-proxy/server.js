@@ -4,8 +4,7 @@
  */
 
 const fastify = require('fastify')({
-  logger: true,
-  bodyLimit: 0 // wichtig: kein Limit, kein Parsing
+  logger: true
 });
 
 // ENV
