@@ -1562,6 +1562,26 @@ async function startRecordingWithIphone() {
           if (isIphoneSession && iphoneFfmpegProcess && iphoneFfmpegProcess.stdin && !iphoneFfmpegProcess.stdin.destroyed) {
             try {
               iphoneFfmpegProcess.stdin.write(data);
+
+              // Calculate audio level from PCM data (Int16) and send to status overlay
+              // Throttle to ~10 updates per second to avoid overwhelming the UI
+              const now = Date.now();
+              if (!global.lastAudioLevelUpdate || now - global.lastAudioLevelUpdate > 100) {
+                global.lastAudioLevelUpdate = now;
+
+                // Convert Buffer to Int16Array and calculate RMS
+                const int16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
+                let sum = 0;
+                for (let i = 0; i < int16.length; i++) {
+                  sum += int16[i] * int16[i];
+                }
+                const rms = Math.sqrt(sum / int16.length) / 32768; // Normalize to 0-1
+
+                // Send to status overlay window (not mainWindow!)
+                if (statusOverlay && !statusOverlay.isDestroyed()) {
+                  statusOverlay.webContents.send('iphone-audio-level', rms);
+                }
+              }
             } catch (e) {
               // Ignore write errors during shutdown
               console.warn('[iPhone] Write error (likely during shutdown):', e.message);

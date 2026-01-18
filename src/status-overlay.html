@@ -937,8 +937,13 @@
       }, 2000);
     }
 
-    // Listen for audio level updates
+    // Listen for audio level updates (from local mic or iPhone)
     ipcRenderer.on('audio-level', (event, level) => {
+      updateAudioLevel(level);
+    });
+
+    // Listen for iPhone audio level updates (same behavior, different source)
+    ipcRenderer.on('iphone-audio-level', (event, level) => {
       updateAudioLevel(level);
     });
 
