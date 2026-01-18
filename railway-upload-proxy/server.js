@@ -31,6 +31,17 @@ const fastify = require('fastify')({
   bodyLimit: 1024 * 1024 * 500 // 500MB max (AssemblyAI erlaubt bis 5GB)
 });
 
+// Content-Type Parser für application/octet-stream - gibt raw Buffer zurück
+fastify.addContentTypeParser('application/octet-stream', function (request, payload, done) {
+  // Wir sammeln die Chunks in einen Buffer
+  const chunks = [];
+  payload.on('data', chunk => chunks.push(chunk));
+  payload.on('end', () => {
+    done(null, Buffer.concat(chunks));
+  });
+  payload.on('error', done);
+});
+
 // Environment Variables
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const DENTDOC_AUTH_TOKEN = process.env.DENTDOC_AUTH_TOKEN;
@@ -81,20 +92,26 @@ fastify.post('/upload', {
     return { error: 'Content-Type must be application/octet-stream' };
   }
 
-  // 3. Content-Length (optional, aber gut für Progress)
-  const contentLength = request.headers['content-length'];
+  // 3. Body ist jetzt ein Buffer (durch unseren Content-Type Parser)
+  const audioBuffer = request.body;
+
+  if (!audioBuffer || audioBuffer.length === 0) {
+    reply.code(400);
+    return { error: 'Empty request body' };
+  }
+
+  console.log(`Upload received: ${(audioBuffer.length / 1024 / 1024).toFixed(2)} MB`);
 
   try {
-    // 4. Stream direkt zu AssemblyAI weiterleiten
+    // 4. Buffer zu AssemblyAI weiterleiten
     const assemblyResponse = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
       headers: {
         'Authorization': ASSEMBLYAI_API_KEY,
         'Content-Type': 'application/octet-stream',
-        ...(contentLength && { 'Content-Length': contentLength })
+        'Content-Length': audioBuffer.length.toString()
       },
-      body: request.raw, // Raw Node.js Stream - wird direkt durchgereicht!
-      duplex: 'half' // Erforderlich für Request-Body-Streaming
+      body: audioBuffer
     });
 
     // 5. AssemblyAI Response parsen
