@@ -91,6 +91,15 @@ dentdoc-desktop/
 │   ├── apiClient.js                  # Backend-Kommunikation (396 Zeilen)
 │   ├── audioRecorder.js              # Mikrofon-Aufnahme (114 Zeilen)
 │   ├── audio-converter.js            # FFmpeg WAV-Konvertierung (93 Zeilen)
+│   ├── vad-controller.js             # VAD Controller (Live-VAD Steuerung)
+│   │
+│   ├── vad/
+│   │   └── vad-worker-thread.js      # VAD Worker mit Sherpa-ONNX Silero
+│   │
+│   ├── pipeline/
+│   │   ├── index.js                  # VAD Pipeline (nur VAD + Render)
+│   │   ├── offlineVad.js             # Offline-VAD für hochgeladene Dateien
+│   │   └── speechRenderer.js         # VAD Segments → speech_only.wav
 │   │
 │   ├── speaker-recognition/
 │   │   ├── index.js                  # Sherpa-ONNX Integration (439 Zeilen)
@@ -109,8 +118,9 @@ dentdoc-desktop/
 │   └── bausteine/bausteine.html      # Bausteine-Editor UI
 │
 ├── models/
-│   └── 3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx
-│                                     # Speaker Recognition ML-Modell
+│   ├── 3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common.onnx
+│   │                                 # Speaker Recognition ML-Modell
+│   └── silero_vad.onnx               # VAD Modell (wird automatisch heruntergeladen)
 │
 └── assets/
     ├── icon.png                      # App-Icon
@@ -377,6 +387,50 @@ Backend-Kommunikationsschicht mit 396 Zeilen.
 | `getDocumentationV2(id, token, bausteine)` | POST /api/.../generate-doc-v2 | Agent-Chain mit Bausteinen |
 | `updateSpeakerMapping(id, mapping, token)` | POST /api/.../update-speakers | Speaker-IDs speichern |
 | `submitFeedback(token, category, message)` | POST /api/feedback | Feedback senden |
+
+### Upload-Architektur (Railway Stream-Proxy)
+
+Der Audio-Upload läuft über einen Railway Stream-Proxy, damit der AssemblyAI API-Key nicht im Desktop-Client exposed wird:
+
+```
+Desktop-App
+    │
+    └─► Railway Upload-Proxy (/upload)    ←── API-Key hier!
+            │
+            └─► AssemblyAI /v2/upload (STREAM)
+                    │
+                    └─► upload_url zurück
+
+Desktop-App
+    │
+    └─► Vercel (/api/transcriptions/start)
+            │
+            └─► { upload_url, fileName }
+```
+
+**Wichtige Architektur-Prinzipien:**
+- Railway ist ein **reiner Stream-Proxy** (kein Speichern, kein Buffer)
+- Audio wird **direkt durchgestreamt** (kein RAM-Verbrauch)
+- AssemblyAI API-Key bleibt auf Railway (DSGVO-sauber)
+- Desktop sendet nur `UPLOAD_PROXY_TOKEN` zur Authentifizierung
+
+**Railway Service (`railway-upload-proxy/`):**
+| Datei | Zweck |
+|-------|-------|
+| `server.js` | Fastify Stream-Proxy |
+| `package.json` | Node.js 18+, Fastify |
+
+**Environment Variables (Railway):**
+| Variable | Beschreibung |
+|----------|--------------|
+| `ASSEMBLYAI_API_KEY` | AssemblyAI API Key |
+| `DENTDOC_AUTH_TOKEN` | Token für Desktop-Authentifizierung |
+
+**Environment Variables (Desktop `.env`):**
+| Variable | Beschreibung |
+|----------|--------------|
+| `UPLOAD_PROXY_URL` | Railway Service URL |
+| `UPLOAD_PROXY_TOKEN` | Gleicher Token wie `DENTDOC_AUTH_TOKEN` |
 
 ### Async Upload & Status-Polling
 
@@ -756,19 +810,57 @@ catch (error) {
 
 ## Audio-Konvertierung (src/audio-converter.js)
 
-FFmpeg-Wrapper für Format-Konvertierung (z.B. importierte MP3/M4A Dateien).
+FFmpeg-Wrapper für Format-Konvertierung mit zwei unterschiedlichen Profilen.
+
+### Zwei Audio-Profile: Warum?
+
+Die App verwendet **zwei verschiedene Audio-Filter-Profile** für unterschiedliche Zwecke:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        ORIGINAL AUFNAHME                                     │
+│                   (16kHz, Mono, PCM, highpass=90Hz)                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                ┌───────────────────┴───────────────────┐
+                │                                       │
+                ▼                                       ▼
+┌───────────────────────────────┐       ┌───────────────────────────────┐
+│   SHERPA SPEAKER RECOGNITION  │       │      ASSEMBLYAI UPLOAD        │
+│   (lokale Sprechererkennung)  │       │      (Transkription)          │
+├───────────────────────────────┤       ├───────────────────────────────┤
+│ Filter: highpass=90Hz         │       │ Filter: highpass=200Hz        │
+│         alimiter=0.97         │       │         lowpass=3000Hz        │
+├───────────────────────────────┤       ├───────────────────────────────┤
+│ Optimiert für:                │       │ Optimiert für:                │
+│ • Voiceprint-Erstellung       │       │ • Spracherkennung (STT)       │
+│ • Sprecher-Unterscheidung     │       │ • Hintergrundgeräusch-Filterung│
+│ • Alle Stimmfrequenzen erhalten│      │ • AssemblyAI Empfehlungen     │
+└───────────────────────────────┘       └───────────────────────────────┘
+```
+
+**Warum unterschiedliche Filter?**
+
+| Aspekt | Sherpa (Speaker Recognition) | AssemblyAI (Transkription) |
+|--------|------------------------------|---------------------------|
+| Highpass | 90 Hz (bewahrt tiefe Stimmen) | 200 Hz (aggressiver) |
+| Lowpass | Keiner (alle Obertöne erhalten) | 3000 Hz (Rauschen entfernen) |
+| Ziel | Sprecher unterscheiden | Text erkennen |
+| Priorität | Voiceprint-Qualität | Transkriptionsgenauigkeit |
 
 ### Funktionen
 
 | Funktion | Beschreibung |
 |----------|--------------|
-| `convertToWav16k(inputPath, outputPath)` | Konvertiert zu 16kHz WAV mit Filtern |
+| `convertToWav16k(inputPath, outputPath)` | Konvertiert zu 16kHz WAV für Sherpa (highpass=90Hz, limiter) |
+| `convertForAssemblyAI(inputPath, outputPath)` | Konvertiert für AssemblyAI Upload (highpass=200Hz, lowpass=3000Hz) |
 | `convertAndReplace(webmPath)` | Konvertiert und gibt WAV-Pfad zurück |
 
-### FFmpeg-Befehl (mit Audio-Filtern)
+### FFmpeg-Befehle
 
+**Für Sherpa Speaker Recognition:**
 ```bash
-ffmpeg -i input.webm \
+ffmpeg -i input.wav \
   -ar 16000 \
   -ac 1 \
   -af "highpass=f=90,alimiter=limit=0.97" \
@@ -776,8 +868,46 @@ ffmpeg -i input.webm \
   -f wav output_16k.wav
 ```
 
-**Hinweis:** Bei FFmpeg-Recording ist diese Konvertierung nicht mehr nötig,
-da direkt WAV aufgenommen wird. Wird nur noch für importierte Dateien verwendet.
+**Für AssemblyAI Upload:**
+```bash
+ffmpeg -i input.wav \
+  -ar 16000 \
+  -ac 1 \
+  -af "highpass=f=200,lowpass=f=3000" \
+  -acodec pcm_s16le \
+  -f wav output_assemblyai.wav
+```
+
+### Upload-Flow mit Temp-Datei
+
+```
+uploadAudio(audioFilePath)
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 1. convertForAssemblyAI()               │
+│    → Erstellt: recording_assemblyai.wav │
+│    → Im gleichen Ordner wie Original    │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 2. Upload zu AssemblyAI                 │
+│    → Optimierte Datei wird hochgeladen  │
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ 3. Cleanup (immer!)                     │
+│    → Temp-Datei wird gelöscht           │
+│    → Auch bei Fehler (catch-Block)      │
+└─────────────────────────────────────────┘
+```
+
+**Cleanup-Garantie:**
+- Success: Temp-Datei wird nach Upload gelöscht
+- Error: Temp-Datei wird im catch-Block gelöscht
+- Crash: Datei bleibt in %TEMP%/dentdoc/ (Windows räumt auf)
 
 ### Pfad-Auflösung
 
@@ -788,6 +918,113 @@ app.asar.unpacked/node_modules/ffmpeg-static/
 // Entwicklung
 node_modules/ffmpeg-static/
 ```
+
+---
+
+## VAD Pipeline (Stille-Entfernung)
+
+Voice Activity Detection (VAD) wird verwendet, um Stille aus Audio-Dateien zu entfernen bevor sie an AssemblyAI gesendet werden. Dies reduziert Upload-Größe und Transkriptionskosten.
+
+### Architektur-Übersicht
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Recording Stop / File Upload                                   │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  1. VAD (Live oder Offline)                                     │
+│     Sherpa-ONNX Silero VAD erkennt Speech-Segmente              │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  2. SPEECH-ONLY WAV (speechRenderer.js)                         │
+│     VAD Segments werden concateniert → speech_only.wav          │
+│     Stille entfernt, nur Sprache bleibt                         │
+│     speechMap erstellt (für Timeline-Mapping)                   │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  3. AssemblyAI Upload                                           │
+│     speech_only.wav → Backend → AssemblyAI                      │
+│     Normale Transkription wie bisher                            │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  4. OUTPUT                                                      │
+│     AssemblyAI Transcript (mit Speaker Labels wenn aktiviert)   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### VAD Modi
+
+| Modus | Verwendung | Beschreibung |
+|-------|-----------|--------------|
+| **Live-VAD** | F9-Aufnahme | VAD läuft parallel zur Aufnahme, Segmente werden live markiert |
+| **Offline-VAD** | Datei-Upload | VAD analysiert hochgeladene Audio-Datei nachträglich |
+
+### Dateien
+
+| Datei | Zweck |
+|-------|-------|
+| `src/vad-controller.js` | Steuert VAD Worker, sammelt Segmente |
+| `src/vad/vad-worker-thread.js` | Node.js Worker mit Sherpa-ONNX Silero VAD |
+| `src/pipeline/index.js` | Pipeline-API: `processFileWithVAD()`, `renderSpeechOnlyFromSegments()` |
+| `src/pipeline/offlineVad.js` | Offline-VAD für hochgeladene Dateien |
+| `src/pipeline/speechRenderer.js` | Rendert speech_only.wav aus VAD-Segmenten |
+
+### VAD Konfiguration (vad-worker-thread.js)
+
+```javascript
+const CONFIG = {
+  sampleRate: 16000,
+  speechStartMs: 100,    // Sprache erkannt nach 100ms Speech
+  speechStopMs: 1500,    // Stille erkannt nach 1.5s Pause
+  preRollMs: 800,        // 800ms Audio VOR Speech-Start behalten
+  postRollMs: 1000,      // 1s Audio NACH Speech-Ende behalten
+  sileroThreshold: 0.4,  // VAD Confidence Threshold
+  minSpeechDuration: 0.1 // Min. 100ms Speech
+};
+```
+
+### speechMap (Timeline-Mapping)
+
+Der `speechRenderer` erstellt eine `speechMap` die Zeitstempel vom speech-only Audio zurück zur Original-Aufnahme mappt:
+
+```javascript
+// Beispiel speechMap
+[
+  {
+    speechStartMs: 0,        // Position in speech_only.wav
+    speechEndMs: 5000,
+    originalStartMs: 2500,   // Position in Original-Aufnahme
+    originalEndMs: 7500,
+    segmentIndex: 0
+  },
+  {
+    speechStartMs: 5000,
+    speechEndMs: 12000,
+    originalStartMs: 15000,
+    originalEndMs: 22000,
+    segmentIndex: 1
+  }
+]
+```
+
+**Hinweis:** Die speechMap wird erstellt aber derzeit nicht aktiv verwendet. Sie könnte in Zukunft für präzise Timestamp-Anzeige genutzt werden.
+
+### Funktionen (speechRenderer.js)
+
+| Funktion | Beschreibung |
+|----------|--------------|
+| `renderSpeechOnly(segments, outputPath)` | Rendert VAD-Segmente zu speech_only.wav |
+| `getTotalDuration(segments)` | Berechnet Gesamtdauer aller Segmente |
+| `mapToOriginalTime(speechTimeMs, speechMap)` | Mappt speech-only Zeit zu Original-Zeit |
+| `mapToSpeechTime(originalTimeMs, speechMap)` | Mappt Original-Zeit zu speech-only Zeit |
 
 ---
 
@@ -1016,16 +1253,65 @@ Floating, always-on-top Fenster:
 - Fehler auto-hide nach 5 Sek
 - Erfolg auto-hide nach 3 Sek (wenn aktiviert)
 
-#### Dynamische Fenstergröße & Click-Through
+#### Fenstergröße & Window Lifecycle (v1.4.5+)
 
-Das Status-Overlay passt seine Größe dynamisch an den Inhalt an (Recording-Status ist kleiner als Success-Status mit Buttons). Dies verhindert, dass unsichtbare Bereiche unterhalb des Fensters Mausklicks blockieren.
+**Architektur-Prinzip:** Main Process ist alleiniger Besitzer der Fenstergröße. Der Renderer steuert NIE die Größe.
 
-**Lösung für Click-Blocking Problem:**
+**Problem (vor v1.4.5):**
+- Renderer kontrollierte Fenstergröße via IPC → Race Conditions
+- Electron cached Window-Bounds intern
+- `hide()` resettet den Cache nicht → "Zombie-Window" mit alter Größe
+- Nach erstem Success (großes Fenster) blockierte das versteckte Fenster Klicks darunter
+
+**Lösung:**
+1. **Destroy statt Hide:** `statusOverlay.destroy()` statt `statusOverlay.hide()` - erstellt frisches Fenster ohne gecachte Bounds
+2. **Deterministische Größen:** Main Process setzt Größe basierend auf State-Typ
+3. **Keine Renderer-Resize-Logik:** Renderer sendet keine size-Events mehr
+
+**Code (main.js):**
 ```javascript
-// In status-overlay.html - resizeWindowToFit()
-// Wird mehrfach nach Status-Updates aufgerufen (10ms, 50ms, 150ms)
-// um sicherzustellen, dass das Fenster exakt auf den Container passt
-ipcRenderer.send('resize-status-overlay', width, height);
+// Deterministische Größen pro State
+function getOverlaySizeForState(type, extra = {}) {
+  switch (type) {
+    case 'recording':
+      return { width: 402, height: 96 };
+    case 'processing':
+      return { width: 402, height: 151 };
+    case 'success':
+      // Kleiner wenn keine shortenings (z.B. "Letzte Dokumentation anzeigen")
+      const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
+      return { width: 402, height: hasShorts ? 417 : 277 };
+    case 'error':
+      return { width: 402, height: 141 };
+    default:
+      return { width: 402, height: 121 };
+  }
+}
+
+// KRITISCH: Destroy statt Hide
+function hideStatusOverlay() {
+  if (statusOverlay && !statusOverlay.isDestroyed()) {
+    statusOverlay.destroy();  // Nicht hide()!
+    statusOverlay = null;
+    statusOverlayReady = false;
+  }
+}
+
+// Größe wird VOR dem Anzeigen gesetzt
+function updateStatusOverlay(title, message, type, extra = {}) {
+  const overlay = createStatusOverlay();
+  const { width, height } = getOverlaySizeForState(type, extra);
+  overlay.setSize(width, height, false);
+  // ... send data to renderer
+}
+```
+
+**BrowserWindow Config:**
+```javascript
+{
+  focusable: false,  // Verhindert Doppelklick-Problem bei benachbarten Feldern
+  // ... andere Optionen
+}
 ```
 
 **Drag-Handle über gesamtes Fenster:**
@@ -1040,11 +1326,10 @@ Das Fenster ist überall verschiebbar durch einen Drag-Handle, der das gesamte F
   z-index: 0;
 }
 
-/* Interaktive Elemente darüber (z-index: 1) */
-.header, .actions, .progress-container, .shortening-section {
-  position: relative;
-  z-index: 1;
-}
+/* Interaktive Elemente darüber */
+.header { z-index: 1; }
+.actions { z-index: 10; -webkit-app-region: no-drag; }  /* Höher für Scroll-Interaktion */
+.progress-container, .shortening-section { z-index: 1; }
 
 /* Buttons explizit no-drag */
 .close-btn, .action-btn, .shortening-btn {
@@ -1052,7 +1337,7 @@ Das Fenster ist überall verschiebbar durch einen Drag-Handle, der das gesamte F
 }
 ```
 
-So ist das Fenster überall verschiebbar, aber Buttons bleiben klickbar.
+So ist das Fenster überall verschiebbar, aber Buttons und Scrollbereiche bleiben interaktiv.
 
 ### voice-profiles.html
 
@@ -1149,7 +1434,7 @@ Inter-Process Communication zwischen Main und Renderer.
 
 ## Datenfluss & Ablaufdiagramme
 
-### Kompletter Aufnahme → Dokumentation Flow
+### Kompletter Aufnahme → Dokumentation Flow (mit VAD)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1158,14 +1443,16 @@ Inter-Process Communication zwischen Main und Renderer.
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. startRecording()                                         │
+│ 2. startRecordingWithVAD()                                  │
 │    • Token & Subscription validieren                        │
 │    • audioRecorder.startRecording()                         │
-│    • WebM nach %TEMP%/dentdoc/recording-{ts}.webm          │
+│    • VAD Worker starten (parallel zur Aufnahme)             │
+│    • WAV nach %TEMP%/dentdoc/recording-{ts}.wav            │
 │    • Status-Overlay: "Aufnahme läuft..."                   │
 └──────────────────────┬──────────────────────────────────────┘
                        │
         [User spricht während Behandlung]
+        [VAD markiert Speech-Segmente live]
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -1174,15 +1461,20 @@ Inter-Process Communication zwischen Main und Renderer.
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. stopRecording() → processAudioFile(webmPath)            │
+│ 4. stopRecordingWithVAD()                                   │
+│    • Aufnahme stoppen                                       │
+│    • VAD Worker stoppen, Segmente sammeln                   │
+│    • speechRenderer.renderSpeechOnly(segments)              │
+│    • Erstellt speech_only.wav + speechMap                   │
+│    Status: "Stille wird entfernt..."                       │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 5a. apiClient.uploadAudio(filePath, token, onProgress)     │
+│ 5a. apiClient.uploadAudio(speechOnlyPath, token, onProgress)│
 │    POST /api/transcriptions/upload                          │
 │    • Desktop → Vercel: Progress 0-50%                       │
-│    • Vercel → AssemblyAI: file.upload() + transcripts.submit()
+│    • Vercel → AssemblyAI: file.upload() + transcripts.submit│
 │    • Kehrt sofort mit transcriptionId zurück (non-blocking) │
 │    Status: "Audio wird gesendet..." → "Audio wird vorbereitet..."
 └──────────────────────┬──────────────────────────────────────┘
@@ -1203,7 +1495,7 @@ Inter-Process Communication zwischen Main und Renderer.
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ 6. speakerRecognition.identifySpeakersFromUtterances()     │
-│    • WebM → 16kHz WAV konvertieren                         │
+│    • WAV → 16kHz WAV konvertieren (falls nötig)            │
 │    • Segmente pro Speaker extrahieren (max 30s)            │
 │    • 512-dim Embeddings erstellen                          │
 │    • Mit Profilen vergleichen (Similarity >= 0.7)          │
@@ -1238,6 +1530,37 @@ Inter-Process Communication zwischen Main und Renderer.
 │ 10. Erfolgs-Overlay                                         │
 │    "Fertig! Dokumentation in Zwischenablage kopiert"       │
 │    → User drückt Ctrl+V im PVS                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Datei-Upload Flow (mit Offline-VAD)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. User wählt "Audio-Datei transkribieren..."              │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. selectAndTranscribeAudioFile()                           │
+│    • Datei-Dialog öffnen                                    │
+│    • Unterstützt: WebM, WAV, MP3, M4A, OGG, FLAC, AAC      │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. processFileWithVAD(audioPath)                            │
+│    • Falls nicht WAV: convertToWav16k()                     │
+│    • Offline-VAD analysiert gesamte Datei                   │
+│    • speechRenderer.renderSpeechOnly(segments)              │
+│    • Erstellt speech_only.wav + speechMap                   │
+│    Status: "Stille wird entfernt..."                       │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 4. Weiter wie bei F9-Aufnahme ab Schritt 5a                 │
+│    (Upload, Polling, Speaker Recognition, Dokumentation)   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -1541,6 +1864,90 @@ npm run build:win
 
 ## Changelog
 
+### Version 1.4.8 (2025-01-18)
+
+**Verbesserte Console-Logs für bessere Lesbarkeit:**
+- Visuelle Trenner mit `/////` für jeden Verarbeitungsschritt
+- VAD Analyse zeigt jetzt Dateigrößen statt Segment-Anzahl:
+  ```
+  ///// VAD ANALYSE /////
+    Original:  301.2s (15.23 MB)
+    Sprache:   275.1s (~13.89 MB)
+    Entfernt:  8.6% Stille
+  ///////////////////////
+  ```
+- Neue `[TEMP]` Marker für alle temporären Datei-Operationen:
+  - `[TEMP] Erstellt:` - Wenn Temp-Datei erstellt wird (mit Größe in MB)
+  - `[TEMP] Geloescht:` - Wenn Temp-Datei gelöscht wird
+- Temp-Ordner Pfad wird am Anfang der Verarbeitung angezeigt
+- Tracking aller Temp-Dateien: converted.wav, Segment-Extrakte, concat_list.txt, speech_only.wav, *_assemblyai.wav
+- Unicode-Arrows (`→`) durch ASCII (`-->`) ersetzt für bessere Terminal-Kompatibilität
+
+**Gelöschte Dateien:**
+- `vad.md` - Wurde in ARCHITECTURE.md integriert
+
+### Version 1.4.7 (2025-01-17)
+
+**VAD Pipeline vereinfacht - OpenAI entfernt:**
+- VAD (Voice Activity Detection) wird jetzt nur noch für Stille-Entfernung verwendet
+- Vollständige Entfernung der OpenAI STT Pipeline
+- Neuer Flow: VAD → speech_only.wav → AssemblyAI (statt OpenAI Chunking)
+
+**Gelöschte Dateien:**
+- `src/pipeline/openaiTranscribe.js` - OpenAI Transkription
+- `src/pipeline/chunker.js` - Audio-Chunking für OpenAI Limits
+- `src/pipeline/speakerRemap.js` - Speaker Drift Korrektur
+- `src/pipeline/transcriptMerge.js` - Chunk-Merging
+- `src/pipeline/config.js` - OpenAI-spezifische Config
+
+**Entfernte Funktionen aus main.js:**
+- `selectAndTestOpenAI()` - OpenAI Test-Menüpunkt
+- `processFileWithOpenAIPipeline()` - OpenAI File-Upload
+- `processWithOpenAIPipeline()` - OpenAI Recording-Verarbeitung
+
+**Entfernte Funktionen aus apiClient.js:**
+- `createTranscriptionFromText()` - OpenAI Transkription speichern
+- `testOpenAITranscription()` - OpenAI API-Test
+
+**Neue/Aktualisierte Funktionen:**
+- `processFileWithVAD()` - Datei-Upload mit Offline-VAD → AssemblyAI
+- `processAudioFileDirectly()` - Speech-only Audio direkt an AssemblyAI senden
+- `stopRecordingWithVAD()` - Live-VAD Segmente → speech_only.wav → AssemblyAI
+
+**speechMap:**
+- Timeline-Mapping von speech-only Audio zu Original-Aufnahme wird erstellt
+- Derzeit nicht aktiv verwendet, aber für zukünftige Features bereit
+
+### Version 1.4.6 (2025-01-16)
+
+**AssemblyAI Audio-Optimierung:**
+- Neue Funktion `convertForAssemblyAI()` in audio-converter.js
+- Audio wird vor Upload mit AssemblyAI-empfohlenen Filtern konvertiert:
+  - `highpass=200Hz` (statt 90Hz) - aggressivere Tiefenfilterung
+  - `lowpass=3000Hz` - entfernt hochfrequentes Rauschen
+- Original-Aufnahme bleibt unverändert für Sherpa Speaker Recognition
+- Temp-Datei (`*_assemblyai.wav`) wird nach Upload automatisch gelöscht
+- Cleanup auch im Fehlerfall garantiert
+
+**Zwei Audio-Profile:**
+- Sherpa: highpass=90Hz, limiter (bewahrt alle Stimmfrequenzen für Voiceprints)
+- AssemblyAI: highpass=200Hz, lowpass=3000Hz (optimiert für Transkription)
+
+### Version 1.4.5 (2025-01-16)
+
+**Status-Overlay Window Lifecycle Fix:**
+- **KRITISCH:** `destroy()` statt `hide()` - verhindert "Zombie-Window" mit gecachten Bounds
+- Main Process ist jetzt alleiniger Besitzer der Fenstergröße (keine Renderer-Resize-Logik mehr)
+- Deterministische Fenstergrößen pro State-Typ (recording, processing, success, error)
+- Success-Fenster passt Größe an ob shortenings vorhanden sind (417px vs 277px)
+- "Letzte Dokumentation anzeigen" zeigt jetzt auch shortenings wenn vorhanden
+- `focusable: false` verhindert Doppelklick-Problem bei benachbarten Textfeldern
+- `.actions` Container hat jetzt `z-index: 10` und `-webkit-app-region: no-drag` für Scroll-Interaktion
+
+**Audio-Aufnahme Constraints:**
+- Alle Audio-Processing deaktiviert: `echoCancellation: false`, `noiseSuppression: false`, `autoGainControl: false`
+- Verbesserte Audio-Level-Berechnung mit RMS + Peak Detection und logarithmischer Skalierung
+
 ### Version 1.4.4 (2025-01-16)
 
 **Transkript-Export mit Kürzungen:**
@@ -1585,6 +1992,20 @@ npm run build:win
 - Problem: Mikrofon über USB-Hub funktionierte nicht zuverlässig
 - Analyse: WebRTC nutzt intern WASAPI shared mode
 - Lösung: Robuste Fallbacks statt FFmpeg (das WASAPI nur mit Full-Build unterstützt)
+
+### Version 1.4.5 (2025-01-18)
+
+**Railway Upload-Proxy:**
+- Neuer Stream-Proxy Service auf Railway für sichere AssemblyAI Uploads
+- AssemblyAI API-Key bleibt auf Railway (nicht mehr im Desktop exposed)
+- Echter Stream-Passthrough ohne Buffer/RAM-Verbrauch
+- DSGVO-sauber: Audio wird nie zwischengespeichert
+- Desktop authentifiziert sich mit `UPLOAD_PROXY_TOKEN`
+
+**Architektur:**
+```
+Desktop → Railway (stream) → AssemblyAI
+```
 
 ### Version 1.4.0 (2025-01-14)
 
@@ -1642,6 +2063,6 @@ npm run build:win
 
 ## Version
 
-**Aktuelle Version:** 1.4.4
-**Letztes Update dieser Dokumentation:** 2025-01-16
+**Aktuelle Version:** 1.4.5
+**Letztes Update dieser Dokumentation:** 2025-01-18
 
