@@ -78,9 +78,17 @@ fastify.register(async function (fastify) {
     // Store socket in pair
     if (role === 'iphone') {
       // Close existing iPhone connection if any
-      if (pair.iphone) {
+      if (pair.iphone && pair.iphone !== socket) {
         fastify.log.info('[IPHONE] Closing existing connection for device %s', deviceId);
-        pair.iphone.close(4003, 'New iPhone connection');
+        try {
+          if (typeof pair.iphone.close === 'function') {
+            pair.iphone.close(4003, 'New iPhone connection');
+          } else if (typeof pair.iphone.terminate === 'function') {
+            pair.iphone.terminate();
+          }
+        } catch (e) {
+          fastify.log.warn('[IPHONE] Error closing old connection: %s', e.message);
+        }
       }
       pair.iphone = socket;
 
@@ -90,9 +98,17 @@ fastify.register(async function (fastify) {
       }
     } else {
       // Close existing Desktop connection if any
-      if (pair.desktop) {
+      if (pair.desktop && pair.desktop !== socket) {
         fastify.log.info('[DESKTOP] Closing existing connection for device %s', deviceId);
-        pair.desktop.close(4003, 'New Desktop connection');
+        try {
+          if (typeof pair.desktop.close === 'function') {
+            pair.desktop.close(4003, 'New Desktop connection');
+          } else if (typeof pair.desktop.terminate === 'function') {
+            pair.desktop.terminate();
+          }
+        } catch (e) {
+          fastify.log.warn('[DESKTOP] Error closing old connection: %s', e.message);
+        }
       }
       pair.desktop = socket;
 
