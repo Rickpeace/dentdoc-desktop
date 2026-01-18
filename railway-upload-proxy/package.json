@@ -11,7 +11,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "fastify": "^4.28.1"
+    "fastify": "^4.28.1",
+    "node-fetch": "^3.3.2"
   },
   "keywords": ["assemblyai", "stream", "proxy", "upload"],
   "private": true
