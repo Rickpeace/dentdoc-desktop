@@ -738,9 +738,13 @@
       // level should be between 0 and 1
       const normalizedLevel = Math.max(0, Math.min(1, level));
 
-      // Direct mapping - no smoothing, icon follows audio exactly
-      // Scale: 1.0 (silent) to 1.3 (loud)
-      const scale = 1 + (normalizedLevel * 0.3);
+      // Amplify the level for more visible effect
+      // Apply a curve to make quiet sounds more visible
+      const amplified = Math.pow(normalizedLevel * 3, 0.7); // Amplify 3x, then compress
+      const clamped = Math.min(1, amplified);
+
+      // Scale: 1.0 (silent) to 1.5 (loud) - more dramatic effect
+      const scale = 1 + (clamped * 0.5);
       icon.style.transform = `scale(${scale})`;
     }
 
