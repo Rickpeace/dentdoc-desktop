@@ -1034,7 +1034,7 @@ async function generateMicQRCode() {
   }
 }
 
-// Test iPhone microphone - records 3 seconds and shows levels
+// Test iPhone microphone - records 10 seconds and shows levels
 let iphoneTestWavPath = null;
 
 async function testIphoneMic() {
@@ -1042,9 +1042,8 @@ async function testIphoneMic() {
   const testBtn = document.getElementById('settingsIphoneTestBtn');
   const progressEl = document.getElementById('settingsIphoneTestProgress');
   const levelEl = document.getElementById('settingsIphoneTestLevel');
+  const progressTextEl = document.getElementById('settingsIphoneTestProgressText');
   const resultEl = document.getElementById('settingsIphoneTestResult');
-  const rmsEl = document.getElementById('settingsIphoneTestRms');
-  const peakEl = document.getElementById('settingsIphoneTestPeak');
   const playBtn = document.getElementById('settingsIphonePlayBtn');
 
   if (!statusEl || !testBtn) return;
@@ -1084,14 +1083,12 @@ async function testIphoneMic() {
     if (result.success) {
       iphoneTestWavPath = result.wavPath;
 
-      // Show results
+      // Show play button
       if (resultEl) {
         resultEl.style.display = 'block';
-        if (rmsEl) rmsEl.textContent = `${result.rmsDb} dB`;
-        if (peakEl) peakEl.textContent = `${result.peakDb} dB`;
       }
 
-      // Evaluate quality
+      // Evaluate quality based on RMS
       const rmsDb = parseFloat(result.rmsDb);
       let quality = '';
       if (rmsDb > -30) {
@@ -1108,7 +1105,7 @@ async function testIphoneMic() {
         statusEl.className = 'status-message error';
       }
 
-      statusEl.textContent = `${result.packetsReceived} Pakete empfangen. ${quality}`;
+      statusEl.textContent = `Audio empfangen. ${quality}`;
     } else {
       statusEl.className = 'status-message error';
       statusEl.textContent = result.error || 'Audio-Test fehlgeschlagen';

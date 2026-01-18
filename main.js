@@ -3416,21 +3416,24 @@ ipcMain.handle('iphone-audio-test', async (event) => {
             testFfmpeg.stdin.write(data);
           }
 
-          // Calculate levels
+          // Calculate levels for this packet (for live meter)
           const int16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
+          let packetSumSquares = 0;
           for (let i = 0; i < int16.length; i++) {
             const sample = Math.abs(int16[i]) / 32768;
             sumSquares += sample * sample;
+            packetSumSquares += sample * sample;
             totalSamples++;
             if (sample > peakLevel) peakLevel = sample;
           }
 
-          // Send level to UI (throttled)
+          // Send LIVE level to UI (based on current packet, not cumulative)
           const now = Date.now();
-          if (!global.lastTestLevelUpdate || now - global.lastTestLevelUpdate > 100) {
+          if (!global.lastTestLevelUpdate || now - global.lastTestLevelUpdate > 50) {
             global.lastTestLevelUpdate = now;
-            const currentRms = Math.sqrt(sumSquares / totalSamples);
-            event.sender.send('iphone-test-level', currentRms);
+            // Use current packet's RMS for live visualization
+            const packetRms = Math.sqrt(packetSumSquares / int16.length);
+            event.sender.send('iphone-test-level', packetRms);
           }
         }
       });
