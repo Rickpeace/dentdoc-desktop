@@ -767,9 +767,11 @@
       title.textContent = data.title;
       currentState = data.type;
 
-      // Reset icon classes and scale
+      // Reset icon classes, scale, and any dynamic styles from audio level
       icon.className = 'icon ' + data.type;
       icon.style.transform = 'scale(1)';
+      icon.style.background = '';  // Reset to CSS default
+      icon.style.boxShadow = '';   // Reset to CSS default
 
       // Set emoji and progress based on type
       switch (data.type) {
