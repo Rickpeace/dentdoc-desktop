@@ -3307,12 +3307,15 @@ ipcMain.handle('iphone-audio-test', async (event) => {
   let packetsReceived = 0;
 
   return new Promise((resolve) => {
-    const TEST_DURATION_MS = 3000;
+    const TEST_DURATION_MS = 10000; // 10 seconds
     let testStarted = false;
+    let testStopping = false; // Flag to prevent writes after cleanup starts
     let testTimeout = null;
     let connectionTimeout = null;
 
     const cleanup = () => {
+      testStopping = true; // Set flag FIRST to stop any new writes
+
       if (connectionTimeout) clearTimeout(connectionTimeout);
       if (testTimeout) clearTimeout(testTimeout);
 
@@ -3325,10 +3328,12 @@ ipcMain.handle('iphone-audio-test', async (event) => {
       }
       testWs = null;
 
-      // Close FFmpeg
-      if (testFfmpeg && testFfmpeg.stdin && !testFfmpeg.stdin.destroyed) {
-        testFfmpeg.stdin.end();
-      }
+      // Close FFmpeg stdin after a short delay to let remaining writes complete
+      setTimeout(() => {
+        if (testFfmpeg && testFfmpeg.stdin && !testFfmpeg.stdin.destroyed) {
+          testFfmpeg.stdin.end();
+        }
+      }, 100);
     };
 
     // Connection timeout
@@ -3360,7 +3365,7 @@ ipcMain.handle('iphone-audio-test', async (event) => {
             if (msg.type === 'TEST_READY' || msg.type === 'IPHONE_READY') {
               if (!testStarted) {
                 testStarted = true;
-                console.log('[iPhone Test] Recording for 3 seconds...');
+                console.log('[iPhone Test] Recording for 10 seconds...');
 
                 // Send progress updates
                 event.sender.send('iphone-test-progress', { stage: 'recording', percent: 0 });
@@ -3403,11 +3408,11 @@ ipcMain.handle('iphone-audio-test', async (event) => {
         }
 
         // Binary PCM audio data
-        if (Buffer.isBuffer(data) && data.length > 0 && testStarted) {
+        if (Buffer.isBuffer(data) && data.length > 0 && testStarted && !testStopping) {
           packetsReceived++;
 
-          // Write to FFmpeg
-          if (testFfmpeg.stdin && !testFfmpeg.stdin.destroyed) {
+          // Write to FFmpeg (check testStopping again to avoid race condition)
+          if (!testStopping && testFfmpeg.stdin && !testFfmpeg.stdin.destroyed) {
             testFfmpeg.stdin.write(data);
           }
 
