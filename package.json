@@ -1,6 +1,6 @@
 {
   "name": "dentdoc-desktop",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "DentDoc Desktop App - Automatische Dokumentation für Zahnärzte",
   "main": "main.js",
   "scripts": {
@@ -43,7 +43,8 @@
     ],
     "asarUnpack": [
       "models/**/*",
-      "node_modules/ffmpeg-static/**/*"
+      "node_modules/ffmpeg-static/**/*",
+      "node_modules/sherpa-onnx-node/**/*"
     ],
     "win": {
       "target": [

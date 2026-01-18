@@ -132,35 +132,51 @@ async function convertAndReplace(webmPath) {
  */
 function analyzeAudio(filePath) {
   // Initialize ffmpeg path on first use
-  initFFmpegPath();
+  try {
+    initFFmpegPath();
+  } catch (err) {
+    console.error('[analyzeAudio] FFmpeg init failed:', err.message);
+    return Promise.resolve({ rms: null, peak: null });
+  }
+
+  if (!ffmpegPath) {
+    console.error('[analyzeAudio] FFmpeg path is null');
+    return Promise.resolve({ rms: null, peak: null });
+  }
 
   return new Promise((resolve) => {
-    const ffmpegProc = spawn(ffmpegPath, [
-      '-i', filePath,
-      '-af', 'astats=metadata=1:reset=1',
-      '-f', 'null',
-      '-'
-    ]);
+    try {
+      const ffmpegProc = spawn(ffmpegPath, [
+        '-i', filePath,
+        '-af', 'astats=metadata=1:reset=1',
+        '-f', 'null',
+        '-'
+      ]);
 
-    let stderr = '';
-    ffmpegProc.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    ffmpegProc.on('close', () => {
-      // Parse RMS and Peak from ffmpeg output
-      const rmsMatch = stderr.match(/RMS level dB:\s*(-?\d+(\.\d+)?)/);
-      const peakMatch = stderr.match(/Peak level dB:\s*(-?\d+(\.\d+)?)/);
-
-      resolve({
-        rms: rmsMatch ? Number(rmsMatch[1]) : null,
-        peak: peakMatch ? Number(peakMatch[1]) : null
+      let stderr = '';
+      ffmpegProc.stderr.on('data', (data) => {
+        stderr += data.toString();
       });
-    });
 
-    ffmpegProc.on('error', () => {
+      ffmpegProc.on('close', () => {
+        // Parse RMS and Peak from ffmpeg output
+        const rmsMatch = stderr.match(/RMS level dB:\s*(-?\d+(\.\d+)?)/);
+        const peakMatch = stderr.match(/Peak level dB:\s*(-?\d+(\.\d+)?)/);
+
+        resolve({
+          rms: rmsMatch ? Number(rmsMatch[1]) : null,
+          peak: peakMatch ? Number(peakMatch[1]) : null
+        });
+      });
+
+      ffmpegProc.on('error', (err) => {
+        console.error('[analyzeAudio] FFmpeg process error:', err.message);
+        resolve({ rms: null, peak: null });
+      });
+    } catch (err) {
+      console.error('[analyzeAudio] Spawn error:', err.message);
       resolve({ rms: null, peak: null });
-    });
+    }
   });
 }
 
