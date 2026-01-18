@@ -1088,24 +1088,9 @@ async function testIphoneMic() {
         resultEl.style.display = 'block';
       }
 
-      // Evaluate quality based on RMS
-      const rmsDb = parseFloat(result.rmsDb);
-      let quality = '';
-      if (rmsDb > -30) {
-        quality = 'Sehr gut!';
-        statusEl.className = 'status-message success';
-      } else if (rmsDb > -45) {
-        quality = 'OK';
-        statusEl.className = 'status-message success';
-      } else if (rmsDb > -60) {
-        quality = 'Leise - näher sprechen';
-        statusEl.className = 'status-message warning';
-      } else {
-        quality = 'Zu leise!';
-        statusEl.className = 'status-message error';
-      }
-
-      statusEl.textContent = `Audio empfangen. ${quality}`;
+      // Simple success message
+      statusEl.className = 'status-message success';
+      statusEl.textContent = 'Aufnahme erfolgreich! Klicke auf Abspielen zum Anhören.';
     } else {
       statusEl.className = 'status-message error';
       statusEl.textContent = result.error || 'Audio-Test fehlgeschlagen';
