@@ -36,7 +36,7 @@ let sherpa = null;
 const LOG_PREFIX = '[VAD]';
 
 /**
- * Get FFmpeg path
+ * Get FFmpeg path (handle ASAR unpacking)
  */
 function getFFmpegPath() {
   const bundledPath = path.join(__dirname, '..', '..', 'bin', 'ffmpeg.exe');
@@ -51,7 +51,15 @@ function getFFmpegPath() {
     return bundledPath;
   }
 
-  return require('ffmpeg-static');
+  // Fallback to ffmpeg-static (handle ASAR unpacking)
+  const ffmpegStaticPath = require('ffmpeg-static');
+
+  // If we're in an ASAR archive, replace path with unpacked version
+  if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
+    return ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
+  }
+
+  return ffmpegStaticPath;
 }
 
 /**

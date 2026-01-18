@@ -16,7 +16,7 @@ const fs = require('fs');
 const os = require('os');
 
 /**
- * Get FFmpeg path (same logic as audioRecorderFFmpeg.js)
+ * Get FFmpeg path (same logic as audio-converter.js)
  */
 function getFFmpegPath() {
   const { app } = require('electron');
@@ -34,8 +34,15 @@ function getFFmpegPath() {
     return bundledPath;
   }
 
-  // Fallback to ffmpeg-static
-  return require('ffmpeg-static');
+  // Fallback to ffmpeg-static (handle ASAR unpacking)
+  const ffmpegStaticPath = require('ffmpeg-static');
+
+  // If we're in an ASAR archive, replace path with unpacked version
+  if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
+    return ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
+  }
+
+  return ffmpegStaticPath;
 }
 
 /**
