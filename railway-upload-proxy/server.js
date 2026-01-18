@@ -3,10 +3,16 @@
  * Reiner Stream-Passthrough - kein Parsing, kein Buffer
  */
 
-const fastify = require('fastify')({
-  logger: true
-});
+const fastify = require('fastify')({ logger: true });
+const fetch = require('node-fetch');
 
+// 🔑 DAS IST DER MAGISCHE TEIL
+fastify.addContentTypeParser(
+  'application/octet-stream',
+  (request, payload, done) => {
+    done(null, payload); // NICHT parsen, nur akzeptieren
+  }
+);
 // ENV
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const DENTDOC_AUTH_TOKEN = process.env.DENTDOC_AUTH_TOKEN;
