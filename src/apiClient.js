@@ -3,13 +3,14 @@ const FormData = require('form-data');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const { convertForAssemblyAI } = require('./audio-converter');
 
 // DentDoc Vercel API URL
-
 const API_BASE_URL = process.env.API_URL || 'https://dentdoc-app.vercel.app/';
 
-// AssemblyAI API Key für Direkt-Upload (umgeht Vercel 4.5MB Limit)
-const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
+// Railway Upload-Proxy URL (API-Key bleibt auf Railway, nicht im Desktop!)
+const UPLOAD_PROXY_URL = process.env.UPLOAD_PROXY_URL || 'https://dentdoc-upload-proxy.up.railway.app';
+const UPLOAD_PROXY_TOKEN = process.env.UPLOAD_PROXY_TOKEN;
 
 /**
  * Get or create a unique device ID for this installation
@@ -164,6 +165,8 @@ async function getUser(token) {
  * @returns {Promise<number>} Transcription ID
  */
 async function uploadAudio(audioFilePath, token, onProgress = null) {
+  let optimizedFilePath = null;
+
   try {
     // Check if file exists and has content
     const stats = fs.statSync(audioFilePath);
@@ -171,36 +174,48 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       throw new Error('EMPTY_RECORDING');
     }
 
-    const fileName = require('path').basename(audioFilePath);
-    const fileBuffer = fs.readFileSync(audioFilePath);
+    // STEP 0: Convert audio with AssemblyAI-optimized filters
+    // (highpass=200Hz, lowpass=3000Hz for better transcription)
+    if (onProgress) {
+      onProgress({ phase: 'prepare', percent: 0, message: 'Audio wird optimiert...' });
+    }
 
-    // STEP 1: Upload directly to AssemblyAI (bypasses Vercel 4.5MB limit!)
+    optimizedFilePath = await convertForAssemblyAI(audioFilePath);
+
+    const fileName = require('path').basename(optimizedFilePath);
+    const fileBuffer = fs.readFileSync(optimizedFilePath);
+    const optimizedSizeMB = (fileBuffer.length / (1024 * 1024)).toFixed(2);
+    console.log(`  [TEMP] Erstellt: ${fileName} (${optimizedSizeMB} MB)`);
+    console.log(`         Pfad: ${optimizedFilePath}`);
+
+    // STEP 1: Upload via Railway Proxy (API-Key bleibt auf Railway, nicht im Desktop!)
     if (onProgress) {
       onProgress({ phase: 'prepare', percent: 5, message: 'Vorbereiten...' });
     }
 
-    console.log('[uploadAudio] Starting direct upload to AssemblyAI, file size:', fileBuffer.length);
-
-    if (!ASSEMBLYAI_API_KEY) {
-      throw new Error('AssemblyAI API-Key nicht konfiguriert. Bitte kontaktieren Sie den Support.');
+    if (!UPLOAD_PROXY_TOKEN) {
+      throw new Error('Upload-Proxy Token nicht konfiguriert. Bitte UPLOAD_PROXY_TOKEN in .env setzen.');
     }
 
     if (onProgress) {
       onProgress({ phase: 'upload', percent: 0, message: 'Upload läuft...' });
     }
 
-    // Use native https for real upload progress tracking (axios doesn't support it in Node.js)
+    // Use native https for real upload progress tracking
     const fileSize = fileBuffer.length;
     const https = require('https');
+    const url = require('url');
 
     const upload_url = await new Promise((resolve, reject) => {
+      const proxyUrl = new url.URL(`${UPLOAD_PROXY_URL}/upload`);
+
       const options = {
-        hostname: 'api.assemblyai.com',
-        port: 443,
-        path: '/v2/upload',
+        hostname: proxyUrl.hostname,
+        port: proxyUrl.port || 443,
+        path: proxyUrl.pathname,
         method: 'POST',
         headers: {
-          'Authorization': ASSEMBLYAI_API_KEY,
+          'Authorization': `Bearer ${UPLOAD_PROXY_TOKEN}`,
           'Content-Type': 'application/octet-stream',
           'Content-Length': fileSize,
         },
@@ -213,17 +228,29 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
           try {
             const json = JSON.parse(data);
             if (res.statusCode >= 200 && res.statusCode < 300) {
+              if (!json.upload_url) {
+                reject(new Error('Keine upload_url vom Proxy erhalten'));
+                return;
+              }
               resolve(json.upload_url);
+            } else if (res.statusCode === 401) {
+              reject(new Error('Upload-Proxy Authentifizierung fehlgeschlagen. Bitte Token prüfen.'));
             } else {
-              reject(new Error(json.error || `Upload failed with status ${res.statusCode}`));
+              reject(new Error(json.error || json.message || `Upload failed with status ${res.statusCode}`));
             }
           } catch (e) {
-            reject(new Error(`Invalid response from AssemblyAI: ${data}`));
+            reject(new Error(`Ungültige Antwort vom Upload-Proxy: ${data}`));
           }
         });
       });
 
-      req.on('error', reject);
+      req.on('error', (err) => {
+        if (err.code === 'ECONNREFUSED') {
+          reject(new Error('Upload-Proxy nicht erreichbar. Bitte später erneut versuchen.'));
+        } else {
+          reject(err);
+        }
+      });
 
       // Timeout handling
       req.setTimeout(300000, () => {
@@ -260,10 +287,8 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       writeNextChunk();
     });
 
-    console.log('[uploadAudio] Upload successful, got upload_url');
-
     if (!upload_url) {
-      throw new Error('No upload_url received from AssemblyAI');
+      throw new Error('No upload_url received from upload proxy');
     }
 
     // STEP 2: Tell backend to start transcription (creates DB entry)
@@ -284,16 +309,32 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       }
     );
 
-    console.log('[uploadAudio] Transcription started, ID:', startResponse.data.id);
-
     if (onProgress) {
       onProgress({ phase: 'submitted', percent: 100, message: 'Übermittelt' });
+    }
+
+    // Cleanup optimized temp file
+    if (optimizedFilePath && fs.existsSync(optimizedFilePath)) {
+      try {
+        fs.unlinkSync(optimizedFilePath);
+        console.log(`  [TEMP] Geloescht: ${require('path').basename(optimizedFilePath)}`);
+      } catch (cleanupErr) {
+        // Ignore cleanup errors
+      }
     }
 
     return startResponse.data.id;
 
   } catch (error) {
-    console.error('Upload error:', error.response?.data || error.message, error.code);
+    // Cleanup optimized temp file on error too
+    if (optimizedFilePath && fs.existsSync(optimizedFilePath)) {
+      try {
+        fs.unlinkSync(optimizedFilePath);
+        console.log(`  [TEMP] Geloescht (Fehler): ${require('path').basename(optimizedFilePath)}`);
+      } catch (cleanupErr) {
+        // Ignore cleanup errors
+      }
+    }
 
     if (error.message === 'EMPTY_RECORDING') {
       throw new Error('Die Aufnahme war zu kurz oder leer. Bitte sprechen Sie mindestens 2-3 Sekunden.');

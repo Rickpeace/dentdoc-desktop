@@ -1,0 +1,18 @@
+{
+  "name": "dentdoc-upload-proxy",
+  "version": "1.0.0",
+  "description": "Stream-Proxy für AssemblyAI Upload (kein Speichern, nur durchreichen)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1"
+  },
+  "keywords": ["assemblyai", "stream", "proxy", "upload"],
+  "private": true
+}
