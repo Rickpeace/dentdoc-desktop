@@ -1082,8 +1082,26 @@ async function testIphoneMic() {
       if (levelEl) levelEl.style.width = '0%';
     }
 
+    // Countdown on button
+    let countdown = 10;
+    const originalBtnText = testBtn.textContent;
+    testBtn.textContent = `Aufnahme... ${countdown}s`;
+    const countdownInterval = setInterval(() => {
+      countdown--;
+      if (countdown > 0) {
+        testBtn.textContent = `Aufnahme... ${countdown}s`;
+      } else {
+        testBtn.textContent = 'Verarbeite...';
+        clearInterval(countdownInterval);
+      }
+    }, 1000);
+
     // Run the audio test
     const result = await ipcRenderer.invoke('iphone-audio-test');
+
+    // Stop countdown and restore button
+    clearInterval(countdownInterval);
+    testBtn.textContent = originalBtnText;
 
     // Hide progress
     if (progressEl) progressEl.style.display = 'none';
@@ -1116,9 +1134,9 @@ async function testIphoneMic() {
 ipcRenderer.on('iphone-test-level', (event, level) => {
   const levelEl = document.getElementById('settingsIphoneTestLevel');
   if (levelEl) {
-    // Convert 0-1 to percentage (amplified for visibility)
-    // Typical speech RMS is 0.01-0.1, so multiply by 1000 for visible bar
-    const percent = Math.min(100, level * 1000);
+    // Sanftere Skalierung: sqrt für weniger extreme Schwankungen
+    const scaled = Math.sqrt(level * 5000) * 10;
+    const percent = Math.min(100, Math.max(3, scaled));
     levelEl.style.width = `${percent}%`;
   }
 });

@@ -3245,15 +3245,19 @@ function cleanupIphoneTestFiles(keepPath = null) {
       .filter(f => f.startsWith('iphone_test_') && f.endsWith('.wav'))
       .map(f => path.join(tempDir, f));
 
+    let deleted = 0;
     for (const file of files) {
       if (file !== keepPath) {
         try {
           fs.unlinkSync(file);
-          console.log('[iPhone Test] Deleted old test file:', path.basename(file));
+          deleted++;
         } catch (e) {
           // File might be in use, ignore
         }
       }
+    }
+    if (deleted > 0) {
+      console.log(`[iPhone Test] Cleanup: ${deleted} alte Test-Dateien gelöscht`);
     }
   } catch (e) {
     console.warn('[iPhone Test] Cleanup error:', e.message);
@@ -3368,7 +3372,7 @@ ipcMain.handle('iphone-audio-test', async (event) => {
         cleanup();
 
         // Wait for FFmpeg to finish
-        testFfmpeg.on('close', () => {
+        testFfmpeg.on('close', async () => {
           if (resolved) return;
           resolved = true;
 
@@ -3382,6 +3386,34 @@ ipcMain.handle('iphone-audio-test', async (event) => {
           console.log(`  RMS: ${rmsDb.toFixed(1)} dB`);
           console.log(`  Peak: ${peakDb.toFixed(1)} dB`);
           console.log(`  File: ${testWavPath}`);
+
+          // Amplify the test file for better playback (add +12dB gain)
+          const amplifiedPath = testWavPath.replace('.wav', '_loud.wav');
+          try {
+            await new Promise((resolveAmp) => {
+              const ampFfmpeg = spawn(ffmpegPath, [
+                '-i', testWavPath,
+                '-af', 'volume=12dB',  // +12dB boost
+                '-y',
+                amplifiedPath
+              ]);
+              ampFfmpeg.on('close', (code) => {
+                if (code === 0) {
+                  console.log('[iPhone Test] Amplified file created:', amplifiedPath);
+                  // Replace original with amplified version
+                  fs.unlinkSync(testWavPath);
+                  fs.renameSync(amplifiedPath, testWavPath);
+                  resolveAmp();
+                } else {
+                  console.warn('[iPhone Test] Amplification failed, using original');
+                  resolveAmp(); // Continue with original file
+                }
+              });
+              ampFfmpeg.on('error', () => resolveAmp());
+            });
+          } catch (e) {
+            console.warn('[iPhone Test] Amplification error:', e.message);
+          }
 
           resolve({
             success: true,
@@ -3448,25 +3480,27 @@ ipcMain.handle('iphone-audio-test', async (event) => {
           }
 
           // Calculate levels for this packet (for live meter)
+          // Use SAME formula as real iPhone recording (line 1588-1593)
           const int16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
-          let packetSumSquares = 0;
+          let packetSum = 0;
           for (let i = 0; i < int16.length; i++) {
+            packetSum += int16[i] * int16[i];
+            // Also track cumulative stats
             const sample = Math.abs(int16[i]) / 32768;
             sumSquares += sample * sample;
-            packetSumSquares += sample * sample;
             totalSamples++;
             if (sample > peakLevel) peakLevel = sample;
           }
+          // RMS normalized to 0-1 (same as iphone-audio-level)
+          const packetRms = Math.sqrt(packetSum / int16.length) / 32768;
 
-          // Send LIVE level to UI (based on current packet, not cumulative)
+          // Send LIVE level to UI
           const now = Date.now();
           if (!global.lastTestLevelUpdate || now - global.lastTestLevelUpdate > 50) {
             global.lastTestLevelUpdate = now;
-            // Use current packet's RMS for live visualization
-            const packetRms = Math.sqrt(packetSumSquares / int16.length);
-            // Send to dashboard window directly
-            if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-              dashboardWindow.webContents.send('iphone-test-level', packetRms);
+            const win = global.dashboardWindow || dashboardWindow;
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('iphone-test-level', packetRms);
             }
           }
         }
