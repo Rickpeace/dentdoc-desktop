@@ -16,27 +16,15 @@
 const fastify = require('fastify')({
   logger: {
     level: 'info',
-    // Keine Request-Bodies loggen (DSGVO)
     serializers: {
       req(req) {
         return {
           method: req.method,
           url: req.url,
-          // Keine Headers loggen (enthält Auth-Token)
         };
       }
     }
-  },
-  // Wichtig: Kein Body-Parsing, wir streamen roh
-  bodyLimit: 1024 * 1024 * 500 // 500MB max (AssemblyAI erlaubt bis 5GB)
-});
-
-// Content-Type Parser für application/octet-stream - Body-Parsing überspringen!
-// Wir nutzen request.raw direkt für echtes Streaming
-fastify.addContentTypeParser('application/octet-stream', function (request, payload, done) {
-  // Nichts parsen - done(null, undefined) überspringt das Parsing
-  // Der Stream ist dann via request.raw verfügbar
-  done(null, undefined);
+  }
 });
 
 // Environment Variables
@@ -46,12 +34,12 @@ const PORT = process.env.PORT || 3000;
 
 // Startup-Check
 if (!ASSEMBLYAI_API_KEY) {
-  console.error('❌ ASSEMBLYAI_API_KEY nicht gesetzt!');
+  console.error('ASSEMBLYAI_API_KEY nicht gesetzt!');
   process.exit(1);
 }
 
 if (!DENTDOC_AUTH_TOKEN) {
-  console.error('❌ DENTDOC_AUTH_TOKEN nicht gesetzt!');
+  console.error('DENTDOC_AUTH_TOKEN nicht gesetzt!');
   process.exit(1);
 }
 
@@ -65,15 +53,9 @@ fastify.get('/health', async () => {
 /**
  * Upload-Proxy Endpoint
  *
- * Nimmt Audio-Stream vom Desktop entgegen und leitet ihn
- * direkt zu AssemblyAI weiter (kein Zwischenspeichern).
+ * KEIN Body-Parser! req.raw ist der Stream.
  */
-fastify.post('/upload', {
-  // Raw body handling für Streaming
-  config: {
-    rawBody: true
-  }
-}, async (request, reply) => {
+fastify.post('/upload', async (request, reply) => {
 
   // 1. Auth-Check
   const authHeader = request.headers['authorization'];
@@ -82,57 +64,42 @@ fastify.post('/upload', {
     return { error: 'Unauthorized' };
   }
 
-  // 2. Content-Type Check
-  const contentType = request.headers['content-type'];
-  if (!contentType || !contentType.includes('application/octet-stream')) {
-    reply.code(400);
-    return { error: 'Content-Type must be application/octet-stream' };
-  }
-
-  // 3. Content-Length für AssemblyAI (optional aber hilfreich)
+  // 2. Content-Length für Logging
   const contentLength = request.headers['content-length'];
-
-  console.log(`Upload stream started: ${contentLength ? (contentLength / 1024 / 1024).toFixed(2) + ' MB' : 'unknown size'}`);
+  console.log(`Upload started: ${contentLength ? (contentLength / 1024 / 1024).toFixed(2) + ' MB' : 'unknown size'}`);
 
   try {
-    // 4. Stream direkt zu AssemblyAI durchreichen (KEIN Buffer, KEIN Speichern!)
+    // 3. Stream direkt zu AssemblyAI durchreichen
+    // req.raw = echter Node.js IncomingMessage Stream
+    // KEIN Buffer, KEIN Body-Parser, KEIN RAM-Verbrauch
     const assemblyResponse = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
       headers: {
         'Authorization': ASSEMBLYAI_API_KEY,
-        'Content-Type': 'application/octet-stream',
-        ...(contentLength && { 'Content-Length': contentLength })
+        'Transfer-Encoding': 'chunked'
       },
-      body: request.raw, // Raw Node.js Stream - wird direkt durchgereicht!
-      duplex: 'half'     // Erforderlich für Request-Body-Streaming in Node.js
+      body: request.raw, // Der echte Stream!
+      duplex: 'half'
     });
 
-    // 5. AssemblyAI Response parsen
+    // 4. AssemblyAI Response parsen
     if (!assemblyResponse.ok) {
       const errorText = await assemblyResponse.text();
       console.error('AssemblyAI error:', assemblyResponse.status, errorText);
-
       reply.code(assemblyResponse.status);
-      return {
-        error: 'AssemblyAI upload failed',
-        status: assemblyResponse.status,
-        details: errorText
-      };
+      return { error: 'AssemblyAI upload failed', details: errorText };
     }
 
     const result = await assemblyResponse.json();
+    console.log('Upload successful, got upload_url');
 
-    // 6. upload_url zurückgeben (das einzige was wir brauchen)
+    // 5. upload_url zurückgeben
     return { upload_url: result.upload_url };
 
   } catch (error) {
     console.error('Upload proxy error:', error.message);
-
     reply.code(500);
-    return {
-      error: 'Upload failed',
-      message: error.message
-    };
+    return { error: 'Upload failed', message: error.message };
   }
 });
 
@@ -140,9 +107,7 @@ fastify.post('/upload', {
 const start = async () => {
   try {
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    console.log(`🚀 DentDoc Upload-Proxy läuft auf Port ${PORT}`);
-    console.log(`📡 AssemblyAI API-Key: ${ASSEMBLYAI_API_KEY ? '✓ gesetzt' : '✗ fehlt'}`);
-    console.log(`🔐 Auth-Token: ${DENTDOC_AUTH_TOKEN ? '✓ gesetzt' : '✗ fehlt'}`);
+    console.log(`DentDoc Upload-Proxy läuft auf Port ${PORT}`);
   } catch (err) {
     console.error('Startup error:', err);
     process.exit(1);
