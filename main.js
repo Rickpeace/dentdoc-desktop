@@ -1534,7 +1534,7 @@ async function startRecordingWithIphone() {
     });
 
     // Connect to Relay
-    const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-desktop-production-a7a1.up.railway.app';
+    const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-audio-relay.up.railway.app';
     console.log('[iPhone] Connecting to relay:', relayUrl);
 
     iphoneRelayWs = new WebSocket(`${relayUrl}/stream?device=${iphoneDeviceId}&role=desktop&token=${token}`);
@@ -3299,7 +3299,7 @@ ipcMain.handle('iphone-audio-test', async (event) => {
   ]);
 
   // Connect to relay
-  const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-desktop-production-a7a1.up.railway.app';
+  const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-audio-relay.up.railway.app';
   let testWs = null;
   let peakLevel = 0;
   let totalSamples = 0;
