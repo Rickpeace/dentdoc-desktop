@@ -3166,6 +3166,75 @@ ipcMain.handle('iphone-unpair', async () => {
   return { success: true };
 });
 
+// Test iPhone connection (check if iPhone is connected to relay)
+ipcMain.handle('iphone-test-connection', async () => {
+  console.log('[iPhone] Testing connection...');
+
+  const iphoneDeviceId = store.get('iphoneDeviceId');
+  const token = store.get('authToken');
+
+  if (!iphoneDeviceId) {
+    return { connected: false, error: 'Kein iPhone gekoppelt' };
+  }
+
+  if (!token) {
+    return { connected: false, error: 'Nicht angemeldet' };
+  }
+
+  // Use HTTP endpoint to check iPhone status (simpler than WebSocket)
+  const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-audio-relay.up.railway.app';
+  // Convert wss:// to https:// for HTTP request
+  const httpUrl = relayUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+  const statusUrl = `${httpUrl}/status/${iphoneDeviceId}`;
+
+  console.log('[iPhone] Checking status via HTTP:', statusUrl);
+
+  const startTime = Date.now();
+
+  try {
+    const response = await fetch(statusUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      signal: AbortSignal.timeout(5000) // 5 second timeout
+    });
+
+    const latency = Date.now() - startTime;
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        return { connected: false, error: 'Authentifizierung fehlgeschlagen' };
+      }
+      return { connected: false, error: `Relay-Fehler: ${response.status}` };
+    }
+
+    const data = await response.json();
+    console.log('[iPhone] Status response:', data);
+
+    if (data.iphoneConnected) {
+      return {
+        connected: true,
+        latency: latency,
+        message: 'iPhone ist verbunden!'
+      };
+    } else {
+      return {
+        connected: false,
+        error: 'Nicht mit Relay verbunden. Bitte Safari auf iPhone öffnen.'
+      };
+    }
+  } catch (err) {
+    console.error('[iPhone] Status check error:', err.message);
+
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return { connected: false, error: 'Relay antwortet nicht (Timeout)' };
+    }
+
+    return { connected: false, error: `Verbindung fehlgeschlagen: ${err.message}` };
+  }
+});
+
 // Open any folder in explorer
 ipcMain.handle('open-folder', async (event, folderPath) => {
   if (!folderPath) {

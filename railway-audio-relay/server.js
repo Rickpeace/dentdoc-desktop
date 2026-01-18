@@ -42,6 +42,34 @@ fastify.get('/health', async (request, reply) => {
   };
 });
 
+// Status check endpoint - check if iPhone is connected for a device
+// Used by Desktop to test iPhone connection without opening WebSocket
+fastify.get('/status/:deviceId', async (request, reply) => {
+  const { deviceId } = request.params;
+  const token = request.headers.authorization?.replace('Bearer ', '');
+
+  // Basic token validation
+  if (!token || token.length < 10) {
+    return reply.code(401).send({ error: 'Invalid or missing token' });
+  }
+
+  const pair = connections.get(deviceId);
+
+  if (!pair) {
+    return {
+      deviceId,
+      iphoneConnected: false,
+      desktopConnected: false
+    };
+  }
+
+  return {
+    deviceId,
+    iphoneConnected: pair.iphone && pair.iphone.readyState === 1,
+    desktopConnected: pair.desktop && pair.desktop.readyState === 1
+  };
+});
+
 /**
  * Safely close a WebSocket - handles all implementations
  * Works with: ws, @fastify/websocket, Node streams

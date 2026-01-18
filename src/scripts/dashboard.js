@@ -970,6 +970,9 @@ async function loadIphonePairingStatus(settings) {
       document.getElementById('settingsIphonePairedState').style.display = 'block';
       document.getElementById('settingsIphoneDeviceName').textContent = backendStatus.deviceName || 'iPhone';
       document.getElementById('settingsIphoneStatusText').textContent = 'Bereit';
+
+      // Generate QR code for /mic (so user can reopen Safari)
+      generateMicQRCode();
     } else {
       // Backend says: not paired (or error) - show unpaired state
       document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
@@ -988,11 +991,259 @@ async function loadIphonePairingStatus(settings) {
       document.getElementById('settingsIphonePairedState').style.display = 'block';
       document.getElementById('settingsIphoneDeviceName').textContent = iphoneDeviceName;
       document.getElementById('settingsIphoneStatusText').textContent = 'Offline prüfen...';
+
+      // Generate QR code for /mic (so user can reopen Safari)
+      generateMicQRCode();
     } else {
       document.getElementById('settingsIphoneUnpairedState').style.display = 'block';
       document.getElementById('settingsIphoneQRState').style.display = 'none';
       document.getElementById('settingsIphonePairedState').style.display = 'none';
     }
+  }
+}
+
+// Generate QR code for /mic page (for paired iPhones to reopen Safari)
+async function generateMicQRCode() {
+  try {
+    const QRCode = require('qrcode');
+    const micUrl = 'https://dentdoc-app.vercel.app/mic';
+
+    const qrContainer = document.getElementById('settingsIphoneMicQRCode');
+    if (!qrContainer) return;
+
+    qrContainer.innerHTML = '';
+
+    const canvas = document.createElement('canvas');
+    await QRCode.toCanvas(canvas, micUrl, {
+      width: 150,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    qrContainer.appendChild(canvas);
+
+    // Show URL
+    const urlEl = document.getElementById('settingsIphoneMicUrl');
+    if (urlEl) {
+      urlEl.textContent = micUrl;
+    }
+  } catch (error) {
+    console.error('[iPhone] Failed to generate mic QR code:', error);
+  }
+}
+
+// Test iPhone microphone connection
+async function testIphoneMic() {
+  const statusEl = document.getElementById('settingsIphoneTestStatus');
+  const testBtn = document.getElementById('settingsIphoneTestBtn');
+
+  if (!statusEl || !testBtn) return;
+
+  testBtn.disabled = true;
+  statusEl.className = 'status-message';
+  statusEl.textContent = 'Verbindung wird geprüft...';
+
+  try {
+    // Check if iPhone is connected via relay
+    const result = await ipcRenderer.invoke('iphone-test-connection');
+
+    if (result.connected) {
+      statusEl.className = 'status-message success';
+      statusEl.textContent = `Verbunden! Latenz: ${result.latency || '?'}ms`;
+    } else {
+      statusEl.className = 'status-message error';
+      statusEl.textContent = result.error || 'iPhone nicht verbunden. Bitte Safari öffnen.';
+    }
+  } catch (error) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = 'Fehler: ' + error.message;
+  }
+
+  testBtn.disabled = false;
+
+  // Clear message after 5 seconds
+  setTimeout(() => {
+    statusEl.textContent = '';
+    statusEl.className = 'status-message';
+  }, 5000);
+}
+
+// Load iPhone Dashboard Section on Home View
+async function loadIphoneDashboardSection(shortcut) {
+  const section = document.getElementById('iphoneDashboardSection');
+  const unpairedState = document.getElementById('iphoneDashboardUnpaired');
+  const pairedState = document.getElementById('iphoneDashboardPaired');
+
+  if (!section) return;
+
+  // Check if iPhone is selected as microphone source
+  const settings = await ipcRenderer.invoke('get-settings');
+  const micSource = settings?.microphoneSource || 'desktop';
+
+  if (micSource !== 'iphone') {
+    // Hide section if desktop mic is selected
+    section.style.display = 'none';
+    return;
+  }
+
+  // Show section
+  section.style.display = 'block';
+
+  // Update shortcut hint
+  const shortcutHint = document.getElementById('iphoneShortcutHint');
+  if (shortcutHint) {
+    shortcutHint.textContent = shortcut || 'F9';
+  }
+
+  // Check pairing status
+  try {
+    const status = await ipcRenderer.invoke('iphone-get-status');
+
+    if (status && status.paired) {
+      // Show paired state
+      unpairedState.style.display = 'none';
+      pairedState.style.display = 'block';
+
+      // Update device name
+      const deviceNameEl = document.getElementById('iphoneDashboardDeviceName');
+      if (deviceNameEl) {
+        deviceNameEl.textContent = status.deviceName || 'iPhone gekoppelt';
+      }
+
+      // Generate QR code for /mic
+      await generateDashboardMicQRCode();
+    } else {
+      // Show unpaired state with pairing QR
+      unpairedState.style.display = 'block';
+      pairedState.style.display = 'none';
+
+      // Generate pairing QR code
+      await generateDashboardPairingQRCode();
+    }
+  } catch (error) {
+    console.error('[iPhone] Dashboard status check failed:', error);
+    // Default to unpaired state
+    unpairedState.style.display = 'block';
+    pairedState.style.display = 'none';
+    await generateDashboardPairingQRCode();
+  }
+}
+
+// Generate pairing QR code for dashboard (starts pairing flow)
+async function generateDashboardPairingQRCode() {
+  try {
+    const QRCode = require('qrcode');
+
+    // Start pairing to get QR URL
+    const result = await ipcRenderer.invoke('iphone-pair-start');
+
+    if (!result.success) {
+      console.error('[iPhone] Dashboard pairing start failed:', result.error);
+      return;
+    }
+
+    const qrContainer = document.getElementById('iphoneDashboardPairingQR');
+    if (!qrContainer) return;
+
+    qrContainer.innerHTML = '';
+
+    const canvas = document.createElement('canvas');
+    await QRCode.toCanvas(canvas, result.pairingUrl, {
+      width: 180,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    qrContainer.appendChild(canvas);
+
+    // Show URL
+    const urlEl = document.getElementById('iphoneDashboardPairingUrl');
+    if (urlEl) {
+      urlEl.textContent = result.pairingUrl;
+    }
+
+    // Start polling for pairing completion
+    startDashboardPairingPoll(result.pairingId);
+  } catch (error) {
+    console.error('[iPhone] Dashboard QR generation failed:', error);
+  }
+}
+
+// Poll for pairing completion on dashboard
+let dashboardPairingPollInterval = null;
+function startDashboardPairingPoll(pairingId) {
+  // Clear any existing poll
+  if (dashboardPairingPollInterval) {
+    clearInterval(dashboardPairingPollInterval);
+  }
+
+  dashboardPairingPollInterval = setInterval(async () => {
+    try {
+      const status = await ipcRenderer.invoke('iphone-pair-status', pairingId);
+
+      if (status.paired || status.status === 'paired') {
+        clearInterval(dashboardPairingPollInterval);
+        dashboardPairingPollInterval = null;
+
+        // Reload dashboard section to show paired state
+        const shortcut = await ipcRenderer.invoke('get-shortcut');
+        await loadIphoneDashboardSection(shortcut || 'F9');
+
+        // Also update settings view if visible
+        loadIphonePairingStatus({});
+      } else if (status.status === 'expired') {
+        clearInterval(dashboardPairingPollInterval);
+        dashboardPairingPollInterval = null;
+        // Regenerate QR code
+        await generateDashboardPairingQRCode();
+      }
+    } catch (error) {
+      console.error('[iPhone] Dashboard pairing poll error:', error);
+    }
+  }, 2000);
+
+  // Auto-stop after 10 minutes
+  setTimeout(() => {
+    if (dashboardPairingPollInterval) {
+      clearInterval(dashboardPairingPollInterval);
+      dashboardPairingPollInterval = null;
+    }
+  }, 10 * 60 * 1000);
+}
+
+// Generate QR code for /mic on dashboard (for paired iPhones)
+async function generateDashboardMicQRCode() {
+  try {
+    const QRCode = require('qrcode');
+    const micUrl = 'https://dentdoc-app.vercel.app/mic';
+
+    const qrContainer = document.getElementById('iphoneDashboardMicQR');
+    if (!qrContainer) return;
+
+    qrContainer.innerHTML = '';
+
+    const canvas = document.createElement('canvas');
+    await QRCode.toCanvas(canvas, micUrl, {
+      width: 150,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#ffffff'
+      }
+    });
+    qrContainer.appendChild(canvas);
+
+    // Show URL
+    const urlEl = document.getElementById('iphoneDashboardMicUrl');
+    if (urlEl) {
+      urlEl.textContent = micUrl;
+    }
+  } catch (error) {
+    console.error('[iPhone] Dashboard mic QR generation failed:', error);
   }
 }
 
@@ -1090,6 +1341,9 @@ function startPairingPoll(pairingId) {
         document.getElementById('settingsIphoneDeviceName').textContent = status.deviceName || 'iPhone';
         document.getElementById('settingsIphoneStatusText').textContent = 'Bereit';
 
+        // Generate QR code for /mic (so user can reopen Safari later)
+        generateMicQRCode();
+
         // Mark settings as changed
         settingsCheckForChanges();
       } else if (status.status === 'expired') {
@@ -1162,6 +1416,7 @@ document.querySelectorAll('input[name="micSource"]').forEach(radio => {
 document.getElementById('settingsIphonePairBtn')?.addEventListener('click', startIphonePairing);
 document.getElementById('settingsIphoneCancelPairBtn')?.addEventListener('click', cancelIphonePairing);
 document.getElementById('settingsIphoneUnpairBtn')?.addEventListener('click', unpairIphone);
+document.getElementById('settingsIphoneTestBtn')?.addEventListener('click', testIphoneMic);
 
 // Listen for iPhone connection status updates from main process
 ipcRenderer.on('iphone-connection-status', (event, status) => {
@@ -2800,6 +3055,9 @@ async function loadHomeStatsWithDevices() {
     } catch (e) {
       document.getElementById('deviceUsage').textContent = '-/-';
     }
+
+    // Load iPhone dashboard section if iPhone is selected
+    await loadIphoneDashboardSection(shortcut || 'F9');
 
     // Load last documentation
     await loadLastDocumentation();

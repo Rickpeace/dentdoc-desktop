@@ -16,9 +16,9 @@ const CONFIG = {
   // Speech detection timing
   speechStartMs: 80,       // 80ms speech to start (schneller als live)
   speechStopMs: 600,       // 600ms silence to end segment (strenger - war 1500)
-  // Padding around speech
-  preRollMs: 200,          // 200ms before speech (war 800 - zu viel Stille)
-  postRollMs: 200,         // 200ms after speech (war 500)
+  // Padding around speech - WICHTIG für erste Worte nach Pause!
+  preRollMs: 600,          // 600ms before speech (erhöht von 200 - erste Worte wurden abgehackt)
+  postRollMs: 400,         // 400ms after speech (erhöht von 200)
   frameMs: 20,
   // Silero VAD parameters - höherer Threshold für strengere Erkennung
   sileroThreshold: 0.5,    // War 0.4 - jetzt strenger
@@ -311,6 +311,8 @@ async function runOfflineVAD(wavPath, onProgress = () => {}) {
   console.log(`  Original:  ${originalDuration}s (${fileSizeMB} MB)`);
   console.log(`  Sprache:   ${speechDuration}s (~${estimatedSpeechSizeMB} MB)`);
   console.log(`  Entfernt:  ${silencePercent}% Stille`);
+  console.log(`  Segmente:  ${processedMarkers.length}`);
+  console.log(`  Padding:   ${CONFIG.preRollMs}ms vor | ${CONFIG.postRollMs}ms nach`);
   console.log('///////////////////////');
   console.log('');
 

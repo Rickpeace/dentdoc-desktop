@@ -218,6 +218,69 @@
           </div>
         </div>
 
+        <!-- iPhone Mic Setup Section (shown when iPhone is selected as mic source) -->
+        <div class="iphone-dashboard-section" id="iphoneDashboardSection" style="display: none;">
+          <!-- Not paired state -->
+          <div id="iphoneDashboardUnpaired" class="iphone-dashboard-card">
+            <div class="iphone-dashboard-content">
+              <div class="iphone-dashboard-icon">
+                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                  <line x1="12" y1="18" x2="12.01" y2="18"/>
+                </svg>
+              </div>
+              <div class="iphone-dashboard-text">
+                <h3>iPhone als Mikrofon einrichten</h3>
+                <p>Scannen Sie den QR-Code mit Ihrem iPhone, um es als kabelloses Mikrofon zu verwenden.</p>
+              </div>
+            </div>
+            <div class="iphone-dashboard-qr">
+              <div id="iphoneDashboardPairingQR" class="qr-code-container"></div>
+              <p class="helper-text" id="iphoneDashboardPairingUrl"></p>
+            </div>
+            <div class="iphone-dashboard-hint">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+              <span>Einmalige Kopplung - danach verbindet sich das iPhone automatisch</span>
+            </div>
+          </div>
+
+          <!-- Paired state -->
+          <div id="iphoneDashboardPaired" class="iphone-dashboard-card" style="display: none;">
+            <div class="iphone-dashboard-content">
+              <div class="iphone-dashboard-icon connected">
+                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                  <line x1="12" y1="18" x2="12.01" y2="18"/>
+                </svg>
+                <div class="connected-badge">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="iphone-dashboard-text">
+                <h3 id="iphoneDashboardDeviceName">iPhone gekoppelt</h3>
+                <p id="iphoneDashboardStatus">Öffnen Sie Safari auf dem iPhone, um die Aufnahme zu starten.</p>
+              </div>
+            </div>
+            <div class="iphone-dashboard-qr">
+              <p class="helper-text" style="margin-bottom: 8px;">Safari geschlossen? QR-Code scannen:</p>
+              <div id="iphoneDashboardMicQR" class="qr-code-container"></div>
+              <p class="helper-text" id="iphoneDashboardMicUrl" style="font-size: 11px;"></p>
+            </div>
+            <div class="iphone-dashboard-hint success">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              <span>iPhone bereit - drücken Sie <kbd id="iphoneShortcutHint">F9</kbd> zum Starten</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Last Documentation Section -->
         <div class="last-doc-section" id="lastDocSection" style="display: none;">
           <h2>Letzte Dokumentation</h2>
@@ -398,6 +461,24 @@
                   </div>
                   <button id="settingsIphoneUnpairBtn" class="btn btn-ghost btn-sm">Entkoppeln</button>
                 </div>
+
+                <!-- QR-Code für /mic (falls Safari geschlossen wurde) -->
+                <div class="iphone-mic-qr-section" style="margin-top: 16px;">
+                  <p class="helper-text" style="margin-bottom: 8px;">
+                    Safari auf iPhone geschlossen? Scannen Sie diesen QR-Code:
+                  </p>
+                  <div id="settingsIphoneMicQRCode" class="qr-code-container" style="margin-bottom: 8px;"></div>
+                  <p class="helper-text pairing-url" id="settingsIphoneMicUrl" style="font-size: 11px;"></p>
+                </div>
+
+                <!-- iPhone Test Button -->
+                <button id="settingsIphoneTestBtn" class="btn btn-secondary" style="margin-top: 12px; width: 100%;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                  </svg>
+                  iPhone testen
+                </button>
+                <div id="settingsIphoneTestStatus" class="status-message" style="margin-top: 8px;"></div>
               </div>
             </div>
           </div>

@@ -556,6 +556,134 @@ kbd {
 }
 
 /* ===========================================
+   iPhone Dashboard Section
+   =========================================== */
+.iphone-dashboard-section {
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+.iphone-dashboard-card {
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+[data-theme="light"] .iphone-dashboard-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border-color: #e2e8f0;
+}
+
+.iphone-dashboard-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.iphone-dashboard-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.iphone-dashboard-icon.connected {
+  background: linear-gradient(135deg, var(--success-500) 0%, var(--success-600) 100%);
+  color: white;
+}
+
+.iphone-dashboard-icon .connected-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  width: 24px;
+  height: 24px;
+  background: var(--success-500);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  border: 2px solid var(--bg-secondary);
+}
+
+.iphone-dashboard-text h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.iphone-dashboard-text p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.iphone-dashboard-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-4);
+  background: white;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+}
+
+.iphone-dashboard-qr .qr-code-container {
+  margin-bottom: var(--space-2);
+}
+
+.iphone-dashboard-qr .qr-code-container canvas {
+  border-radius: var(--radius-sm);
+}
+
+.iphone-dashboard-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.iphone-dashboard-hint svg {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.iphone-dashboard-hint.success {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success-600);
+}
+
+.iphone-dashboard-hint.success svg {
+  color: var(--success-500);
+}
+
+.iphone-dashboard-hint kbd {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* ===========================================
    Last Documentation Section
    =========================================== */
 .last-doc-section {
