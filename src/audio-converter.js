@@ -1,4 +1,5 @@
 const ffmpeg = require('fluent-ffmpeg');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
@@ -123,8 +124,124 @@ async function convertAndReplace(webmPath) {
   return wavPath;
 }
 
+/**
+ * Analyze audio file for RMS and Peak levels
+ * Used to determine how much gain/normalization is needed
+ * @param {string} filePath - Path to audio file
+ * @returns {Promise<{rms: number|null, peak: number|null}>} Levels in dBFS
+ */
+function analyzeAudio(filePath) {
+  // Initialize ffmpeg path on first use
+  initFFmpegPath();
+
+  return new Promise((resolve) => {
+    const ffmpegProc = spawn(ffmpegPath, [
+      '-i', filePath,
+      '-af', 'astats=metadata=1:reset=1',
+      '-f', 'null',
+      '-'
+    ]);
+
+    let stderr = '';
+    ffmpegProc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ffmpegProc.on('close', () => {
+      // Parse RMS and Peak from ffmpeg output
+      const rmsMatch = stderr.match(/RMS level dB:\s*(-?\d+(\.\d+)?)/);
+      const peakMatch = stderr.match(/Peak level dB:\s*(-?\d+(\.\d+)?)/);
+
+      resolve({
+        rms: rmsMatch ? Number(rmsMatch[1]) : null,
+        peak: peakMatch ? Number(peakMatch[1]) : null
+      });
+    });
+
+    ffmpegProc.on('error', () => {
+      resolve({ rms: null, peak: null });
+    });
+  });
+}
+
+/**
+ * Auto-level audio based on RMS measurement
+ * Applies appropriate gain/normalization based on input level
+ *
+ * Strategy:
+ * - RMS < -24 dB: Very quiet → full loudnorm normalization
+ * - RMS -24 to -18 dB: Quiet → gentle volume boost (1.3x)
+ * - RMS -18 to -14 dB: Good → minimal boost (1.1x)
+ * - RMS > -14 dB: Loud → limiter only (prevent clipping)
+ *
+ * @param {string} inputPath - Path to input audio file
+ * @param {string} outputPath - Path to output audio file (optional)
+ * @returns {Promise<{outputPath: string, rms: number|null, filter: string}>}
+ */
+async function autoLevel(inputPath, outputPath = null) {
+  // Initialize ffmpeg path on first use
+  initFFmpegPath();
+
+  // Generate output path if not provided
+  if (!outputPath) {
+    const parsedPath = path.parse(inputPath);
+    outputPath = path.join(parsedPath.dir, `${parsedPath.name}_leveled.wav`);
+  }
+
+  // Analyze audio first
+  const { rms } = await analyzeAudio(inputPath);
+  console.log(`[AutoLevel] Input RMS: ${rms !== null ? rms.toFixed(1) + ' dB' : 'unknown'}`);
+
+  let filter;
+  let filterName;
+
+  if (rms === null) {
+    // Fallback if analysis failed
+    filter = 'volume=1.2';
+    filterName = 'fallback (1.2x)';
+  } else if (rms < -24) {
+    // Very quiet → full normalization
+    filter = 'loudnorm=I=-16:LRA=11:TP=-1.5';
+    filterName = 'loudnorm (very quiet)';
+  } else if (rms < -18) {
+    // Quiet → gentle boost
+    filter = 'volume=1.3';
+    filterName = 'volume 1.3x (quiet)';
+  } else if (rms < -14) {
+    // Good → minimal boost
+    filter = 'volume=1.1';
+    filterName = 'volume 1.1x (good)';
+  } else {
+    // Loud → just limit to prevent clipping
+    filter = 'alimiter=limit=-1.5dB';
+    filterName = 'limiter only (loud)';
+  }
+
+  console.log(`[AutoLevel] Applying: ${filterName}`);
+
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .audioFilters(filter)
+      .audioFrequency(16000)
+      .audioChannels(1)
+      .audioCodec('pcm_s16le')
+      .format('wav')
+      .on('end', () => {
+        console.log(`[AutoLevel] Output saved: ${outputPath}`);
+        resolve({ outputPath, rms, filter: filterName });
+      })
+      .on('error', (err) => {
+        console.error(`[AutoLevel] Error: ${err.message}`);
+        reject(new Error(`Auto-level failed: ${err.message}`));
+      })
+      .save(outputPath);
+  });
+}
+
 module.exports = {
   convertToWav16k,
   convertForAssemblyAI,
-  convertAndReplace
+  convertAndReplace,
+  analyzeAudio,
+  autoLevel
 };

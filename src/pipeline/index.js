@@ -56,12 +56,18 @@ async function runOfflineVAD(audioPath, onProgress = () => {}) {
  */
 async function processFileWithVAD(audioPath, options = {}) {
   const { onProgress = () => {} } = options;
+  const audioConverter = require('../audio-converter');
+
+  // Setup output directory
+  const outputDir = path.join(os.tmpdir(), 'dentdoc', 'pipeline');
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
 
   // Log temp folder location
-  const tempDir = path.join(os.tmpdir(), 'dentdoc', 'pipeline');
   console.log('');
   console.log('///// TEMP DATEIEN /////');
-  console.log(`  Ordner: ${tempDir}`);
+  console.log(`  Ordner: ${outputDir}`);
 
   // Check if file needs conversion (not already WAV)
   const ext = path.extname(audioPath).toLowerCase();
@@ -70,19 +76,26 @@ async function processFileWithVAD(audioPath, options = {}) {
   if (ext !== '.wav') {
     onProgress({ stage: 'convert', percent: 2, message: `Konvertiere ${ext.toUpperCase()}...` });
 
-    const audioConverter = require('../audio-converter');
-    const outputDir = path.join(os.tmpdir(), 'dentdoc', 'pipeline');
-
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-
     const wavPath = path.join(outputDir, `converted_${Date.now()}.wav`);
     processPath = await audioConverter.convertToWav16k(audioPath, wavPath);
 
     // Log temp file creation
     const convertedSize = (fs.statSync(processPath).size / (1024 * 1024)).toFixed(2);
     console.log(`  [TEMP] Erstellt: ${path.basename(processPath)} (${convertedSize} MB)`);
+  }
+
+  // Auto-Level: Measure RMS and apply appropriate gain/normalization
+  onProgress({ stage: 'autolevel', percent: 3, message: 'Audio wird optimiert...' });
+
+  const leveledPath = path.join(outputDir, `leveled_${Date.now()}.wav`);
+
+  try {
+    const levelResult = await audioConverter.autoLevel(processPath, leveledPath);
+    console.log(`  [TEMP] Erstellt: ${path.basename(leveledPath)} (Auto-Level: ${levelResult.filter})`);
+    processPath = levelResult.outputPath;
+  } catch (err) {
+    console.warn(`  [AutoLevel] Übersprungen: ${err.message}`);
+    // Continue with original file if auto-level fails
   }
 
   // Run offline VAD
@@ -97,7 +110,6 @@ async function processFileWithVAD(audioPath, options = {}) {
   // Render speech-only WAV
   onProgress({ stage: 'render', percent: 25, message: 'Audio wird vorbereitet...' });
 
-  const outputDir = path.join(os.tmpdir(), 'dentdoc', 'pipeline');
   const speechOnlyPath = path.join(outputDir, `speech_only_${Date.now()}.wav`);
 
   const { wavPath, speechMap } = await speechRenderer.renderSpeechOnly(segments, speechOnlyPath);
