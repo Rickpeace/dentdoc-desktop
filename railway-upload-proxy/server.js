@@ -31,14 +31,13 @@ const fastify = require('fastify')({
   bodyLimit: 1024 * 1024 * 500 // 500MB max (AssemblyAI erlaubt bis 5GB)
 });
 
-// Content-Type Parser für application/octet-stream - STREAM durchreichen (kein Buffer!)
-fastify.addContentTypeParser(
-  'application/octet-stream',
-  { parseAs: 'stream' },
-  (req, payload, done) => {
-    done(null, payload); // payload ist der raw Node.js Stream
-  }
-);
+// Content-Type Parser für application/octet-stream - Body-Parsing überspringen!
+// Wir nutzen request.raw direkt für echtes Streaming
+fastify.addContentTypeParser('application/octet-stream', function (request, payload, done) {
+  // Nichts parsen - done(null, undefined) überspringt das Parsing
+  // Der Stream ist dann via request.raw verfügbar
+  done(null, undefined);
+});
 
 // Environment Variables
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
