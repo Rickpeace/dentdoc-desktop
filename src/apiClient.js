@@ -882,6 +882,117 @@ async function resetPraxisEinstellungen(token) {
   }
 }
 
+// ===========================================
+// iPhone Microphone Pairing API
+// ===========================================
+
+/**
+ * Start iPhone pairing process
+ * @param {string} token - User auth token
+ * @returns {Promise<{pairingId: string, qrUrl: string}>}
+ */
+async function iphonePairStart(token) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/iphone/pair/start`,
+      {},
+      {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }
+    );
+
+    return {
+      pairingId: response.data.pairingId,
+      pairingUrl: response.data.pairingUrl
+    };
+  } catch (error) {
+    console.error('iPhone pair start error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Pairing konnte nicht gestartet werden');
+  }
+}
+
+/**
+ * Check iPhone pairing status
+ * @param {string} pairingId - The pairing ID to check
+ * @param {string} token - User auth token
+ * @returns {Promise<{paired: boolean, iphoneDeviceId?: string, deviceName?: string, iphoneAuthToken?: string}>}
+ */
+async function iphonePairStatus(pairingId, token) {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}api/iphone/pair/status?pairingId=${pairingId}`,
+      {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }
+    );
+
+    // Status can be: 'pending', 'paired', 'expired'
+    if (response.data.status === 'paired') {
+      return {
+        status: 'paired',
+        paired: true,
+        iphoneDeviceId: response.data.device?.iphoneDeviceId,
+        deviceName: response.data.device?.deviceName,
+      };
+    }
+
+    return {
+      status: response.data.status,
+      paired: false,
+      expiresAt: response.data.expiresAt
+    };
+  } catch (error) {
+    console.error('iPhone pair status error:', error.response?.data || error.message);
+    return { paired: false };
+  }
+}
+
+/**
+ * Get iPhone connection status
+ * @param {string} token - User auth token
+ * @returns {Promise<{paired: boolean, deviceName?: string, lastSeen?: string}>}
+ */
+async function iphoneStatus(token) {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}api/iphone/status`,
+      {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }
+    );
+
+    return {
+      paired: response.data.paired || false,
+      deviceName: response.data.deviceName,
+      lastSeen: response.data.lastSeen
+    };
+  } catch (error) {
+    console.error('iPhone status error:', error.response?.data || error.message);
+    return { paired: false };
+  }
+}
+
+/**
+ * Unpair iPhone
+ * @param {string} token - User auth token
+ * @returns {Promise<{success: boolean}>}
+ */
+async function iphoneUnpair(token) {
+  try {
+    await axios.delete(
+      `${API_BASE_URL}api/iphone/unpair`,
+      {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }
+    );
+
+    return { success: true };
+  } catch (error) {
+    console.error('iPhone unpair error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Entkoppeln fehlgeschlagen');
+  }
+}
+
 module.exports = {
   login,
   logout,
@@ -908,4 +1019,9 @@ module.exports = {
   addThemenAnpassung,
   removeThemenAnpassung,
   resetPraxisEinstellungen,
+  // iPhone Pairing
+  iphonePairStart,
+  iphonePairStatus,
+  iphoneStatus,
+  iphoneUnpair,
 };
