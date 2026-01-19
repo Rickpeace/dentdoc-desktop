@@ -1691,6 +1691,63 @@
           </button>
         </div>
 
+        <!-- Sub-step: Phone Already Paired -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepPhoneAlreadyPaired" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon wizard-step-icon-success">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            </div>
+            <h2>Smartphone bereits gekoppelt</h2>
+            <p>Es ist bereits ein Gerät mit diesem Computer verbunden.</p>
+          </div>
+
+          <div class="wizard-card">
+            <div class="wizard-phone-connected-status">
+              <div class="wizard-phone-icon-connected">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                  <polyline points="9 12 11 14 15 10" stroke-width="2.5"/>
+                </svg>
+              </div>
+              <div class="wizard-phone-info">
+                <span class="wizard-phone-name" id="wizardPairedDeviceName">Smartphone</span>
+                <span class="wizard-phone-status">Gekoppelt</span>
+              </div>
+            </div>
+
+            <div class="wizard-decision-buttons" style="margin-top: var(--space-5);">
+              <button type="button" class="wizard-decision-btn wizard-decision-yes" id="wizardPhoneUseExisting">
+                <div class="wizard-decision-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </div>
+                <div class="wizard-decision-content">
+                  <span class="wizard-decision-title">Dieses Gerät verwenden</span>
+                  <span class="wizard-decision-desc">Weiter zum Audiotest</span>
+                </div>
+              </button>
+
+              <button type="button" class="wizard-decision-btn wizard-decision-neutral" id="wizardPhonePairNew">
+                <div class="wizard-decision-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7"/>
+                    <rect x="14" y="3" width="7" height="7"/>
+                    <rect x="3" y="14" width="7" height="7"/>
+                    <rect x="14" y="14" width="7" height="7"/>
+                  </svg>
+                </div>
+                <div class="wizard-decision-content">
+                  <span class="wizard-decision-title">Neues Gerät koppeln</span>
+                  <span class="wizard-decision-desc">Altes Gerät wird getrennt</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Sub-step 1b-2: Phone Pairing - QR Code & Instructions -->
         <div class="wizard-mic-substep" id="wizardMicSubstepPhonePairing" style="display: none;">
           <div class="wizard-step-header">

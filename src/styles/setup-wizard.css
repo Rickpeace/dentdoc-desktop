@@ -963,6 +963,11 @@
   color: #ef4444;
 }
 
+.wizard-decision-neutral .wizard-decision-icon {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.2), rgba(100, 116, 139, 0.05));
+  color: var(--text-secondary);
+}
+
 .wizard-decision-content {
   flex: 1;
 }

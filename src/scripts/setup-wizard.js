@@ -226,7 +226,28 @@ class SetupWizard {
     });
 
     // Q2: Use Phone? - Yes
-    document.getElementById('wizardPhoneYes')?.addEventListener('click', () => {
+    document.getElementById('wizardPhoneYes')?.addEventListener('click', async () => {
+      // Check if phone is already paired
+      const status = await ipcRenderer.invoke('iphone-get-status');
+      if (status.paired && status.deviceName) {
+        this.pairedDeviceName = status.deviceName;
+        this.setMicWizardState('phone_already_paired');
+      } else {
+        this.setMicWizardState('phone_pairing');
+        this.startPhonePairing();
+      }
+    });
+
+    // Already paired - use existing device
+    document.getElementById('wizardPhoneUseExisting')?.addEventListener('click', () => {
+      this.settings.microphoneSource = 'iphone';
+      this.setMicWizardState('phone_test');
+    });
+
+    // Already paired - pair new device
+    document.getElementById('wizardPhonePairNew')?.addEventListener('click', async () => {
+      // Unpair old device first
+      await ipcRenderer.invoke('iphone-unpair');
       this.setMicWizardState('phone_pairing');
       this.startPhonePairing();
     });
@@ -278,10 +299,17 @@ class SetupWizard {
       'initial_question': 'wizardMicSubstepInitial',
       'has_mic': 'wizardMicSubstepHasMic',
       'phone_question': 'wizardMicSubstepPhoneQuestion',
+      'phone_already_paired': 'wizardMicSubstepPhoneAlreadyPaired',
       'phone_pairing': 'wizardMicSubstepPhonePairing',
       'phone_test': 'wizardMicSubstepPhoneTest',
       'no_mic': 'wizardMicSubstepNoMic'
     };
+
+    // Update device name if showing already paired screen
+    if (this.micWizardState === 'phone_already_paired') {
+      const nameEl = document.getElementById('wizardPairedDeviceName');
+      if (nameEl) nameEl.textContent = this.pairedDeviceName || 'Smartphone';
+    }
 
     const substepId = substepMap[this.micWizardState];
     if (substepId) {
@@ -309,7 +337,8 @@ class SetupWizard {
 
     // Step 1: Disable next button on question states (must make a choice)
     if (this.micWizardState === 'initial_question' ||
-        this.micWizardState === 'phone_question') {
+        this.micWizardState === 'phone_question' ||
+        this.micWizardState === 'phone_already_paired') {
       // Disable navigation on these screens (user makes choice via substep buttons)
       if (nextBtn) {
         nextBtn.disabled = true;
@@ -1409,12 +1438,15 @@ class SetupWizard {
         case 'phone_question':
           this.setMicWizardState('initial_question');
           return;
+        case 'phone_already_paired':
+          this.setMicWizardState('phone_question');
+          return;
         case 'phone_pairing':
           this.cancelPhonePairing();
           this.setMicWizardState('phone_question');
           return;
         case 'phone_test':
-          this.setMicWizardState('phone_pairing');
+          this.setMicWizardState('phone_already_paired');
           return;
         case 'no_mic':
           this.setMicWizardState('phone_question');
