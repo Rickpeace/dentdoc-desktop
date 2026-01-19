@@ -520,7 +520,7 @@ class SetupWizard {
       if (timerText) timerText.textContent = '10';
       if (status) status.textContent = 'Sprechen Sie jetzt ins Handy...';
       if (playbackDiv) playbackDiv.style.display = 'none';
-      if (levelBar) levelBar.style.setProperty('--level', '0%');
+      if (levelBar) levelBar.style.width = '0%';
 
       // Start level animation and countdown
       this.animatePhoneLevel();
@@ -540,7 +540,7 @@ class SetupWizard {
       if (container) container.classList.remove('recording');
       if (btnText) btnText.textContent = 'Test starten';
       if (timer) timer.style.display = 'none';
-      if (levelBar) levelBar.style.setProperty('--level', '0%');
+      if (levelBar) levelBar.style.width = '0%';
 
       if (!result.success) {
         if (result.cancelled) {
@@ -597,7 +597,7 @@ class SetupWizard {
 
     if (container) container.classList.remove('recording');
     if (btnText) btnText.textContent = 'Test starten';
-    if (levelBar) levelBar.style.setProperty('--level', '0%');
+    if (levelBar) levelBar.style.width = '0%';
     if (timer) timer.style.display = 'none';
   }
 
@@ -622,7 +622,7 @@ class SetupWizard {
 
     // Simulate audio levels during recording
     const level = 20 + Math.random() * 60;
-    levelBar.style.setProperty('--level', level + '%');
+    levelBar.style.width = level + '%';
 
     if (this.isPhoneTesting) {
       requestAnimationFrame(() => setTimeout(() => this.animatePhoneLevel(), 100));

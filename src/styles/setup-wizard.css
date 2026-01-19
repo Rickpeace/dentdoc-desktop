@@ -1527,16 +1527,11 @@
   background: rgba(0, 0, 0, 0.2);
   border-radius: var(--radius-full);
   overflow: hidden;
-  position: relative;
 }
 
-.wizard-phone-level-bar::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
+.wizard-phone-level-bar-fill {
   height: 100%;
-  width: var(--level, 0%);
+  width: 0%;
   background: linear-gradient(90deg, var(--success-500), var(--primary-500), var(--error-500));
   border-radius: var(--radius-full);
   transition: width 0.1s;
