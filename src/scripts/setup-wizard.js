@@ -300,15 +300,14 @@ class SetupWizard {
     const nextBtn = document.getElementById('wizardNextBtn');
     const backBtn = document.getElementById('wizardBackBtn');
 
-    // Reset navigation buttons to default visible state when not on step 1
+    // Only handle step 1 - let updateNavigation() handle other steps
     if (this.currentStep !== 1) {
+      // Just reset disabled state, don't touch display (updateNavigation handles that)
       if (nextBtn) {
         nextBtn.disabled = false;
         nextBtn.style.opacity = '1';
         nextBtn.style.pointerEvents = 'auto';
-        nextBtn.style.display = 'flex';
       }
-      if (backBtn) backBtn.style.display = 'flex';
       return;
     }
 
