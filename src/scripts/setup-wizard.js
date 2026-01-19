@@ -293,11 +293,12 @@ class SetupWizard {
 
     // Only handle step 1 - let updateNavigation() handle other steps
     if (this.currentStep !== 1) {
-      // Just reset disabled state, don't touch display (updateNavigation handles that)
+      // Reset disabled state and button text back to normal
       if (nextBtn) {
         nextBtn.disabled = false;
         nextBtn.style.opacity = '1';
         nextBtn.style.pointerEvents = 'auto';
+        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
       }
       return;
     }
