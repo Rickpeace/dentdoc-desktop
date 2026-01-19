@@ -867,3 +867,627 @@
     width: 120px;
   }
 }
+
+/* ===========================================
+   Microphone Decision Tree Sub-Steps
+   =========================================== */
+
+/* Sub-step containers */
+.wizard-mic-substep {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Question styling */
+.wizard-question {
+  text-align: center;
+  margin-bottom: var(--space-5);
+}
+
+.wizard-question h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.wizard-question-hint {
+  font-size: 0.9375rem;
+  color: var(--text-tertiary);
+}
+
+/* Decision Buttons */
+.wizard-decision-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.wizard-decision-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--glass-bg);
+  border: 2px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.wizard-decision-btn:hover {
+  border-color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.05);
+  transform: translateY(-2px);
+}
+
+.wizard-decision-btn:active {
+  transform: translateY(0);
+}
+
+.wizard-decision-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.wizard-decision-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.wizard-decision-yes .wizard-decision-icon {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.05));
+  color: #22c55e;
+}
+
+.wizard-decision-no .wizard-decision-icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.05));
+  color: #ef4444;
+}
+
+.wizard-decision-content {
+  flex: 1;
+}
+
+.wizard-decision-title {
+  display: block;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.wizard-decision-desc {
+  display: block;
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+}
+
+/* Warning Banner */
+.wizard-warning-banner {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.05));
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-lg);
+}
+
+.wizard-warning-banner.wizard-warning-small {
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.wizard-warning-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+.wizard-warning-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.wizard-warning-small .wizard-warning-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.wizard-warning-small .wizard-warning-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.wizard-warning-content h4 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.wizard-warning-content p {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* QR Code Section */
+.wizard-qr-section {
+  text-align: center;
+  padding: var(--space-5);
+  background: white;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-5);
+}
+
+[data-theme="dark"] .wizard-qr-section {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.wizard-qr-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+  margin-bottom: var(--space-3);
+}
+
+.wizard-qr-container canvas {
+  border-radius: var(--radius-md);
+}
+
+.wizard-qr-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.wizard-qr-url {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* Phone Instructions */
+.wizard-phone-instructions {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-default);
+}
+
+.wizard-phone-instructions h4 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-4);
+}
+
+.wizard-instruction-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wizard-instruction-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.wizard-instruction-number {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--primary-500);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.wizard-instruction-text {
+  padding-top: 4px;
+}
+
+.wizard-instruction-text strong {
+  display: block;
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.wizard-instruction-text p {
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* Connection Status */
+.wizard-connection-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  margin-top: var(--space-5);
+}
+
+.wizard-connection-status.waiting {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.wizard-connection-status.connected {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.wizard-connection-status.expired,
+.wizard-connection-status.error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.wizard-status-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Phone Connected Status */
+.wizard-phone-connected-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-5);
+}
+
+.wizard-phone-icon-connected {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-lg);
+  background: #22c55e;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wizard-phone-icon-connected svg {
+  width: 28px;
+  height: 28px;
+}
+
+.wizard-phone-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.wizard-phone-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wizard-phone-status {
+  font-size: 0.8125rem;
+  color: #22c55e;
+  font-weight: 500;
+}
+
+/* Mic Test Section Improvements */
+.wizard-mic-test-section {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-default);
+}
+
+.wizard-mic-test-section h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.wizard-test-instruction {
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+}
+
+.wizard-mic-level-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: var(--space-2);
+  text-align: center;
+}
+
+/* Product Recommendation */
+.wizard-product-recommendation {
+  padding: var(--space-5);
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.02));
+  border: 1px solid rgba(249, 115, 22, 0.2);
+  border-radius: var(--radius-xl);
+}
+
+.wizard-product-badge {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 14px;
+  background: var(--primary-500);
+  color: white;
+  border-radius: var(--radius-full);
+  margin-bottom: var(--space-4);
+}
+
+.wizard-product-content {
+  display: flex;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.wizard-product-image {
+  width: 80px;
+  height: 80px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--primary-500);
+}
+
+.wizard-product-info h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.wizard-product-desc {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: var(--space-3);
+}
+
+.wizard-product-features {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.wizard-product-feature {
+  font-size: 0.75rem;
+  padding: 5px 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+}
+
+.wizard-product-links {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.wizard-product-links .wizard-btn {
+  flex: 1;
+  min-width: 160px;
+  justify-content: center;
+}
+
+/* Tip Card */
+.wizard-tip-card {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(124, 58, 237, 0.02));
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: var(--radius-lg);
+  margin-top: var(--space-5);
+}
+
+.wizard-tip-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: rgba(124, 58, 237, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #7c3aed;
+}
+
+.wizard-tip-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.wizard-tip-content h4 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.wizard-tip-content p {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Back Link */
+.wizard-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: var(--space-2) 0;
+  margin-top: var(--space-4);
+  transition: color 0.2s ease;
+}
+
+.wizard-back-link:hover {
+  color: var(--text-secondary);
+}
+
+.wizard-back-link svg {
+  transition: transform 0.2s ease;
+}
+
+.wizard-back-link:hover svg {
+  transform: translateX(-3px);
+}
+
+/* No Mic Actions */
+.wizard-no-mic-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-default);
+}
+
+/* Step Icon Variants */
+.wizard-step-icon-success {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.05)) !important;
+  color: #22c55e !important;
+}
+
+.wizard-step-icon-warning {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.05)) !important;
+  color: #f59e0b !important;
+}
+
+/* Responsive adjustments for mic wizard */
+@media (max-width: 600px) {
+  .wizard-decision-buttons {
+    gap: var(--space-3);
+  }
+
+  .wizard-decision-btn {
+    padding: var(--space-4);
+  }
+
+  .wizard-decision-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .wizard-decision-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .wizard-product-content {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .wizard-product-features {
+    justify-content: center;
+  }
+
+  .wizard-product-links {
+    flex-direction: column;
+  }
+
+  .wizard-product-links .wizard-btn {
+    width: 100%;
+  }
+
+  .wizard-warning-banner {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .wizard-warning-icon {
+    margin: 0 auto;
+  }
+
+  .wizard-tip-card {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .wizard-tip-icon {
+    margin: 0 auto;
+  }
+
+  .wizard-no-mic-actions {
+    flex-direction: column-reverse;
+    gap: var(--space-4);
+  }
+
+  .wizard-no-mic-actions .wizard-btn {
+    width: 100%;
+  }
+
+  .wizard-no-mic-actions .wizard-back-link {
+    margin-top: 0;
+  }
+}

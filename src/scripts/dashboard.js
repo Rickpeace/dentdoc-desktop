@@ -897,6 +897,8 @@ async function loadSettingsView() {
 
 async function loadSettingsMicrophones() {
   const micSelect = document.getElementById('settingsMicSelect');
+  const noMicHint = document.getElementById('settingsNoMicrophoneHint');
+
   try {
     // Use WebRTC to enumerate audio devices
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -906,8 +908,13 @@ async function loadSettingsMicrophones() {
 
     if (mics.length === 0) {
       micSelect.innerHTML = '<option value="">Kein Mikrofon gefunden</option>';
+      // Show the no microphone hint
+      if (noMicHint) noMicHint.style.display = 'block';
       return;
     }
+
+    // Hide the no microphone hint when mics are found
+    if (noMicHint) noMicHint.style.display = 'none';
 
     mics.forEach((mic, index) => {
       const option = document.createElement('option');
@@ -926,6 +933,8 @@ async function loadSettingsMicrophones() {
   } catch (error) {
     console.error('Error loading microphones:', error);
     micSelect.innerHTML = '<option value="">Fehler beim Laden</option>';
+    // Show the no microphone hint on error
+    if (noMicHint) noMicHint.style.display = 'block';
   }
 }
 

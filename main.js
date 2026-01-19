@@ -2692,12 +2692,28 @@ ipcMain.handle('get-recording-state', () => {
 ipcMain.handle('check-first-run', (event, tourId = 'general') => {
   const tourKey = `tourCompleted_${tourId}`;
   const tourCompleted = store.get(tourKey, false);
+
+  // Also check for incomplete setup (user closed without microphone)
+  if (tourId === 'setup-wizard') {
+    const setupIncomplete = store.get('setupIncomplete', false);
+    if (setupIncomplete) {
+      return true; // Show wizard again if setup was incomplete
+    }
+  }
+
   return !tourCompleted;
 });
 
 ipcMain.handle('mark-tour-completed', (event, tourId = 'general') => {
   const tourKey = `tourCompleted_${tourId}`;
   store.set(tourKey, true);
+
+  // Clear incomplete flag when wizard is completed
+  if (tourId === 'setup-wizard') {
+    store.delete('setupIncomplete');
+    store.delete('setupIncompleteReason');
+  }
+
   return true;
 });
 

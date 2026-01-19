@@ -420,9 +420,27 @@
                 </label>
                 <label class="radio-option">
                   <input type="radio" name="micSource" value="iphone" id="settingsMicSourceIphone">
-                  <span>iPhone als Mikrofon</span>
+                  <span>Smartphone als Mikrofon</span>
                 </label>
               </div>
+            </div>
+
+            <!-- Kein Mikrofon Hinweis (wird angezeigt wenn kein Mikrofon gefunden) -->
+            <div id="settingsNoMicrophoneHint" class="no-mic-hint" style="display: none;">
+              <div class="no-mic-hint-header">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M12 8v4M12 16h.01"/>
+                </svg>
+                <span>Kein USB-Mikrofon gefunden</span>
+              </div>
+              <p class="no-mic-hint-text">
+                Für beste Ergebnisse empfehlen wir ein USB-Konferenzmikrofon wie das
+                <a href="https://www.amazon.de/s?k=Beyerdynamic+SPACE+USB" target="_blank" rel="noopener">Beyerdynamic SPACE</a>.
+              </p>
+              <p class="no-mic-hint-tip">
+                <strong>Tipp:</strong> Rechtsklick auf das Tray-Icon ermöglicht auch das Hochladen von Audio-Dateien.
+              </p>
             </div>
 
             <!-- iPhone Kopplung Section -->
@@ -1479,54 +1497,435 @@
         </div>
       </div>
 
-      <!-- Step 1: Microphone -->
+      <!-- Step 1: Microphone (Decision Tree with Sub-Steps) -->
       <div class="wizard-step" data-step="1">
-        <div class="wizard-step-header">
-          <div class="wizard-step-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="23"/>
-              <line x1="8" y1="23" x2="16" y2="23"/>
-            </svg>
-          </div>
-          <h2>Mikrofon einrichten</h2>
-          <p>Wählen Sie das Mikrofon aus, das Sie für Ihre Aufnahmen verwenden möchten. Ein gutes Mikrofon verbessert die Transkriptionsqualität erheblich.</p>
-        </div>
 
-        <div class="wizard-card">
-          <div class="wizard-form-group">
-            <label for="wizardMicSelect">Mikrofon auswählen</label>
-            <select id="wizardMicSelect">
-              <option value="">Lade Mikrofone...</option>
-            </select>
+        <!-- Sub-step 1.0: Initial Question - Do you have a USB microphone? -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepInitial">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </div>
+            <h2>Mikrofon einrichten</h2>
+            <p>Für die beste Audioqualität ist ein gutes Mikrofon wichtig.</p>
           </div>
 
-          <div class="wizard-mic-test">
-            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardMicTestBtn">Mikrofon testen (5 Sek.)</button>
-            <div class="wizard-mic-level">
-              <div class="wizard-mic-level-bar" id="wizardMicLevelBar"></div>
+          <div class="wizard-card">
+            <div class="wizard-question">
+              <h3>Besitzen Sie bereits ein USB-Mikrofon an Ihrem PC?</h3>
+              <p class="wizard-question-hint">(Lavalier, Konferenz-Mikrofon, Headset, oder ähnliches)</p>
+            </div>
+
+            <div class="wizard-decision-buttons">
+              <button type="button" class="wizard-decision-btn wizard-decision-yes" id="wizardMicHasYes">
+                <div class="wizard-decision-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </div>
+                <div class="wizard-decision-content">
+                  <span class="wizard-decision-title">Ja, ich habe ein Mikrofon</span>
+                  <span class="wizard-decision-desc">USB-Mikrofon, Headset oder Konferenzmikrofon</span>
+                </div>
+              </button>
+
+              <button type="button" class="wizard-decision-btn wizard-decision-no" id="wizardMicHasNo">
+                <div class="wizard-decision-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </div>
+                <div class="wizard-decision-content">
+                  <span class="wizard-decision-title">Nein, kein Mikrofon vorhanden</span>
+                  <span class="wizard-decision-desc">Weitere Optionen anzeigen</span>
+                </div>
+              </button>
             </div>
           </div>
-          <div class="wizard-mic-playback" id="wizardMicPlayback" style="display: none;">
-            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardPlayMicBtn">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;">
-                <polygon points="5,3 19,12 5,21"/>
-              </svg>
-              Anhören
-            </button>
-            <audio id="wizardMicAudio" style="display: none;"></audio>
-          </div>
-          <div class="wizard-mic-status" id="wizardMicStatus">Klicken Sie auf "Mikrofon testen" und sprechen Sie</div>
         </div>
 
-        <div class="wizard-info">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-          </svg>
-          <p><strong>Tipp:</strong> Verwenden Sie ein Headset oder externes Mikrofon für die beste Audioqualität. Laptop-Mikrofone funktionieren, aber Hintergrundgeräusche können die Erkennung beeinträchtigen.</p>
+        <!-- Sub-step 1a: Has Microphone - Device Selection & Test -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepHasMic" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </div>
+            <h2>Mikrofon auswählen</h2>
+            <p>Wählen Sie Ihr Mikrofon aus der Liste und testen Sie es.</p>
+          </div>
+
+          <div class="wizard-card">
+            <div class="wizard-form-group">
+              <label for="wizardMicSelect">Ihr Mikrofon</label>
+              <select id="wizardMicSelect">
+                <option value="">Lade Mikrofone...</option>
+              </select>
+            </div>
+
+            <div class="wizard-mic-test-section">
+              <h4>Mikrofontest</h4>
+              <p class="wizard-test-instruction">Klicken Sie auf "Test starten" und sprechen Sie einen Satz.</p>
+
+              <div class="wizard-mic-test">
+                <button type="button" class="wizard-btn wizard-btn-primary" id="wizardMicTestBtn">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+                    <circle cx="12" cy="12" r="10"/>
+                    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+                  </svg>
+                  Test starten (5 Sek.)
+                </button>
+              </div>
+
+              <div class="wizard-mic-level" id="wizardMicLevelContainer">
+                <div class="wizard-mic-level-bar" id="wizardMicLevelBar"></div>
+                <span class="wizard-mic-level-label">Lautstärkepegel</span>
+              </div>
+
+              <div class="wizard-mic-playback" id="wizardMicPlayback" style="display: none;">
+                <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardPlayMicBtn">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
+                    <polygon points="5,3 19,12 5,21"/>
+                  </svg>
+                  Aufnahme anhören
+                </button>
+                <audio id="wizardMicAudio" style="display: none;"></audio>
+              </div>
+
+              <div class="wizard-mic-status" id="wizardMicStatus">Bereit für den Test</div>
+            </div>
+          </div>
+
+          <div class="wizard-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 16v-4M12 8h.01"/>
+            </svg>
+            <p><strong>Tipp:</strong> Sprechen Sie in normaler Lautstärke. Der Pegel sollte zwischen 30-80% liegen.</p>
+          </div>
+
+          <button type="button" class="wizard-back-link" id="wizardMicBackToQuestion">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Zurück zur Auswahl
+          </button>
         </div>
+
+        <!-- Sub-step 1b-1: Phone Question - Use phone as temporary mic? -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepPhoneQuestion" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                <line x1="12" y1="18" x2="12.01" y2="18"/>
+              </svg>
+            </div>
+            <h2>Handy als Mikrofon?</h2>
+            <p>Sie können Ihr Smartphone temporär als kabelloses Mikrofon verwenden.</p>
+          </div>
+
+          <div class="wizard-card">
+            <div class="wizard-warning-banner">
+              <div class="wizard-warning-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div class="wizard-warning-content">
+                <h4>Nur für temporäre Nutzung empfohlen</h4>
+                <p>Die Audioqualität eines Smartphones ist für den Dauergebrauch nicht optimal. Ideal zum Testen und für Demos mit Mitarbeitern.</p>
+              </div>
+            </div>
+
+            <div class="wizard-question" style="margin-top: 24px;">
+              <h3>Möchten Sie Ihr Handy temporär als Mikrofon verwenden?</h3>
+            </div>
+
+            <div class="wizard-decision-buttons">
+              <button type="button" class="wizard-decision-btn wizard-decision-yes" id="wizardPhoneYes">
+                <div class="wizard-decision-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                    <line x1="12" y1="18" x2="12.01" y2="18"/>
+                  </svg>
+                </div>
+                <div class="wizard-decision-content">
+                  <span class="wizard-decision-title">Ja, Handy einrichten</span>
+                  <span class="wizard-decision-desc">iPhone oder Android als temporäres Mikrofon</span>
+                </div>
+              </button>
+
+              <button type="button" class="wizard-decision-btn wizard-decision-no" id="wizardPhoneNo">
+                <div class="wizard-decision-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </div>
+                <div class="wizard-decision-content">
+                  <span class="wizard-decision-title">Nein, danke</span>
+                  <span class="wizard-decision-desc">Mikrofon-Empfehlung anzeigen</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <button type="button" class="wizard-back-link" id="wizardPhoneBackToQuestion">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Zurück zur ersten Frage
+          </button>
+        </div>
+
+        <!-- Sub-step 1b-2: Phone Pairing - QR Code & Instructions -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepPhonePairing" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"/>
+                <rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/>
+              </svg>
+            </div>
+            <h2>Handy verbinden</h2>
+            <p>Scannen Sie den QR-Code mit Ihrem Smartphone.</p>
+          </div>
+
+          <div class="wizard-card">
+            <div class="wizard-qr-section">
+              <div class="wizard-qr-container" id="wizardPhoneQRContainer">
+                <div class="wizard-qr-loading">
+                  <div class="wizard-status-spinner"></div>
+                  <span>QR-Code wird generiert...</span>
+                </div>
+              </div>
+              <p class="wizard-qr-url" id="wizardPhonePairingUrl"></p>
+            </div>
+
+            <div class="wizard-phone-instructions">
+              <h4>So geht's:</h4>
+              <ol class="wizard-instruction-list">
+                <li>
+                  <div class="wizard-instruction-number">1</div>
+                  <div class="wizard-instruction-text">
+                    <strong>QR-Code scannen</strong>
+                    <p>Öffnen Sie die Kamera-App auf Ihrem iPhone oder Android</p>
+                  </div>
+                </li>
+                <li>
+                  <div class="wizard-instruction-number">2</div>
+                  <div class="wizard-instruction-text">
+                    <strong>Webseite öffnen</strong>
+                    <p>Tippen Sie auf den angezeigten Link</p>
+                  </div>
+                </li>
+                <li>
+                  <div class="wizard-instruction-number">3</div>
+                  <div class="wizard-instruction-text">
+                    <strong>Mikrofon erlauben</strong>
+                    <p>Bestätigen Sie die Mikrofon-Berechtigung im Browser</p>
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+            <div class="wizard-connection-status waiting" id="wizardPhoneConnectionStatus">
+              <div class="wizard-status-spinner"></div>
+              <span>Warte auf Verbindung...</span>
+            </div>
+
+            <div class="wizard-info" style="margin-top: 16px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              <p><strong>Optimaler Abstand:</strong> Positionieren Sie das Handy ca. 30-50 cm von Ihrem Mund entfernt für beste Audioqualität.</p>
+            </div>
+          </div>
+
+          <button type="button" class="wizard-back-link" id="wizardPairingBackToPhoneQuestion">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Zurück
+          </button>
+        </div>
+
+        <!-- Sub-step 1b-3: Phone Connected - Test Audio -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepPhoneTest" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon wizard-step-icon-success">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            </div>
+            <h2>Handy verbunden!</h2>
+            <p>Testen Sie jetzt die Audioqualität.</p>
+          </div>
+
+          <div class="wizard-card">
+            <div class="wizard-phone-connected-status">
+              <div class="wizard-phone-icon-connected">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                  <polyline points="9 12 11 14 15 10" stroke-width="2.5"/>
+                </svg>
+              </div>
+              <div class="wizard-phone-info">
+                <span class="wizard-phone-name" id="wizardPhoneDeviceName">Smartphone</span>
+                <span class="wizard-phone-status">Verbunden</span>
+              </div>
+            </div>
+
+            <div class="wizard-mic-test-section">
+              <h4>Audiotest</h4>
+              <p class="wizard-test-instruction">Halten Sie das Handy 30-50 cm von Ihrem Mund entfernt und sprechen Sie einen Testsatz.</p>
+
+              <div class="wizard-mic-test">
+                <button type="button" class="wizard-btn wizard-btn-primary" id="wizardPhoneTestBtn">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+                    <circle cx="12" cy="12" r="10"/>
+                    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+                  </svg>
+                  Test starten (10 Sek.)
+                </button>
+              </div>
+
+              <div class="wizard-mic-level" id="wizardPhoneLevelContainer">
+                <div class="wizard-mic-level-bar" id="wizardPhoneLevelBar"></div>
+                <span class="wizard-mic-level-label">Lautstärkepegel</span>
+              </div>
+
+              <div class="wizard-mic-playback" id="wizardPhonePlayback" style="display: none;">
+                <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardPhonePlayBtn">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
+                    <polygon points="5,3 19,12 5,21"/>
+                  </svg>
+                  Aufnahme anhören
+                </button>
+                <audio id="wizardPhoneAudio" style="display: none;"></audio>
+              </div>
+
+              <div class="wizard-mic-status" id="wizardPhoneStatus">Bereit für den Test</div>
+            </div>
+          </div>
+
+          <div class="wizard-warning-banner wizard-warning-small">
+            <div class="wizard-warning-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 16v-4M12 8h.01"/>
+              </svg>
+            </div>
+            <div class="wizard-warning-content">
+              <p>Das Handy-Mikrofon ist nur für temporäre Nutzung gedacht. Für den Dauereinsatz empfehlen wir ein USB-Mikrofon.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-step 1c: No Microphone - Product Recommendation -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepNoMic" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon wizard-step-icon-warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 8v4M12 16h.01"/>
+              </svg>
+            </div>
+            <h2>Kein Mikrofon vorhanden</h2>
+            <p>Für DentDoc benötigen Sie ein Mikrofon. Hier ist unsere Empfehlung.</p>
+          </div>
+
+          <div class="wizard-card">
+            <div class="wizard-product-recommendation">
+              <div class="wizard-product-badge">Unsere Empfehlung</div>
+              <div class="wizard-product-content">
+                <div class="wizard-product-image">
+                  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                  </svg>
+                </div>
+                <div class="wizard-product-info">
+                  <h3>Beyerdynamic SPACE</h3>
+                  <p class="wizard-product-desc">Hochwertiges USB-Konferenzmikrofon mit exzellenter Sprachqualität. Ideal für medizinische Dokumentation.</p>
+                  <div class="wizard-product-features">
+                    <span class="wizard-product-feature">USB-Anschluss</span>
+                    <span class="wizard-product-feature">Plug & Play</span>
+                    <span class="wizard-product-feature">Premium-Audio</span>
+                  </div>
+                </div>
+              </div>
+              <div class="wizard-product-links">
+                <a href="https://www.amazon.de/s?k=Beyerdynamic+SPACE+USB" target="_blank" rel="noopener" class="wizard-btn wizard-btn-secondary">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                  Bei Amazon suchen
+                </a>
+                <a href="https://www.thomann.de/de/search_dir.html?sw=beyerdynamic%20space" target="_blank" rel="noopener" class="wizard-btn wizard-btn-secondary">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                  Bei Thomann suchen
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <div class="wizard-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 16v-4M12 8h.01"/>
+            </svg>
+            <p><strong>Bitte starten Sie den Einrichtungsassistenten neu, sobald Sie ein Mikrofon haben.</strong></p>
+          </div>
+
+          <div class="wizard-tip-card">
+            <div class="wizard-tip-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+              </svg>
+            </div>
+            <div class="wizard-tip-content">
+              <h4>TIPP: Audio-Dateien hochladen</h4>
+              <p>Sie können auch ohne Mikrofon arbeiten! Klicken Sie mit der <strong>rechten Maustaste</strong> auf das DentDoc-Icon im System Tray - dort können Sie bestehende Audio-Dateien hochladen und transkribieren lassen.</p>
+            </div>
+          </div>
+
+          <div class="wizard-no-mic-actions">
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardNoMicClose">
+              Assistent schließen
+            </button>
+            <button type="button" class="wizard-back-link" id="wizardNoMicBack">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"/>
+              </svg>
+              Zurück zur Auswahl
+            </button>
+          </div>
+        </div>
+
       </div>
 
       <!-- Step 2: Shortcut -->

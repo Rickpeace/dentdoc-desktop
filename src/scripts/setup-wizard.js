@@ -12,6 +12,7 @@ class SetupWizard {
     this.totalSteps = 8; // 0-7 (removed separate audio step)
     this.settings = {
       microphoneId: null, // Windows device name for FFmpeg
+      microphoneSource: 'desktop', // 'desktop' or 'iphone'
       shortcut: 'F9',
       docMode: 'single',
       autoExport: true,
@@ -29,6 +30,13 @@ class SetupWizard {
 
     // Shortcut recording state
     this.isRecordingShortcut = false;
+
+    // Mic wizard substep state machine
+    this.micWizardState = 'initial_question'; // initial_question, has_mic, phone_question, phone_pairing, phone_test, no_mic
+    this.phonePairingId = null;
+    this.phonePairingPollInterval = null;
+    this.isPhoneConnected = false;
+    this.isPhoneTesting = false;
 
     this.init();
   }
@@ -190,6 +198,474 @@ class SetupWizard {
     document.getElementById('wizardProfileCancelBtn')?.addEventListener('click', () => {
       this.cancelProfileRecording();
     });
+
+    // === Mic Wizard Decision Tree Events ===
+    this.bindMicWizardEvents();
+  }
+
+  // ==========================================
+  // MIC WIZARD STATE MACHINE
+  // ==========================================
+
+  bindMicWizardEvents() {
+    // Q1: Has USB Mic? - Yes
+    document.getElementById('wizardMicHasYes')?.addEventListener('click', () => {
+      this.setMicWizardState('has_mic');
+      this.loadMicrophones();
+    });
+
+    // Q1: Has USB Mic? - No
+    document.getElementById('wizardMicHasNo')?.addEventListener('click', () => {
+      this.setMicWizardState('phone_question');
+    });
+
+    // Q2: Use Phone? - Yes
+    document.getElementById('wizardPhoneYes')?.addEventListener('click', () => {
+      this.setMicWizardState('phone_pairing');
+      this.startPhonePairing();
+    });
+
+    // Q2: Use Phone? - No
+    document.getElementById('wizardPhoneNo')?.addEventListener('click', () => {
+      this.setMicWizardState('no_mic');
+    });
+
+    // Back buttons
+    document.getElementById('wizardMicBackToQuestion')?.addEventListener('click', () => {
+      this.stopMicTest();
+      this.setMicWizardState('initial_question');
+    });
+
+    document.getElementById('wizardPhoneBackToQuestion')?.addEventListener('click', () => {
+      this.setMicWizardState('initial_question');
+    });
+
+    document.getElementById('wizardPairingBackToPhoneQuestion')?.addEventListener('click', () => {
+      this.cancelPhonePairing();
+      this.setMicWizardState('phone_question');
+    });
+
+    document.getElementById('wizardNoMicBack')?.addEventListener('click', () => {
+      this.setMicWizardState('phone_question');
+    });
+
+    // No mic close button
+    document.getElementById('wizardNoMicClose')?.addEventListener('click', () => {
+      this.closeWizardIncomplete();
+    });
+
+    // Phone test buttons
+    document.getElementById('wizardPhoneTestBtn')?.addEventListener('click', () => {
+      this.togglePhoneTest();
+    });
+
+    document.getElementById('wizardPhonePlayBtn')?.addEventListener('click', () => {
+      this.playPhoneTest();
+    });
+  }
+
+  setMicWizardState(newState) {
+    this.micWizardState = newState;
+    this.updateMicSubstepVisibility();
+    this.updateMicNavigation();
+  }
+
+  updateMicSubstepVisibility() {
+    // Hide all substeps
+    document.querySelectorAll('.wizard-mic-substep').forEach(el => {
+      el.style.display = 'none';
+    });
+
+    // Show the appropriate substep
+    const substepMap = {
+      'initial_question': 'wizardMicSubstepInitial',
+      'has_mic': 'wizardMicSubstepHasMic',
+      'phone_question': 'wizardMicSubstepPhoneQuestion',
+      'phone_pairing': 'wizardMicSubstepPhonePairing',
+      'phone_test': 'wizardMicSubstepPhoneTest',
+      'no_mic': 'wizardMicSubstepNoMic'
+    };
+
+    const substepId = substepMap[this.micWizardState];
+    if (substepId) {
+      const substep = document.getElementById(substepId);
+      if (substep) substep.style.display = 'block';
+    }
+  }
+
+  updateMicNavigation() {
+    const nextBtn = document.getElementById('wizardNextBtn');
+    const backBtn = document.getElementById('wizardBackBtn');
+
+    if (this.currentStep !== 1) return; // Only affect step 1
+
+    // Disable next button on question states (must make a choice)
+    if (this.micWizardState === 'initial_question' ||
+        this.micWizardState === 'phone_question' ||
+        this.micWizardState === 'phone_pairing') {
+      if (nextBtn) {
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = '0.5';
+        nextBtn.style.pointerEvents = 'none';
+      }
+    } else if (this.micWizardState === 'no_mic') {
+      // Hide navigation on no-mic screen (they need to close or go back)
+      if (nextBtn) nextBtn.style.display = 'none';
+      if (backBtn) backBtn.style.display = 'none';
+    } else {
+      // Enable navigation for has_mic and phone_test states
+      if (nextBtn) {
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = '1';
+        nextBtn.style.pointerEvents = 'auto';
+        nextBtn.style.display = 'flex';
+      }
+      if (backBtn) backBtn.style.display = 'flex';
+    }
+  }
+
+  // ==========================================
+  // PHONE PAIRING FLOW
+  // ==========================================
+
+  async startPhonePairing() {
+    try {
+      const result = await ipcRenderer.invoke('iphone-pair-start');
+
+      if (!result.success) {
+        throw new Error(result.error || 'Pairing konnte nicht gestartet werden');
+      }
+
+      this.phonePairingId = result.pairingId;
+
+      // Generate QR code
+      const qrContainer = document.getElementById('wizardPhoneQRContainer');
+      if (qrContainer) {
+        qrContainer.innerHTML = ''; // Clear loading state
+
+        // Use QRCode library (should be available via require or global)
+        const QRCode = window.QRCode || require('qrcode');
+        const canvas = document.createElement('canvas');
+
+        await QRCode.toCanvas(canvas, result.pairingUrl, {
+          width: 200,
+          margin: 2,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+
+        qrContainer.appendChild(canvas);
+      }
+
+      // Show URL
+      const urlEl = document.getElementById('wizardPhonePairingUrl');
+      if (urlEl) urlEl.textContent = result.pairingUrl;
+
+      // Update connection status
+      this.updatePhoneConnectionStatus('waiting');
+
+      // Start polling for connection
+      this.startPhonePairingPoll(result.pairingId);
+
+    } catch (error) {
+      console.error('Phone pairing error:', error);
+      this.updatePhoneConnectionStatus('error', error.message);
+    }
+  }
+
+  startPhonePairingPoll(pairingId) {
+    this.phonePairingPollInterval = setInterval(async () => {
+      try {
+        const status = await ipcRenderer.invoke('iphone-pair-status', pairingId);
+
+        if (status.paired || status.status === 'paired') {
+          clearInterval(this.phonePairingPollInterval);
+          this.phonePairingPollInterval = null;
+
+          this.isPhoneConnected = true;
+          this.settings.microphoneSource = 'iphone';
+
+          // Update device name
+          const nameEl = document.getElementById('wizardPhoneDeviceName');
+          if (nameEl) nameEl.textContent = status.deviceName || 'Smartphone';
+
+          // Move to phone test state
+          this.setMicWizardState('phone_test');
+
+        } else if (status.status === 'expired') {
+          clearInterval(this.phonePairingPollInterval);
+          this.phonePairingPollInterval = null;
+          this.updatePhoneConnectionStatus('expired');
+        }
+      } catch (error) {
+        console.error('Pairing poll error:', error);
+      }
+    }, 2000);
+
+    // Auto-timeout after 5 minutes
+    setTimeout(() => {
+      if (this.phonePairingPollInterval) {
+        clearInterval(this.phonePairingPollInterval);
+        this.phonePairingPollInterval = null;
+        this.updatePhoneConnectionStatus('expired');
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  cancelPhonePairing() {
+    if (this.phonePairingPollInterval) {
+      clearInterval(this.phonePairingPollInterval);
+      this.phonePairingPollInterval = null;
+    }
+    this.phonePairingId = null;
+
+    // Try to cancel on backend
+    ipcRenderer.invoke('iphone-cancel-pair').catch(() => {});
+  }
+
+  updatePhoneConnectionStatus(status, errorMessage = '') {
+    const statusEl = document.getElementById('wizardPhoneConnectionStatus');
+    if (!statusEl) return;
+
+    switch (status) {
+      case 'waiting':
+        statusEl.innerHTML = `
+          <div class="wizard-status-spinner"></div>
+          <span>Warte auf Verbindung...</span>
+        `;
+        statusEl.className = 'wizard-connection-status waiting';
+        break;
+      case 'connected':
+        statusEl.innerHTML = `
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span>Verbunden!</span>
+        `;
+        statusEl.className = 'wizard-connection-status connected';
+        break;
+      case 'expired':
+        statusEl.innerHTML = `
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span>QR-Code abgelaufen. <a href="#" id="wizardRegenerateQR">Neu generieren</a></span>
+        `;
+        statusEl.className = 'wizard-connection-status expired';
+        // Bind regenerate handler
+        document.getElementById('wizardRegenerateQR')?.addEventListener('click', (e) => {
+          e.preventDefault();
+          this.startPhonePairing();
+        });
+        break;
+      case 'error':
+        statusEl.innerHTML = `
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="15" y1="9" x2="9" y2="15"/>
+            <line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+          <span>Fehler: ${errorMessage}</span>
+        `;
+        statusEl.className = 'wizard-connection-status error';
+        break;
+    }
+  }
+
+  // ==========================================
+  // PHONE AUDIO TEST
+  // ==========================================
+
+  togglePhoneTest() {
+    if (this.isPhoneTesting) {
+      return; // Don't allow manual stop - wait for auto-stop
+    } else {
+      this.startPhoneTest();
+    }
+  }
+
+  async startPhoneTest() {
+    const btn = document.getElementById('wizardPhoneTestBtn');
+    const levelBar = document.getElementById('wizardPhoneLevelBar');
+    const status = document.getElementById('wizardPhoneStatus');
+    const playbackDiv = document.getElementById('wizardPhonePlayback');
+
+    try {
+      this.isPhoneTesting = true;
+
+      if (btn) {
+        btn.innerHTML = `
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          </svg>
+          Aufnahme läuft...
+        `;
+        btn.disabled = true;
+      }
+
+      if (status) status.textContent = 'Aufnahme läuft... Sprechen Sie ins Handy (10 Sek.)';
+      if (playbackDiv) playbackDiv.style.display = 'none';
+
+      // Start test recording via IPC (iPhone audio test)
+      const startResult = await ipcRenderer.invoke('iphone-audio-test');
+
+      if (!startResult.success) {
+        throw new Error(startResult.error || 'Test konnte nicht gestartet werden');
+      }
+
+      // Animate level bar during recording
+      this.animatePhoneLevel();
+
+      // Auto-stop after 10 seconds
+      setTimeout(async () => {
+        if (this.isPhoneTesting) {
+          await this.stopPhoneTest();
+        }
+      }, 10000);
+
+    } catch (error) {
+      console.error('Phone test error:', error);
+      if (status) status.textContent = 'Fehler: ' + error.message;
+      this.resetPhoneTestUI();
+    }
+  }
+
+  async stopPhoneTest() {
+    this.isPhoneTesting = false;
+
+    const btn = document.getElementById('wizardPhoneTestBtn');
+    const levelBar = document.getElementById('wizardPhoneLevelBar');
+    const status = document.getElementById('wizardPhoneStatus');
+    const playbackDiv = document.getElementById('wizardPhonePlayback');
+
+    if (btn) {
+      btn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+          <circle cx="12" cy="12" r="10"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        </svg>
+        Test starten (10 Sek.)
+      `;
+      btn.disabled = false;
+    }
+
+    if (levelBar) levelBar.style.width = '0%';
+
+    // Show success and playback button
+    if (status) {
+      status.textContent = 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen';
+      status.className = 'wizard-mic-status success';
+    }
+    if (playbackDiv) playbackDiv.style.display = 'flex';
+  }
+
+  resetPhoneTestUI() {
+    this.isPhoneTesting = false;
+
+    const btn = document.getElementById('wizardPhoneTestBtn');
+    const levelBar = document.getElementById('wizardPhoneLevelBar');
+
+    if (btn) {
+      btn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+          <circle cx="12" cy="12" r="10"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        </svg>
+        Test starten (10 Sek.)
+      `;
+      btn.disabled = false;
+    }
+    if (levelBar) levelBar.style.width = '0%';
+  }
+
+  animatePhoneLevel() {
+    const levelBar = document.getElementById('wizardPhoneLevelBar');
+    if (!levelBar || !this.isPhoneTesting) return;
+
+    // Simulate audio levels (in production, this would come from phone relay IPC events)
+    const level = 20 + Math.random() * 60;
+    levelBar.style.width = level + '%';
+
+    if (this.isPhoneTesting) {
+      requestAnimationFrame(() => setTimeout(() => this.animatePhoneLevel(), 100));
+    }
+  }
+
+  async playPhoneTest() {
+    const btn = document.getElementById('wizardPhonePlayBtn');
+    const audio = document.getElementById('wizardPhoneAudio');
+    const status = document.getElementById('wizardPhoneStatus');
+
+    // If already playing, stop
+    if (audio && !audio.paused) {
+      audio.pause();
+      audio.currentTime = 0;
+      if (btn) btn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+        Aufnahme anhören
+      `;
+      return;
+    }
+
+    try {
+      if (btn) btn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
+          <rect x="6" y="4" width="4" height="16"/>
+          <rect x="14" y="4" width="4" height="16"/>
+        </svg>
+        Stoppen
+      `;
+
+      const result = await ipcRenderer.invoke('iphone-play-test-audio');
+      if (!result.success) {
+        throw new Error(result.error || 'Keine Testaufnahme vorhanden');
+      }
+
+      if (audio) {
+        audio.src = `data:${result.mimeType || 'audio/wav'};base64,${result.data}`;
+        audio.onended = () => {
+          if (btn) btn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
+              <polygon points="5,3 19,12 5,21"/>
+            </svg>
+            Aufnahme anhören
+          `;
+        };
+        await audio.play();
+      }
+    } catch (error) {
+      console.error('Phone playback error:', error);
+      if (status) status.textContent = 'Wiedergabe-Fehler: ' + error.message;
+      if (btn) btn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+        Aufnahme anhören
+      `;
+    }
+  }
+
+  // ==========================================
+  // INCOMPLETE WIZARD HANDLING
+  // ==========================================
+
+  async closeWizardIncomplete() {
+    // Close wizard but do NOT mark as completed
+    // This means it will show again on next app launch
+    this.cancelPhonePairing();
+    this.stopMicTest();
+
+    // Save incomplete state
+    await ipcRenderer.invoke('save-settings', {
+      setupIncomplete: true,
+      setupIncompleteReason: 'no_microphone'
+    });
+
+    this.hide();
   }
 
   // Voice profile recording state
@@ -693,18 +1169,38 @@ class SetupWizard {
   showStep(index) {
     // Stop any running mic test when changing steps (industry standard behavior)
     this.stopMicTest();
+    this.cancelPhonePairing();
 
-    // Reset mic test UI when showing microphone step (step 1)
+    // Reset mic wizard state and UI when showing microphone step (step 1)
     if (index === 1) {
+      // Reset to initial question state
+      this.micWizardState = 'initial_question';
+      this.isPhoneConnected = false;
+      this.isPhoneTesting = false;
+
+      // Reset all mic test UI elements
       const playbackDiv = document.getElementById('wizardMicPlayback');
       const statusDiv = document.getElementById('wizardMicStatus');
       const levelBar = document.getElementById('wizardMicLevelBar');
+      const phonePlaybackDiv = document.getElementById('wizardPhonePlayback');
+      const phoneStatusDiv = document.getElementById('wizardPhoneStatus');
+      const phoneLevelBar = document.getElementById('wizardPhoneLevelBar');
+
       if (playbackDiv) playbackDiv.style.display = 'none';
       if (statusDiv) {
-        statusDiv.textContent = 'Klicken Sie auf "Mikrofon testen" und sprechen Sie';
+        statusDiv.textContent = 'Bereit für den Test';
         statusDiv.className = 'wizard-mic-status';
       }
       if (levelBar) levelBar.style.width = '0%';
+      if (phonePlaybackDiv) phonePlaybackDiv.style.display = 'none';
+      if (phoneStatusDiv) {
+        phoneStatusDiv.textContent = 'Bereit für den Test';
+        phoneStatusDiv.className = 'wizard-mic-status';
+      }
+      if (phoneLevelBar) phoneLevelBar.style.width = '0%';
+
+      // Show initial substep, hide others
+      this.updateMicSubstepVisibility();
     }
 
     // Hide all steps
@@ -797,6 +1293,11 @@ class SetupWizard {
     // Skip button - show for optional steps (shortcut, AI mode, transcripts, audio, profiles)
     const optionalSteps = [2, 3, 4, 5, 6]; // Shortcut, AI Mode, Transcripts, Audio, Profiles
     skipBtn.style.display = optionalSteps.includes(this.currentStep) ? 'block' : 'none';
+
+    // Apply mic wizard navigation rules for step 1
+    if (this.currentStep === 1) {
+      this.updateMicNavigation();
+    }
   }
 
   updateSummary() {
