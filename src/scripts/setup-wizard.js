@@ -245,18 +245,6 @@ class SetupWizard {
       this.setMicWizardState('phone_question');
     });
 
-    document.getElementById('wizardNoMicBack')?.addEventListener('click', () => {
-      this.setMicWizardState('phone_question');
-    });
-
-    // No mic - continue anyway button
-    document.getElementById('wizardNoMicContinue')?.addEventListener('click', () => {
-      // User wants to continue without microphone - proceed to next step
-      this.settings.microphoneSource = 'none';
-      this.settings.microphoneId = null;
-      this.nextStep();
-    });
-
     // Phone test buttons
     document.getElementById('wizardPhoneTestBtn')?.addEventListener('click', () => {
       this.togglePhoneTest();
@@ -314,14 +302,24 @@ class SetupWizard {
     // Step 1: Disable next button on question states (must make a choice)
     if (this.micWizardState === 'initial_question' ||
         this.micWizardState === 'phone_question' ||
-        this.micWizardState === 'phone_pairing' ||
-        this.micWizardState === 'no_mic') {
-      // Hide navigation on these screens (user makes choice via substep buttons)
+        this.micWizardState === 'phone_pairing') {
+      // Disable navigation on these screens (user makes choice via substep buttons)
       if (nextBtn) {
         nextBtn.disabled = true;
         nextBtn.style.opacity = '0.5';
         nextBtn.style.pointerEvents = 'none';
+        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
       }
+    } else if (this.micWizardState === 'no_mic') {
+      // No mic - enable buttons, change text to "Trotzdem fortfahren"
+      if (nextBtn) {
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = '1';
+        nextBtn.style.pointerEvents = 'auto';
+        nextBtn.style.display = 'flex';
+        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Trotzdem fortfahren';
+      }
+      if (backBtn) backBtn.style.display = 'flex';
     } else {
       // Enable navigation for has_mic and phone_test states
       if (nextBtn) {
@@ -329,6 +327,7 @@ class SetupWizard {
         nextBtn.style.opacity = '1';
         nextBtn.style.pointerEvents = 'auto';
         nextBtn.style.display = 'flex';
+        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
       }
       if (backBtn) backBtn.style.display = 'flex';
     }
@@ -1354,6 +1353,12 @@ class SetupWizard {
   }
 
   nextStep() {
+    // If on step 1 with no_mic state, clear microphone settings
+    if (this.currentStep === 1 && this.micWizardState === 'no_mic') {
+      this.settings.microphoneSource = 'none';
+      this.settings.microphoneId = null;
+    }
+
     if (this.currentStep < this.totalSteps - 1) {
       this.showStep(this.currentStep + 1);
     }
