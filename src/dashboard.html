@@ -1795,19 +1795,20 @@
               <h4>Audiotest</h4>
               <p class="wizard-test-instruction">Halten Sie das Handy 30-50 cm von Ihrem Mund entfernt und sprechen Sie einen Testsatz.</p>
 
-              <div class="wizard-mic-test">
+              <div class="wizard-phone-test-container">
                 <button type="button" class="wizard-btn wizard-btn-primary" id="wizardPhoneTestBtn">
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
                     <circle cx="12" cy="12" r="10"/>
                     <circle cx="12" cy="12" r="3" fill="currentColor"/>
                   </svg>
-                  Test starten (10 Sek.)
+                  <span id="wizardPhoneTestBtnText">Test starten</span>
                 </button>
-              </div>
-
-              <div class="wizard-mic-level" id="wizardPhoneLevelContainer">
-                <div class="wizard-mic-level-bar" id="wizardPhoneLevelBar"></div>
-                <span class="wizard-mic-level-label">Lautstärkepegel</span>
+                <div class="wizard-phone-level-bar-container">
+                  <div class="wizard-phone-level-bar" id="wizardPhoneLevelBar"></div>
+                </div>
+                <div class="wizard-phone-timer" id="wizardPhoneTimer" style="display: none;">
+                  <span id="wizardPhoneTimerText">10</span>s
+                </div>
               </div>
 
               <div class="wizard-mic-playback" id="wizardPhonePlayback" style="display: none;">
@@ -1815,9 +1816,9 @@
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
                     <polygon points="5,3 19,12 5,21"/>
                   </svg>
-                  Aufnahme anhören
+                  <span id="wizardPhonePlayBtnText">Aufnahme anhören</span>
                 </button>
-                <audio id="wizardPhoneAudio" style="display: none;"></audio>
+                <audio id="wizardPhoneAudio"></audio>
               </div>
 
               <div class="wizard-mic-status" id="wizardPhoneStatus">Bereit für den Test</div>

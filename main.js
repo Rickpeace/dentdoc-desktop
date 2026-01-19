@@ -3584,6 +3584,23 @@ ipcMain.handle('iphone-play-test-audio', async (event, wavPath) => {
   }
 });
 
+// Get audio file data as base64 for internal playback
+ipcMain.handle('get-audio-file-data', async (event, filePath) => {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { success: false, error: 'Datei nicht gefunden' };
+  }
+
+  try {
+    const data = fs.readFileSync(filePath);
+    return {
+      success: true,
+      data: data.toString('base64')
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // Open any folder in explorer
 ipcMain.handle('open-folder', async (event, folderPath) => {
   if (!folderPath) {

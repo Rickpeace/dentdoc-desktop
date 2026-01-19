@@ -38,6 +38,8 @@ class SetupWizard {
     this.isPhoneConnected = false;
     this.isPhoneTesting = false;
     this.phoneTestWavPath = null; // Path to recorded test audio file
+    this.phoneCountdownInterval = null; // Timer interval for countdown
+    this.phoneTestTimeLeft = 10; // Seconds remaining
 
     this.init();
   }
@@ -489,46 +491,61 @@ class SetupWizard {
 
   togglePhoneTest() {
     if (this.isPhoneTesting) {
-      return; // Don't allow manual stop - wait for auto-stop
+      this.stopPhoneTest();
     } else {
       this.startPhoneTest();
     }
   }
 
   async startPhoneTest() {
+    const container = document.querySelector('.wizard-phone-test-container');
     const btn = document.getElementById('wizardPhoneTestBtn');
+    const btnText = document.getElementById('wizardPhoneTestBtnText');
     const levelBar = document.getElementById('wizardPhoneLevelBar');
+    const timer = document.getElementById('wizardPhoneTimer');
+    const timerText = document.getElementById('wizardPhoneTimerText');
     const status = document.getElementById('wizardPhoneStatus');
     const playbackDiv = document.getElementById('wizardPhonePlayback');
 
     try {
       this.isPhoneTesting = true;
-      this.phoneTestWavPath = null; // Reset path
+      this.phoneTestWavPath = null;
+      this.phoneTestTimeLeft = 10;
 
-      if (btn) {
-        btn.innerHTML = `
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
-            <circle cx="12" cy="12" r="10"/>
-            <circle cx="12" cy="12" r="3" fill="currentColor"/>
-          </svg>
-          Aufnahme läuft...
-        `;
-        btn.disabled = true;
-      }
-
-      if (status) status.textContent = 'Aufnahme läuft... Sprechen Sie ins Handy (10 Sek.)';
+      // Update UI for recording state
+      if (container) container.classList.add('recording');
+      if (btnText) btnText.textContent = 'Stoppen';
+      if (timer) timer.style.display = 'flex';
+      if (timerText) timerText.textContent = '10';
+      if (status) status.textContent = 'Sprechen Sie jetzt ins Handy...';
       if (playbackDiv) playbackDiv.style.display = 'none';
+      if (levelBar) levelBar.style.setProperty('--level', '0%');
 
-      // Start level animation BEFORE the blocking call
+      // Start level animation and countdown
       this.animatePhoneLevel();
+      this.startPhoneCountdown();
 
       // This call blocks for 10 seconds while recording
       const result = await ipcRenderer.invoke('iphone-audio-test');
 
-      // Recording finished
+      // Recording finished (either completed or was cancelled)
       this.isPhoneTesting = false;
+      if (this.phoneCountdownInterval) {
+        clearInterval(this.phoneCountdownInterval);
+        this.phoneCountdownInterval = null;
+      }
+
+      // Reset UI
+      if (container) container.classList.remove('recording');
+      if (btnText) btnText.textContent = 'Test starten';
+      if (timer) timer.style.display = 'none';
+      if (levelBar) levelBar.style.setProperty('--level', '0%');
 
       if (!result.success) {
+        if (result.cancelled) {
+          if (status) status.textContent = 'Test abgebrochen';
+          return;
+        }
         throw new Error(result.error || 'Test konnte nicht gestartet werden');
       }
 
@@ -536,22 +553,8 @@ class SetupWizard {
       this.phoneTestWavPath = result.wavPath;
       console.log('[Phone Test] Recording saved to:', this.phoneTestWavPath);
 
-      // Update UI to show completion
-      if (btn) {
-        btn.innerHTML = `
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
-            <circle cx="12" cy="12" r="10"/>
-            <circle cx="12" cy="12" r="3" fill="currentColor"/>
-          </svg>
-          Test starten (10 Sek.)
-        `;
-        btn.disabled = false;
-      }
-
-      if (levelBar) levelBar.style.width = '0%';
-
       if (status) {
-        status.textContent = 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen';
+        status.textContent = 'Test abgeschlossen!';
         status.className = 'wizard-mic-status success';
       }
       if (playbackDiv) playbackDiv.style.display = 'flex';
@@ -559,28 +562,57 @@ class SetupWizard {
     } catch (error) {
       console.error('Phone test error:', error);
       this.isPhoneTesting = false;
+      if (this.phoneCountdownInterval) {
+        clearInterval(this.phoneCountdownInterval);
+        this.phoneCountdownInterval = null;
+      }
       if (status) status.textContent = 'Fehler: ' + error.message;
       this.resetPhoneTestUI();
     }
   }
 
+  async stopPhoneTest() {
+    // Cancel the ongoing test
+    await ipcRenderer.invoke('iphone-audio-test-cancel');
+    this.isPhoneTesting = false;
+
+    if (this.phoneCountdownInterval) {
+      clearInterval(this.phoneCountdownInterval);
+      this.phoneCountdownInterval = null;
+    }
+
+    this.resetPhoneTestUI();
+    const status = document.getElementById('wizardPhoneStatus');
+    if (status) status.textContent = 'Test abgebrochen';
+  }
+
   resetPhoneTestUI() {
     this.isPhoneTesting = false;
 
-    const btn = document.getElementById('wizardPhoneTestBtn');
+    const container = document.querySelector('.wizard-phone-test-container');
+    const btnText = document.getElementById('wizardPhoneTestBtnText');
     const levelBar = document.getElementById('wizardPhoneLevelBar');
+    const timer = document.getElementById('wizardPhoneTimer');
 
-    if (btn) {
-      btn.innerHTML = `
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
-          <circle cx="12" cy="12" r="10"/>
-          <circle cx="12" cy="12" r="3" fill="currentColor"/>
-        </svg>
-        Test starten (10 Sek.)
-      `;
-      btn.disabled = false;
-    }
-    if (levelBar) levelBar.style.width = '0%';
+    if (container) container.classList.remove('recording');
+    if (btnText) btnText.textContent = 'Test starten';
+    if (levelBar) levelBar.style.setProperty('--level', '0%');
+    if (timer) timer.style.display = 'none';
+  }
+
+  startPhoneCountdown() {
+    const timerText = document.getElementById('wizardPhoneTimerText');
+    this.phoneTestTimeLeft = 10;
+
+    this.phoneCountdownInterval = setInterval(() => {
+      this.phoneTestTimeLeft--;
+      if (timerText) timerText.textContent = this.phoneTestTimeLeft;
+
+      if (this.phoneTestTimeLeft <= 0) {
+        clearInterval(this.phoneCountdownInterval);
+        this.phoneCountdownInterval = null;
+      }
+    }, 1000);
   }
 
   animatePhoneLevel() {
@@ -589,7 +621,7 @@ class SetupWizard {
 
     // Simulate audio levels during recording
     const level = 20 + Math.random() * 60;
-    levelBar.style.width = level + '%';
+    levelBar.style.setProperty('--level', level + '%');
 
     if (this.isPhoneTesting) {
       requestAnimationFrame(() => setTimeout(() => this.animatePhoneLevel(), 100));
@@ -598,6 +630,7 @@ class SetupWizard {
 
   async playPhoneTest() {
     const btn = document.getElementById('wizardPhonePlayBtn');
+    const btnText = document.getElementById('wizardPhonePlayBtnText');
     const audio = document.getElementById('wizardPhoneAudio');
     const status = document.getElementById('wizardPhoneStatus');
 
@@ -605,12 +638,7 @@ class SetupWizard {
     if (audio && !audio.paused) {
       audio.pause();
       audio.currentTime = 0;
-      if (btn) btn.innerHTML = `
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
-          <polygon points="5,3 19,12 5,21"/>
-        </svg>
-        Aufnahme anhören
-      `;
+      if (btnText) btnText.textContent = 'Aufnahme anhören';
       return;
     }
 
@@ -620,39 +648,29 @@ class SetupWizard {
     }
 
     try {
-      if (btn) btn.innerHTML = `
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
-          <rect x="6" y="4" width="4" height="16"/>
-          <rect x="14" y="4" width="4" height="16"/>
-        </svg>
-        Stoppen
-      `;
+      if (btnText) btnText.textContent = 'Stoppen';
 
-      // Pass the saved wav path to playback handler
-      const result = await ipcRenderer.invoke('iphone-play-test-audio', this.phoneTestWavPath);
+      // Get audio data as base64 for internal playback
+      const result = await ipcRenderer.invoke('get-audio-file-data', this.phoneTestWavPath);
       if (!result.success) {
-        throw new Error(result.error || 'Wiedergabe fehlgeschlagen');
+        throw new Error(result.error || 'Datei konnte nicht geladen werden');
       }
 
-      // Reset button after a delay (file opens in external player)
-      setTimeout(() => {
-        if (btn) btn.innerHTML = `
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
-            <polygon points="5,3 19,12 5,21"/>
-          </svg>
-          Aufnahme anhören
-        `;
-      }, 1000);
-
+      if (audio) {
+        audio.src = `data:audio/wav;base64,${result.data}`;
+        audio.onended = () => {
+          if (btnText) btnText.textContent = 'Aufnahme anhören';
+        };
+        audio.onerror = () => {
+          if (btnText) btnText.textContent = 'Aufnahme anhören';
+          if (status) status.textContent = 'Wiedergabe-Fehler';
+        };
+        await audio.play();
+      }
     } catch (error) {
       console.error('Phone playback error:', error);
       if (status) status.textContent = 'Wiedergabe-Fehler: ' + error.message;
-      if (btn) btn.innerHTML = `
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
-          <polygon points="5,3 19,12 5,21"/>
-        </svg>
-        Aufnahme anhören
-      `;
+      if (btnText) btnText.textContent = 'Aufnahme anhören';
     }
   }
 
