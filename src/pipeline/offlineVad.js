@@ -10,24 +10,24 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { app } = require('electron');
 
-// Configuration for OFFLINE VAD (stricter than live VAD to remove more silence)
+// Configuration for OFFLINE VAD
 const CONFIG = {
   sampleRate: 16000,
   // Speech detection timing
-  speechStartMs: 80,       // 80ms speech to start (schneller als live)
-  speechStopMs: 600,       // 600ms silence to end segment (strenger - war 1500)
-  // Padding around speech - WICHTIG für erste Worte nach Pause!
-  preRollMs: 600,          // 600ms before speech (erhöht von 200 - erste Worte wurden abgehackt)
-  postRollMs: 400,         // 400ms after speech (erhöht von 200)
+  speechStartMs: 60,       // 60ms speech to start (war 80 - schneller reagieren)
+  speechStopMs: 800,       // 800ms silence to end segment (war 600 - mehr Toleranz)
+  // Padding around speech - KRITISCH für erste Buchstaben!
+  preRollMs: 1200,         // 1200ms before speech (war 800 - noch mehr Puffer für erste Buchstaben)
+  postRollMs: 500,         // 500ms after speech (war 400)
   frameMs: 20,
-  // Silero VAD parameters - höherer Threshold für strengere Erkennung
-  sileroThreshold: 0.5,    // War 0.4 - jetzt strenger
-  minSpeechDuration: 0.15, // War 0.1
+  // Silero VAD parameters - weniger streng für bessere Erkennung
+  sileroThreshold: 0.4,    // War 0.5 - sensitiver für leise Anfänge
+  minSpeechDuration: 0.1,  // War 0.15 - kürzere Sprache erkennen
   maxSpeechDuration: 300,
   // Minimum speech segment duration (ms)
-  minSegmentMs: 400,       // War 300 - kurze Segmente verwerfen
+  minSegmentMs: 300,       // War 400 - kürzere Segmente behalten
   // Merge gap (ms) - segments closer than this will be merged
-  mergeGapMs: 300          // War 500 - weniger aggressive Zusammenführung
+  mergeGapMs: 400          // War 300 - mehr zusammenführen
 };
 
 let sherpa = null;
