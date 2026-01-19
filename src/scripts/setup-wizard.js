@@ -37,6 +37,7 @@ class SetupWizard {
     this.phonePairingPollInterval = null;
     this.isPhoneConnected = false;
     this.isPhoneTesting = false;
+    this.phoneTestWavPath = null; // Path to recorded test audio file
 
     this.init();
   }
@@ -502,6 +503,7 @@ class SetupWizard {
 
     try {
       this.isPhoneTesting = true;
+      this.phoneTestWavPath = null; // Reset path
 
       if (btn) {
         btn.innerHTML = `
@@ -517,57 +519,49 @@ class SetupWizard {
       if (status) status.textContent = 'Aufnahme läuft... Sprechen Sie ins Handy (10 Sek.)';
       if (playbackDiv) playbackDiv.style.display = 'none';
 
-      // Start test recording via IPC (iPhone audio test)
-      const startResult = await ipcRenderer.invoke('iphone-audio-test');
-
-      if (!startResult.success) {
-        throw new Error(startResult.error || 'Test konnte nicht gestartet werden');
-      }
-
-      // Animate level bar during recording
+      // Start level animation BEFORE the blocking call
       this.animatePhoneLevel();
 
-      // Auto-stop after 10 seconds
-      setTimeout(async () => {
-        if (this.isPhoneTesting) {
-          await this.stopPhoneTest();
-        }
-      }, 10000);
+      // This call blocks for 10 seconds while recording
+      const result = await ipcRenderer.invoke('iphone-audio-test');
+
+      // Recording finished
+      this.isPhoneTesting = false;
+
+      if (!result.success) {
+        throw new Error(result.error || 'Test konnte nicht gestartet werden');
+      }
+
+      // Store the wav path for playback
+      this.phoneTestWavPath = result.wavPath;
+      console.log('[Phone Test] Recording saved to:', this.phoneTestWavPath);
+
+      // Update UI to show completion
+      if (btn) {
+        btn.innerHTML = `
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          </svg>
+          Test starten (10 Sek.)
+        `;
+        btn.disabled = false;
+      }
+
+      if (levelBar) levelBar.style.width = '0%';
+
+      if (status) {
+        status.textContent = 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen';
+        status.className = 'wizard-mic-status success';
+      }
+      if (playbackDiv) playbackDiv.style.display = 'flex';
 
     } catch (error) {
       console.error('Phone test error:', error);
+      this.isPhoneTesting = false;
       if (status) status.textContent = 'Fehler: ' + error.message;
       this.resetPhoneTestUI();
     }
-  }
-
-  async stopPhoneTest() {
-    this.isPhoneTesting = false;
-
-    const btn = document.getElementById('wizardPhoneTestBtn');
-    const levelBar = document.getElementById('wizardPhoneLevelBar');
-    const status = document.getElementById('wizardPhoneStatus');
-    const playbackDiv = document.getElementById('wizardPhonePlayback');
-
-    if (btn) {
-      btn.innerHTML = `
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
-          <circle cx="12" cy="12" r="10"/>
-          <circle cx="12" cy="12" r="3" fill="currentColor"/>
-        </svg>
-        Test starten (10 Sek.)
-      `;
-      btn.disabled = false;
-    }
-
-    if (levelBar) levelBar.style.width = '0%';
-
-    // Show success and playback button
-    if (status) {
-      status.textContent = 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen';
-      status.className = 'wizard-mic-status success';
-    }
-    if (playbackDiv) playbackDiv.style.display = 'flex';
   }
 
   resetPhoneTestUI() {
@@ -593,7 +587,7 @@ class SetupWizard {
     const levelBar = document.getElementById('wizardPhoneLevelBar');
     if (!levelBar || !this.isPhoneTesting) return;
 
-    // Simulate audio levels (in production, this would come from phone relay IPC events)
+    // Simulate audio levels during recording
     const level = 20 + Math.random() * 60;
     levelBar.style.width = level + '%';
 
@@ -620,6 +614,11 @@ class SetupWizard {
       return;
     }
 
+    if (!this.phoneTestWavPath) {
+      if (status) status.textContent = 'Keine Testaufnahme vorhanden';
+      return;
+    }
+
     try {
       if (btn) btn.innerHTML = `
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
@@ -629,23 +628,22 @@ class SetupWizard {
         Stoppen
       `;
 
-      const result = await ipcRenderer.invoke('iphone-play-test-audio');
+      // Pass the saved wav path to playback handler
+      const result = await ipcRenderer.invoke('iphone-play-test-audio', this.phoneTestWavPath);
       if (!result.success) {
-        throw new Error(result.error || 'Keine Testaufnahme vorhanden');
+        throw new Error(result.error || 'Wiedergabe fehlgeschlagen');
       }
 
-      if (audio) {
-        audio.src = `data:${result.mimeType || 'audio/wav'};base64,${result.data}`;
-        audio.onended = () => {
-          if (btn) btn.innerHTML = `
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
-              <polygon points="5,3 19,12 5,21"/>
-            </svg>
-            Aufnahme anhören
-          `;
-        };
-        await audio.play();
-      }
+      // Reset button after a delay (file opens in external player)
+      setTimeout(() => {
+        if (btn) btn.innerHTML = `
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
+            <polygon points="5,3 19,12 5,21"/>
+          </svg>
+          Aufnahme anhören
+        `;
+      }, 1000);
+
     } catch (error) {
       console.error('Phone playback error:', error);
       if (status) status.textContent = 'Wiedergabe-Fehler: ' + error.message;
