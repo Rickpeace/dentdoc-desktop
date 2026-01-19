@@ -48,6 +48,9 @@ class SetupWizard {
     // Always bind events so keyboard shortcuts work
     this.bindEvents();
 
+    // Setup IPC listeners for real-time data
+    this.setupPhoneLevelListener();
+
     // Check if wizard should be shown
     const shouldShow = await ipcRenderer.invoke('check-first-run', 'setup-wizard');
 
@@ -534,8 +537,7 @@ class SetupWizard {
       if (playbackDiv) playbackDiv.style.display = 'none';
       if (levelBar) levelBar.style.width = '0%';
 
-      // Start level animation and countdown
-      this.animatePhoneLevel();
+      // Start countdown timer
       this.startPhoneCountdown();
 
       // This call blocks for 10 seconds while recording
@@ -628,17 +630,19 @@ class SetupWizard {
     }, 1000);
   }
 
-  animatePhoneLevel() {
-    const levelBar = document.getElementById('wizardPhoneLevelBar');
-    if (!levelBar || !this.isPhoneTesting) return;
+  setupPhoneLevelListener() {
+    // Listen for real audio levels from the iPhone test
+    ipcRenderer.on('iphone-test-level', (event, level) => {
+      if (!this.isPhoneTesting) return;
 
-    // Simulate audio levels during recording
-    const level = 20 + Math.random() * 60;
-    levelBar.style.width = level + '%';
-
-    if (this.isPhoneTesting) {
-      requestAnimationFrame(() => setTimeout(() => this.animatePhoneLevel(), 100));
-    }
+      const levelBar = document.getElementById('wizardPhoneLevelBar');
+      if (levelBar) {
+        // Same scaling as in dashboard.js for consistency
+        const scaled = Math.sqrt(level * 5000) * 10;
+        const percent = Math.min(100, Math.max(3, scaled));
+        levelBar.style.width = `${percent}%`;
+      }
+    });
   }
 
   async playPhoneTest() {
