@@ -1492,29 +1492,31 @@
   }
 }
 
-/* Phone Test Container - inline with button, level bar, and timer */
+/* Phone Test Container */
 .wizard-phone-test-container {
   display: flex;
-  align-items: center;
-  gap: 0;
+  flex-direction: column;
+  gap: var(--space-3);
   margin-bottom: var(--space-4);
 }
 
+.wizard-phone-test-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .wizard-phone-test-container .wizard-btn {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
   flex-shrink: 0;
+  min-width: 140px;
 }
 
 .wizard-phone-level-bar-container {
   flex: 1;
-  height: 42px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border-default);
-  border-left: none;
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-2);
+  height: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-full);
+  overflow: hidden;
 }
 
 [data-theme="light"] .wizard-phone-level-bar-container {
@@ -1522,9 +1524,8 @@
 }
 
 .wizard-phone-level-bar {
-  height: 12px;
+  height: 100%;
   width: 100%;
-  background: rgba(0, 0, 0, 0.2);
   border-radius: var(--radius-full);
   overflow: hidden;
 }
@@ -1532,30 +1533,19 @@
 .wizard-phone-level-bar-fill {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, var(--success-500), var(--primary-500), var(--error-500));
+  background: linear-gradient(90deg, var(--success-500), var(--primary-500));
   border-radius: var(--radius-full);
   transition: width 0.1s;
 }
 
 .wizard-phone-timer {
-  height: 42px;
-  min-width: 50px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
-  border-left: none;
-  border-top-right-radius: var(--radius-lg);
-  border-bottom-right-radius: var(--radius-lg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.wizard-phone-timer span {
+  flex-shrink: 0;
+  min-width: 40px;
+  font-size: 1.125rem;
+  font-weight: 700;
   color: var(--primary-500);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 /* Recording state */

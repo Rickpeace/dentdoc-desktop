@@ -517,8 +517,8 @@ class SetupWizard {
     const container = document.querySelector('.wizard-phone-test-container');
     const btn = document.getElementById('wizardPhoneTestBtn');
     const btnText = document.getElementById('wizardPhoneTestBtnText');
+    const testRow = document.getElementById('wizardPhoneTestRow');
     const levelBar = document.getElementById('wizardPhoneLevelBar');
-    const timer = document.getElementById('wizardPhoneTimer');
     const timerText = document.getElementById('wizardPhoneTimerText');
     const status = document.getElementById('wizardPhoneStatus');
     const playbackDiv = document.getElementById('wizardPhonePlayback');
@@ -531,7 +531,7 @@ class SetupWizard {
       // Update UI for recording state
       if (container) container.classList.add('recording');
       if (btnText) btnText.textContent = 'Stoppen';
-      if (timer) timer.style.display = 'flex';
+      if (testRow) testRow.style.display = 'flex';
       if (timerText) timerText.textContent = '10';
       if (status) status.textContent = 'Sprechen Sie jetzt ins Handy...';
       if (playbackDiv) playbackDiv.style.display = 'none';
@@ -553,7 +553,7 @@ class SetupWizard {
       // Reset UI
       if (container) container.classList.remove('recording');
       if (btnText) btnText.textContent = 'Test starten';
-      if (timer) timer.style.display = 'none';
+      if (testRow) testRow.style.display = 'none';
       if (levelBar) levelBar.style.width = '0%';
 
       if (!result.success) {
@@ -606,13 +606,13 @@ class SetupWizard {
 
     const container = document.querySelector('.wizard-phone-test-container');
     const btnText = document.getElementById('wizardPhoneTestBtnText');
+    const testRow = document.getElementById('wizardPhoneTestRow');
     const levelBar = document.getElementById('wizardPhoneLevelBar');
-    const timer = document.getElementById('wizardPhoneTimer');
 
     if (container) container.classList.remove('recording');
     if (btnText) btnText.textContent = 'Test starten';
+    if (testRow) testRow.style.display = 'none';
     if (levelBar) levelBar.style.width = '0%';
-    if (timer) timer.style.display = 'none';
   }
 
   startPhoneCountdown() {
