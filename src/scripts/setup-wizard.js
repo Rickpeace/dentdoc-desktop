@@ -300,21 +300,29 @@ class SetupWizard {
     const nextBtn = document.getElementById('wizardNextBtn');
     const backBtn = document.getElementById('wizardBackBtn');
 
-    if (this.currentStep !== 1) return; // Only affect step 1
+    // Reset navigation buttons to default visible state when not on step 1
+    if (this.currentStep !== 1) {
+      if (nextBtn) {
+        nextBtn.disabled = false;
+        nextBtn.style.opacity = '1';
+        nextBtn.style.pointerEvents = 'auto';
+        nextBtn.style.display = 'flex';
+      }
+      if (backBtn) backBtn.style.display = 'flex';
+      return;
+    }
 
-    // Disable next button on question states (must make a choice)
+    // Step 1: Disable next button on question states (must make a choice)
     if (this.micWizardState === 'initial_question' ||
         this.micWizardState === 'phone_question' ||
-        this.micWizardState === 'phone_pairing') {
+        this.micWizardState === 'phone_pairing' ||
+        this.micWizardState === 'no_mic') {
+      // Hide navigation on these screens (user makes choice via substep buttons)
       if (nextBtn) {
         nextBtn.disabled = true;
         nextBtn.style.opacity = '0.5';
         nextBtn.style.pointerEvents = 'none';
       }
-    } else if (this.micWizardState === 'no_mic') {
-      // Hide navigation on no-mic screen (they need to close or go back)
-      if (nextBtn) nextBtn.style.display = 'none';
-      if (backBtn) backBtn.style.display = 'none';
     } else {
       // Enable navigation for has_mic and phone_test states
       if (nextBtn) {
@@ -1226,6 +1234,7 @@ class SetupWizard {
     this.currentStep = index;
     this.updateProgress();
     this.updateNavigation();
+    this.updateMicNavigation(); // Reset mic-specific navigation state
     this.updateSummary();
 
     // Load existing voice profiles when showing step 6
