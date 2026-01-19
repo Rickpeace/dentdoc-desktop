@@ -1578,7 +1578,7 @@ async function startRecordingWithIphone() {
           if (iphoneRelayWs && iphoneRelayWs.readyState === WebSocket.OPEN) {
             iphoneRelayWs.send(JSON.stringify({ type: 'PING' }));
           }
-        }, 10000); // Every 10 seconds
+        }, 5000); // Every 5 seconds (iOS Safari needs frequent keepalive)
       });
 
       iphoneRelayWs.on('message', (data) => {
