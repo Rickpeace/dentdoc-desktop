@@ -1039,6 +1039,7 @@ class SetupWizard {
     const status = document.getElementById('wizardMicStatus');
     const playbackDiv = document.getElementById('wizardMicPlayback');
 
+    const wasRecording = this.isTesting;
     this.isTesting = false;
 
     // Stop audio monitoring (local getUserMedia stream)
@@ -1059,6 +1060,11 @@ class SetupWizard {
 
     if (levelBar) {
       levelBar.style.width = '0%';
+    }
+
+    // Only call stop-mic-test if we were actually recording
+    if (!wasRecording) {
+      return;
     }
 
     try {

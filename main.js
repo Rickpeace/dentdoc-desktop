@@ -3178,6 +3178,13 @@ ipcMain.handle('iphone-get-status', async () => {
   }
 });
 
+// Cancel iPhone pairing (used when user navigates away from pairing screen)
+ipcMain.handle('iphone-cancel-pair', async () => {
+  console.log('[iPhone] Cancelling pairing process...');
+  // Nothing to do on backend - the pairing ID will just expire
+  return { success: true };
+});
+
 // Unpair iPhone
 ipcMain.handle('iphone-unpair', async () => {
   console.log('[iPhone] Unpairing device...');
