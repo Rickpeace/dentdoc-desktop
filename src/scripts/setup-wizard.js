@@ -290,6 +290,7 @@ class SetupWizard {
   updateMicNavigation() {
     const nextBtn = document.getElementById('wizardNextBtn');
     const backBtn = document.getElementById('wizardBackBtn');
+    const skipBtn = document.getElementById('wizardSkipBtn');
 
     // Only handle step 1 - let updateNavigation() handle other steps
     if (this.currentStep !== 1) {
@@ -305,8 +306,7 @@ class SetupWizard {
 
     // Step 1: Disable next button on question states (must make a choice)
     if (this.micWizardState === 'initial_question' ||
-        this.micWizardState === 'phone_question' ||
-        this.micWizardState === 'phone_pairing') {
+        this.micWizardState === 'phone_question') {
       // Disable navigation on these screens (user makes choice via substep buttons)
       if (nextBtn) {
         nextBtn.disabled = true;
@@ -314,6 +314,16 @@ class SetupWizard {
         nextBtn.style.pointerEvents = 'none';
         nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
       }
+      if (skipBtn) skipBtn.style.display = 'none';
+    } else if (this.micWizardState === 'phone_pairing') {
+      // Phone pairing - show skip button so user can skip if pairing doesn't work
+      if (nextBtn) {
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = '0.5';
+        nextBtn.style.pointerEvents = 'none';
+        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
+      }
+      if (skipBtn) skipBtn.style.display = 'block';
     } else if (this.micWizardState === 'no_mic') {
       // No mic - enable buttons, change text to "Trotzdem fortfahren"
       if (nextBtn) {
@@ -324,6 +334,7 @@ class SetupWizard {
         nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Trotzdem fortfahren';
       }
       if (backBtn) backBtn.style.display = 'flex';
+      if (skipBtn) skipBtn.style.display = 'none';
     } else {
       // Enable navigation for has_mic and phone_test states
       if (nextBtn) {
@@ -334,6 +345,7 @@ class SetupWizard {
         nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
       }
       if (backBtn) backBtn.style.display = 'flex';
+      if (skipBtn) skipBtn.style.display = 'none';
     }
   }
 
