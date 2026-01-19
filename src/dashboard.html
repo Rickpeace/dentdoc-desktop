@@ -1847,12 +1847,28 @@
               </svg>
             </div>
             <h2>Kein Mikrofon vorhanden</h2>
-            <p>Für DentDoc benötigen Sie ein Mikrofon. Hier ist unsere Empfehlung.</p>
+            <p>Sie können trotzdem fortfahren oder sich ein Mikrofon besorgen.</p>
           </div>
 
           <div class="wizard-card">
+            <!-- Audio Upload Info -->
+            <div class="wizard-tip-card" style="margin: 0 0 var(--space-5) 0;">
+              <div class="wizard-tip-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </div>
+              <div class="wizard-tip-content">
+                <h4>Audio-Dateien hochladen</h4>
+                <p>Sie können auch ohne Mikrofon arbeiten! <strong>Rechtsklick</strong> auf das DentDoc-Icon im System Tray ermöglicht das Hochladen von Audio-Dateien zur Transkription.</p>
+              </div>
+            </div>
+
+            <!-- Product Recommendation -->
             <div class="wizard-product-recommendation">
-              <div class="wizard-product-badge">Unsere Empfehlung</div>
+              <div class="wizard-product-badge">Empfehlung für später</div>
               <div class="wizard-product-content">
                 <div class="wizard-product-image">
                   <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -1864,11 +1880,11 @@
                 </div>
                 <div class="wizard-product-info">
                   <h3>Beyerdynamic SPACE</h3>
-                  <p class="wizard-product-desc">Hochwertiges USB-Konferenzmikrofon mit exzellenter Sprachqualität. Ideal für medizinische Dokumentation.</p>
+                  <p class="wizard-product-desc">Hochwertiges USB-Konferenzmikrofon. Ideal für medizinische Dokumentation.</p>
                   <div class="wizard-product-features">
-                    <span class="wizard-product-feature">USB-Anschluss</span>
+                    <span class="wizard-product-feature">USB</span>
                     <span class="wizard-product-feature">Plug & Play</span>
-                    <span class="wizard-product-feature">Premium-Audio</span>
+                    <span class="wizard-product-feature">Premium</span>
                   </div>
                 </div>
               </div>
@@ -1879,7 +1895,7 @@
                     <polyline points="15 3 21 3 21 9"/>
                     <line x1="10" y1="14" x2="21" y2="3"/>
                   </svg>
-                  Bei Amazon suchen
+                  Amazon
                 </a>
                 <a href="https://www.thomann.de/de/search_dir.html?sw=beyerdynamic%20space" target="_blank" rel="noopener" class="wizard-btn wizard-btn-secondary">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
@@ -1887,41 +1903,24 @@
                     <polyline points="15 3 21 3 21 9"/>
                     <line x1="10" y1="14" x2="21" y2="3"/>
                   </svg>
-                  Bei Thomann suchen
+                  Thomann
                 </a>
               </div>
             </div>
           </div>
 
-          <div class="wizard-info">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 16v-4M12 8h.01"/>
-            </svg>
-            <p><strong>Bitte starten Sie den Einrichtungsassistenten neu, sobald Sie ein Mikrofon haben.</strong></p>
-          </div>
-
-          <div class="wizard-tip-card">
-            <div class="wizard-tip-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-              </svg>
-            </div>
-            <div class="wizard-tip-content">
-              <h4>TIPP: Audio-Dateien hochladen</h4>
-              <p>Sie können auch ohne Mikrofon arbeiten! Klicken Sie mit der <strong>rechten Maustaste</strong> auf das DentDoc-Icon im System Tray - dort können Sie bestehende Audio-Dateien hochladen und transkribieren lassen.</p>
-            </div>
-          </div>
-
           <div class="wizard-no-mic-actions">
-            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardNoMicClose">
-              Assistent schließen
+            <button type="button" class="wizard-btn wizard-btn-primary" id="wizardNoMicContinue">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              Trotzdem fortfahren
             </button>
             <button type="button" class="wizard-back-link" id="wizardNoMicBack">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="15 18 9 12 15 6"/>
               </svg>
-              Zurück zur Auswahl
+              Zurück
             </button>
           </div>
         </div>

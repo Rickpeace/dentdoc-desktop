@@ -249,9 +249,12 @@ class SetupWizard {
       this.setMicWizardState('phone_question');
     });
 
-    // No mic close button
-    document.getElementById('wizardNoMicClose')?.addEventListener('click', () => {
-      this.closeWizardIncomplete();
+    // No mic - continue anyway button
+    document.getElementById('wizardNoMicContinue')?.addEventListener('click', () => {
+      // User wants to continue without microphone - proceed to next step
+      this.settings.microphoneSource = 'none';
+      this.settings.microphoneId = null;
+      this.nextStep();
     });
 
     // Phone test buttons
@@ -1349,6 +1352,33 @@ class SetupWizard {
   }
 
   prevStep() {
+    // Special handling for Step 1 (Microphone) with substeps
+    if (this.currentStep === 1) {
+      // Navigate back within mic substeps first
+      switch (this.micWizardState) {
+        case 'has_mic':
+          this.stopMicTest();
+          this.setMicWizardState('initial_question');
+          return;
+        case 'phone_question':
+          this.setMicWizardState('initial_question');
+          return;
+        case 'phone_pairing':
+          this.cancelPhonePairing();
+          this.setMicWizardState('phone_question');
+          return;
+        case 'phone_test':
+          this.setMicWizardState('phone_pairing');
+          return;
+        case 'no_mic':
+          this.setMicWizardState('phone_question');
+          return;
+        case 'initial_question':
+          // At the start of mic substeps, go to previous wizard step
+          break;
+      }
+    }
+
     if (this.currentStep > 0) {
       this.showStep(this.currentStep - 1);
     }
