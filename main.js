@@ -395,7 +395,7 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {Object} options.shortenings - Shortenings from v1.2 hybrid mode
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -521,6 +521,30 @@ ${transcript}
     if (saveTranscript) {
       const transcriptPath = path.join(folderPath, `${baseFilename}.txt`);
       fs.writeFileSync(transcriptPath, content, 'utf8');
+
+      // Save JSON metadata for dashboard transcript browser
+      if (utterances && utterances.length > 0) {
+        const jsonMetadata = {
+          jobId: jobId,
+          createdAt: now.toISOString(),
+          duration: utterances.length > 0 ? utterances[utterances.length - 1].end : 0,
+          speakers: [...new Set(Object.values(speakerMapping || {}).filter(s => s))],
+          utterances: utterances.map(u => ({
+            speaker: speakerMapping && speakerMapping[u.speaker] ? speakerMapping[u.speaker] : u.speaker,
+            start: u.start,
+            end: u.end,
+            text: u.text
+          })),
+          words: words || null, // Word-level timestamps for precise audio navigation
+          summary: summary,
+          shortenings: shortenings || null,
+          topicSegments: topicSegments || null, // KI-extracted topic segments for audio navigation
+          passages: passages || null, // Semantic audio passages (15-40 sec thematic clips)
+          docLinks: docLinks || null // Links from documentation text to audio passages
+        };
+        const jsonPath = path.join(folderPath, `${baseFilename}.json`);
+        fs.writeFileSync(jsonPath, JSON.stringify(jsonMetadata, null, 2), 'utf8');
+      }
     }
 
     // Save audio if enabled and source exists
@@ -937,6 +961,13 @@ async function processAudioFile(audioFilePath, options = {}) {
       ? JSON.parse(transcriptionResult.utterances)
       : transcriptionResult.utterances;
 
+    // Handle words (word-level timestamps from AssemblyAI)
+    const words = transcriptionResult.words
+      ? (typeof transcriptionResult.words === 'string'
+        ? JSON.parse(transcriptionResult.words)
+        : transcriptionResult.words)
+      : null;
+
     // Check if speech was detected
     if (!utterances || utterances.length === 0) {
       throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
@@ -1030,6 +1061,10 @@ async function processAudioFile(audioFilePath, options = {}) {
       // Megaprompt: 7-Step Pipeline mit paralleler Extraktion
       updateStatusOverlay('Dokumentation wird erstellt...', 'Megaprompt-Pipeline verarbeitet (7 Schritte)...', 'processing', { step: 4 });
       result = await apiClient.getDocumentationMegaprompt(transcriptionId, token);
+    } else if (docMode === 'agent-v2') {
+      // Agent V2: 2-stufige Pipeline mit GPT-4.1 Thinking
+      updateStatusOverlay('Dokumentation...', 'Agent V2: Rekonstruktion + Dokumentation...', 'processing', { step: 4 });
+      result = await apiClient.getDocumentationAgentV2(transcriptionId, token);
     } else {
       // Single Prompt: Use standard endpoint
       updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
@@ -1049,6 +1084,69 @@ async function processAudioFile(audioFilePath, options = {}) {
     // Copy to clipboard
     clipboard.writeText(documentation);
 
+    // Show success immediately - user can already paste the documentation
+    const autoClose = store.get('autoCloseOverlay', false);
+    updateStatusOverlay(
+      'Fertig!',
+      'Dokumentation in Zwischenablage kopiert (Strg+V)',
+      'success',
+      { documentation, transcript: finalTranscript, shortenings, autoClose }
+    );
+
+    // Reset processing state immediately so user knows it's done
+    isProcessing = false;
+    updateTrayMenu();
+
+    // Reset tray icon
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+
+    // === BACKGROUND TASKS (don't block success display) ===
+    // These run async and don't affect the user's immediate experience
+
+    // Extract topic segments using AI (for clickable audio navigation in dashboard)
+    let topicSegments = null;
+    if (words && words.length > 0) {
+      try {
+        debugLog('Extracting topic segments from transcript...');
+        const topicResult = await apiClient.extractTopicSegments(token, transcript, words);
+        topicSegments = topicResult.topics || null;
+        debugLog(`Topic segments extracted: ${topicSegments ? topicSegments.length : 0}`);
+      } catch (topicError) {
+        console.error('Topic extraction failed (non-critical):', topicError);
+        debugLog('Topic extraction failed: ' + topicError.message);
+        // Continue without topic segments - this is a nice-to-have feature
+      }
+    }
+
+    // NEUER ANSATZ: Passagen-basiertes Matching
+    // 1. Segmentiere Transkript in semantische Audio-Passagen (15-40 Sek. pro Thema)
+    // 2. Verknüpfe Dokumentations-Abschnitte mit diesen Passagen
+    let passages = null;
+    let docLinks = null;
+    if (words && words.length > 0 && documentation) {
+      try {
+        // Step 1: Segment transcript into thematic passages
+        debugLog('Segmenting transcript into semantic passages...');
+        const passageResult = await apiClient.segmentPassages(token, transcript, words);
+        passages = passageResult.passages || [];
+        debugLog(`Passages created: ${passages.length}`);
+
+        // Step 2: Match documentation sections to passages
+        if (passages.length > 0) {
+          debugLog('Matching documentation to audio passages...');
+          const matchResult = await apiClient.matchDocToAudio(token, documentation, passages);
+          docLinks = matchResult.links || null;
+          debugLog(`Doc links found: ${docLinks ? docLinks.length : 0}`);
+        }
+      } catch (matchError) {
+        console.error('Passage segmentation/matching failed (non-critical):', matchError);
+        debugLog('Passage matching failed: ' + matchError.message);
+        // Continue without links - this is a nice-to-have feature
+      }
+    }
+
     // Auto-save transcript and/or audio if enabled
     const autoExport = store.get('autoExport', true);
     const keepAudio = store.get('keepAudio', false);
@@ -1062,15 +1160,17 @@ async function processAudioFile(audioFilePath, options = {}) {
           tempAudioPath: currentRecordingPath,
           saveTranscript: autoExport,
           saveAudio: keepAudio,
-          shortenings: shortenings
+          shortenings: shortenings,
+          utterances: utterances,
+          words: words,
+          topicSegments: topicSegments,
+          passages: passages,
+          docLinks: docLinks
         });
       } catch (error) {
         console.error('Failed to save recording files:', error);
       }
     }
-
-    isProcessing = false;
-    updateTrayMenu();
 
     // Increment today's recording count
     const todayStart = new Date();
@@ -1082,19 +1182,6 @@ async function processAudioFile(audioFilePath, options = {}) {
     } else {
       store.set('todayRecordings', { date: todayStr, count: 1 });
     }
-
-    // Reset tray icon
-    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-    tray.setImage(iconPath);
-    tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
-
-    const autoClose = store.get('autoCloseOverlay', false);
-    updateStatusOverlay(
-      'Fertig!',
-      'Dokumentation in Zwischenablage kopiert (Strg+V)',
-      'success',
-      { documentation, transcript: finalTranscript, shortenings, autoClose }
-    );
 
     // Update user minutes
     try {
@@ -1286,11 +1373,19 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       ? JSON.parse(transcriptionResult.utterances)
       : transcriptionResult.utterances;
 
+    // Handle words (word-level timestamps from AssemblyAI)
+    const words = transcriptionResult.words
+      ? (typeof transcriptionResult.words === 'string'
+        ? JSON.parse(transcriptionResult.words)
+        : transcriptionResult.words)
+      : null;
+
     if (!utterances || utterances.length === 0) {
       throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
     }
 
     console.log(`  Utterances: ${utterances.length}`);
+    console.log(`  Words: ${words ? words.length : 0}`);
     console.log('');
 
     // Speaker recognition
@@ -1330,6 +1425,8 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       docResponse = await apiClient.getDocumentationV1_1(transcriptionId, token);
     } else if (docMode === 'megaprompt') {
       docResponse = await apiClient.getDocumentationMegaprompt(transcriptionId, token);
+    } else if (docMode === 'agent-v2') {
+      docResponse = await apiClient.getDocumentationAgentV2(transcriptionId, token);
     } else {
       docResponse = await apiClient.getDocumentation(transcriptionId, token);
     }
@@ -1346,6 +1443,44 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
     // Copy to clipboard
     clipboard.writeText(documentation);
+
+    // Extract topic segments using AI (for clickable audio navigation in dashboard)
+    let topicSegments = null;
+    if (words && words.length > 0) {
+      try {
+        console.log('  Extrahiere Themen-Segmente...');
+        const topicResult = await apiClient.extractTopicSegments(token, transcript, words);
+        topicSegments = topicResult.topics || null;
+        console.log(`  Themen-Segmente: ${topicSegments ? topicSegments.length : 0}`);
+      } catch (topicError) {
+        console.log('  [!] Themen-Extraktion fehlgeschlagen (nicht kritisch):', topicError.message);
+        // Continue without topic segments
+      }
+    }
+
+    // NEUER ANSATZ: Passagen-basiertes Matching
+    let passages = null;
+    let docLinks = null;
+    if (words && words.length > 0 && documentation) {
+      try {
+        // Step 1: Segment transcript into thematic passages
+        console.log('  Segmentiere Transkript in Passagen...');
+        const passageResult = await apiClient.segmentPassages(token, transcript, words);
+        passages = passageResult.passages || [];
+        console.log(`  Passagen erstellt: ${passages.length}`);
+
+        // Step 2: Match documentation sections to passages
+        if (passages.length > 0) {
+          console.log('  Matche Dokumentation mit Passagen...');
+          const matchResult = await apiClient.matchDocToAudio(token, documentation, passages);
+          docLinks = matchResult.links || null;
+          console.log(`  Doc-Links gefunden: ${docLinks ? docLinks.length : 0}`);
+        }
+      } catch (matchError) {
+        console.log('  [!] Passagen-Matching fehlgeschlagen (nicht kritisch):', matchError.message);
+        // Continue without links
+      }
+    }
 
     // Auto-save if enabled
     const autoExport = store.get('autoExport', true);
@@ -1364,7 +1499,12 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
           originalAudioPath: audioFilePath,  // Original before VAD
           saveTranscript: autoExport,
           saveAudio: keepAudio,
-          shortenings: shortenings
+          shortenings: shortenings,
+          utterances: utterances,
+          words: words,
+          topicSegments: topicSegments,
+          passages: passages,
+          docLinks: docLinks
         });
       } catch (error) {
         console.log('  [!] Fehler beim Speichern:', error.message);
@@ -2494,6 +2634,130 @@ ipcMain.handle('get-dashboard-stats', () => {
     profileCount,
     bausteineCount
   };
+});
+
+// Get all transcripts for dashboard transcript browser
+ipcMain.handle('get-all-transcripts', async () => {
+  try {
+    const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
+    const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
+
+    if (!fs.existsSync(transcriptPath)) {
+      return { success: true, transcripts: [] };
+    }
+
+    const transcripts = [];
+
+    // Recursively find all .json files in transcript folder
+    const findJsonFiles = (dir) => {
+      const items = fs.readdirSync(dir, { withFileTypes: true });
+      for (const item of items) {
+        const fullPath = path.join(dir, item.name);
+        if (item.isDirectory()) {
+          findJsonFiles(fullPath);
+        } else if (item.name.endsWith('.json')) {
+          try {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            const metadata = JSON.parse(content);
+            // Add file path for later retrieval
+            metadata.filePath = fullPath;
+            metadata.folderName = path.basename(path.dirname(fullPath));
+            // Check if audio file exists (try multiple extensions)
+            const basePath = fullPath.replace('.json', '');
+            const audioExtensions = ['.wav', '.webm', '.mp3', '.m4a', '.ogg'];
+            metadata.hasAudio = audioExtensions.some(ext => fs.existsSync(basePath + ext));
+            transcripts.push(metadata);
+          } catch (err) {
+            console.error(`Failed to parse JSON: ${fullPath}`, err.message);
+          }
+        }
+      }
+    };
+
+    findJsonFiles(transcriptPath);
+
+    // Sort by date, newest first
+    transcripts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    return { success: true, transcripts };
+  } catch (error) {
+    console.error('get-all-transcripts error:', error);
+    return { success: false, error: error.message, transcripts: [] };
+  }
+});
+
+// Get single transcript detail with audio path
+ipcMain.handle('get-transcript-detail', async (event, filePath) => {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: 'Datei nicht gefunden' };
+    }
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    const metadata = JSON.parse(content);
+
+    // Get audio file path - try multiple extensions
+    const basePath = filePath.replace('.json', '');
+    const audioExtensions = ['.wav', '.webm', '.mp3', '.m4a', '.ogg'];
+    let audioPath = null;
+
+    for (const ext of audioExtensions) {
+      const testPath = basePath + ext;
+      if (fs.existsSync(testPath)) {
+        audioPath = testPath;
+        break;
+      }
+    }
+    metadata.audioPath = audioPath;
+
+    // Also check for speech_only audio
+    let speechOnlyPath = null;
+    for (const ext of audioExtensions) {
+      const testPath = basePath + '_speech_only' + ext;
+      if (fs.existsSync(testPath)) {
+        speechOnlyPath = testPath;
+        break;
+      }
+    }
+    metadata.speechOnlyPath = speechOnlyPath;
+
+    console.log('[get-transcript-detail] Audio paths:', { audioPath, speechOnlyPath });
+
+    return { success: true, transcript: metadata };
+  } catch (error) {
+    console.error('get-transcript-detail error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get audio file as base64 for playback in renderer
+ipcMain.handle('get-transcript-audio', async (event, audioPath) => {
+  try {
+    if (!audioPath || !fs.existsSync(audioPath)) {
+      return { success: false, error: 'Audio-Datei nicht gefunden' };
+    }
+
+    const audioBuffer = fs.readFileSync(audioPath);
+    const base64 = audioBuffer.toString('base64');
+
+    // Determine MIME type from extension
+    const ext = path.extname(audioPath).toLowerCase();
+    const mimeTypes = {
+      '.wav': 'audio/wav',
+      '.webm': 'audio/webm',
+      '.mp3': 'audio/mpeg',
+      '.m4a': 'audio/mp4',
+      '.ogg': 'audio/ogg'
+    };
+    const mimeType = mimeTypes[ext] || 'audio/wav';
+
+    console.log('[get-transcript-audio] Loading:', audioPath, 'MIME:', mimeType);
+
+    return { success: true, data: base64, mimeType };
+  } catch (error) {
+    console.error('get-transcript-audio error:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('increment-recording-count', () => {

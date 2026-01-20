@@ -2145,6 +2145,62 @@ kbd {
   justify-content: flex-end;
 }
 
+/* Modal Header with Close Button */
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.modal-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.modal-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.modal-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+.modal-body {
+  padding: var(--space-5);
+}
+
+/* Modal Content (box inside overlay) */
+.modal-content {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  width: 90%;
+  max-width: 700px;
+  animation: slideUp 0.3s ease-out;
+  overflow: hidden;
+}
+
 /* Move dropdown */
 .move-dropdown {
   position: fixed;
@@ -3979,5 +4035,655 @@ kbd {
 .btn-sm {
   padding: var(--space-2) var(--space-3);
   font-size: 0.8125rem;
+}
+
+/* ===========================================
+   Transcripts View
+   =========================================== */
+
+.transcripts-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding: 0 var(--space-2);
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+  flex: 1;
+  max-width: 400px;
+}
+
+.search-box svg {
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.search-box input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  width: 100%;
+}
+
+.search-box input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.transcripts-count {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.transcripts-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  max-height: calc(100vh - 280px);
+  padding: var(--space-2);
+}
+
+.transcripts-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-12);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.transcripts-empty svg {
+  width: 64px;
+  height: 64px;
+  margin-bottom: var(--space-4);
+  opacity: 0.5;
+}
+
+.transcripts-empty p {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.transcripts-empty span {
+  font-size: 0.875rem;
+}
+
+/* Transcript Card */
+.transcript-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.transcript-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-tertiary);
+  transform: translateY(-1px);
+}
+
+.transcript-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.transcript-card-date {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.transcript-card-speakers {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.transcript-card-audio-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.75rem;
+  color: var(--color-success);
+  background: rgba(34, 197, 94, 0.1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+}
+
+.transcript-card-audio-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.transcript-card-summary {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+}
+
+.transcript-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.transcript-tag {
+  font-size: 0.75rem;
+  color: var(--color-primary);
+  background: rgba(249, 115, 22, 0.1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+}
+
+/* Transcript Modal */
+.transcript-modal {
+  max-width: 800px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript-modal-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.transcript-section {
+  margin-bottom: var(--space-6);
+}
+
+.transcript-section h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.transcript-summary {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.transcript-utterances {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.utterance {
+  padding: var(--space-3);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-primary);
+}
+
+.utterance-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.utterance-time {
+  font-size: 0.75rem;
+  color: var(--color-primary);
+  background: rgba(249, 115, 22, 0.1);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.utterance-time:hover {
+  background: rgba(249, 115, 22, 0.2);
+}
+
+.utterance-speaker {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.utterance-text {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.utterance-text .keyword {
+  color: var(--color-primary);
+  background: rgba(249, 115, 22, 0.1);
+  padding: 0 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.utterance-text .keyword:hover {
+  background: rgba(249, 115, 22, 0.25);
+}
+
+/* Audio Player - Clean minimal design */
+.transcript-audio-player {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border-default);
+}
+
+.audio-play-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: transparent;
+  border: 2px solid var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  color: var(--color-primary);
+}
+
+.audio-play-btn:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
+.audio-play-btn.playing {
+  background: var(--color-primary);
+  color: white;
+}
+
+.audio-play-btn svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+}
+
+.audio-play-btn.playing svg {
+  margin-left: 0;
+}
+
+.audio-progress-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.audio-progress {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  position: relative;
+  transition: height 0.15s ease;
+}
+
+.audio-progress:hover {
+  height: 6px;
+}
+
+.audio-progress-bar {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: var(--radius-full);
+  width: 0%;
+  transition: width 0.1s linear;
+  position: relative;
+}
+
+.audio-progress-bar::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  background: #f97316;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.6);
+}
+
+.audio-time {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Clickable words in transcript */
+.clickable-word {
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 2px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.clickable-word:hover {
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--color-primary);
+}
+
+/* ===== Clickable Documentation Terms ===== */
+/* Terms in the summary/documentation that link to audio */
+.doc-audio-link {
+  cursor: pointer;
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: all var(--transition-fast);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.doc-audio-link:hover {
+  background: rgba(249, 115, 22, 0.15);
+  text-decoration-style: solid;
+}
+
+/* Type-based colors for documentation links */
+.doc-audio-link[data-type="zahnfarbe"] {
+  color: #10b981;
+}
+
+.doc-audio-link[data-type="zahnfarbe"]:hover {
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.doc-audio-link[data-type="zahnnummer"] {
+  color: #f59e0b;
+}
+
+.doc-audio-link[data-type="zahnnummer"]:hover {
+  background: rgba(245, 158, 11, 0.15);
+}
+
+.doc-audio-link[data-type="befund"] {
+  color: #ef4444;
+}
+
+.doc-audio-link[data-type="befund"]:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.doc-audio-link[data-type="behandlung"] {
+  color: #3b82f6;
+}
+
+.doc-audio-link[data-type="behandlung"]:hover {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.doc-audio-link[data-type="material"] {
+  color: #8b5cf6;
+}
+
+.doc-audio-link[data-type="material"]:hover {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.doc-audio-link[data-type="kosten"] {
+  color: #06b6d4;
+}
+
+.doc-audio-link[data-type="kosten"]:hover {
+  background: rgba(6, 182, 212, 0.15);
+}
+
+/* ===== Topic Tags Section ===== */
+.topic-section {
+  margin-top: 16px;
+}
+
+.topic-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topic-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.topic-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.topic-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.topic-tag:hover {
+  background: rgba(249, 115, 22, 0.1);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.topic-tag .topic-count {
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+}
+
+.topic-tag:hover .topic-count {
+  background: rgba(249, 115, 22, 0.2);
+  color: var(--color-primary);
+}
+
+/* Topic type colors */
+.topic-tag[data-type="zahnfarbe"] {
+  border-left: 3px solid #10b981;
+}
+
+.topic-tag[data-type="befund"] {
+  border-left: 3px solid #ef4444;
+}
+
+.topic-tag[data-type="behandlung"] {
+  border-left: 3px solid #3b82f6;
+}
+
+.topic-tag[data-type="material"] {
+  border-left: 3px solid #8b5cf6;
+}
+
+.topic-tag[data-type="allgemein"] {
+  border-left: 3px solid #6b7280;
+}
+
+/* ===== Topic Popup ===== */
+/* Overlay behind the popup for better visibility */
+.topic-popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.topic-popup-content {
+  width: 90%;
+  max-width: 480px;
+  max-height: 70vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: slideUp 0.2s ease-out;
+}
+
+.topic-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.topic-popup-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.topic-popup-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all var(--transition-fast);
+}
+
+.topic-popup-close:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.topic-popup-segments {
+  padding: 12px;
+  max-height: calc(60vh - 60px);
+  overflow-y: auto;
+}
+
+.topic-segment {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.topic-segment:last-child {
+  margin-bottom: 0;
+}
+
+.topic-segment:hover {
+  background: rgba(249, 115, 22, 0.05);
+  border-color: var(--color-primary);
+}
+
+.topic-segment-play {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  border-radius: 50%;
+  color: white;
+}
+
+.topic-segment-play svg {
+  width: 14px;
+  height: 14px;
+}
+
+.topic-segment-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.topic-segment-time {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 2px;
+}
+
+.topic-segment-topic {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.topic-segment-summary {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 

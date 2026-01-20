@@ -52,6 +52,16 @@
           </svg>
           <span>Übersicht</span>
         </a>
+        <a href="#" class="nav-item" data-view="transcripts" id="nav-transcripts">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <line x1="10" y1="9" x2="8" y2="9"/>
+          </svg>
+          <span>Transkripte</span>
+        </a>
         <a href="#" class="nav-item" data-view="settings" id="nav-settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/>
@@ -337,6 +347,100 @@
               <div class="step-number">3</div>
               <h4>Fertig</h4>
               <p>Die Dokumentation wird automatisch erstellt und in die Zwischenablage kopiert</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transcripts View -->
+      <div class="view" id="view-transcripts">
+        <div class="view-header">
+          <h1>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            Transkripte
+          </h1>
+          <p>Alle Aufnahmen durchsuchen und anhören</p>
+        </div>
+
+        <!-- Search and Filter Bar -->
+        <div class="transcripts-toolbar">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="M21 21l-4.35-4.35"/>
+            </svg>
+            <input type="text" id="transcriptSearch" placeholder="Suche nach Datum, Sprecher...">
+          </div>
+          <div class="transcripts-count">
+            <span id="transcriptCount">0</span> Transkripte
+          </div>
+        </div>
+
+        <!-- Transcripts List -->
+        <div class="transcripts-list" id="transcriptsList">
+          <div class="transcripts-empty" id="transcriptsEmpty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <p>Noch keine Transkripte vorhanden</p>
+            <span>Nach der ersten Aufnahme erscheinen hier Ihre Transkripte</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transcript Detail Modal -->
+      <div class="modal-overlay" id="transcriptModal" style="display: none;">
+        <div class="modal-content transcript-modal">
+          <div class="modal-header">
+            <h2 id="transcriptModalTitle">Transkript</h2>
+            <button class="modal-close" id="transcriptModalClose">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Audio Player -->
+          <div class="transcript-audio-player" id="transcriptAudioPlayer" style="display: none;">
+            <audio id="transcriptAudio"></audio>
+            <button class="audio-play-btn" id="audioPlayBtn">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+            </button>
+            <div class="audio-progress-container">
+              <div class="audio-progress" id="audioProgress">
+                <div class="audio-progress-bar" id="audioProgressBar"></div>
+              </div>
+              <div class="audio-time">
+                <span id="audioCurrentTime">0:00</span> <span id="audioDuration">0:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-body transcript-modal-body">
+            <!-- Summary Section -->
+            <div class="transcript-section">
+              <h3>Zusammenfassung</h3>
+              <div class="transcript-summary" id="transcriptSummary"></div>
+            </div>
+
+            <!-- Topic Tags Section (clickable audio segments) -->
+            <div class="transcript-section topic-section" id="topicSection" style="display: none;">
+              <h3>Themen <span class="topic-hint">(klicken zum Anhoeren)</span></h3>
+              <div class="topic-tags" id="topicTags"></div>
+            </div>
+
+            <!-- Full Transcript Section -->
+            <div class="transcript-section">
+              <h3>Vollstaendiges Transkript</h3>
+              <div class="transcript-utterances" id="transcriptUtterances"></div>
             </div>
           </div>
         </div>
@@ -642,15 +746,17 @@
             <select id="settingsDocModeSelect">
               <option value="single">Single Prompt (Standard)</option>
               <option value="single-v1.1">Single Prompt V1.1 (Experimental)</option>
-              <option value="hybrid-v1.2">Hybrid V1.2 (Empfohlen)</option>
+              <option value="hybrid-v1.2">Hybrid V1.2</option>
               <option value="megaprompt">Megaprompt (7-Step Pipeline)</option>
               <option value="agent-chain">Agent-Kette mit Bausteinen</option>
+              <option value="agent-v2">Agent V2 (Empfohlen)</option>
             </select>
             <p class="helper-text">
               <strong>Single Prompt:</strong> Ein KI-Aufruf für die gesamte Dokumentation.<br>
               <strong>Hybrid V1.2:</strong> Optimiert - 60% schneller, erkennt automatisch Themen.<br>
-              <strong>Megaprompt:</strong> 7-Schritt-Pipeline mit 10 parallelen Extraktoren für maximale Genauigkeit.<br>
-              <strong>Agent-Kette:</strong> Erkennt Behandlungskategorien und fügt automatisch Standard-Aufklärungstexte hinzu.
+              <strong>Megaprompt:</strong> 7-Schritt-Pipeline mit 10 parallelen Extraktoren.<br>
+              <strong>Agent-Kette:</strong> Erkennt Behandlungskategorien und fügt Standard-Aufklärungstexte hinzu.<br>
+              <strong>Agent V2:</strong> 2-stufig: Erst Rekonstruktion, dann Dokumentation. Nutzt GPT-4.1 Thinking.
             </p>
           </div>
 
@@ -2020,14 +2126,24 @@
         </div>
 
         <div class="wizard-options">
-          <div class="wizard-option selected" data-mode="hybrid-v1.2">
+          <div class="wizard-option selected" data-mode="agent-v2">
+            <div class="wizard-option-radio"></div>
+            <div class="wizard-option-content">
+              <div class="wizard-option-header">
+                <span class="wizard-option-title">Agent V2</span>
+                <span class="wizard-option-badge">Empfohlen</span>
+              </div>
+              <p class="wizard-option-desc">2-stufige KI-Pipeline: Erst Rekonstruktion des Transkripts (sachlich, ohne Erklärungen), dann strukturierte Akte-Dokumentation. Nutzt GPT-4.1 Thinking für maximale Qualität.</p>
+            </div>
+          </div>
+
+          <div class="wizard-option" data-mode="hybrid-v1.2">
             <div class="wizard-option-radio"></div>
             <div class="wizard-option-content">
               <div class="wizard-option-header">
                 <span class="wizard-option-title">Hybrid V1.2</span>
-                <span class="wizard-option-badge">Empfohlen</span>
               </div>
-              <p class="wizard-option-desc">Optimierte KI-Dokumentation: 60% schneller, erkennt automatisch relevante Themen (Füllung, Extraktion, etc.) und strukturiert die Dokumentation entsprechend. Ideal für die meisten Anwendungsfälle.</p>
+              <p class="wizard-option-desc">Optimierte KI-Dokumentation: 60% schneller, erkennt automatisch relevante Themen (Füllung, Extraktion, etc.) und strukturiert die Dokumentation entsprechend.</p>
             </div>
           </div>
 
@@ -2427,6 +2543,17 @@
           Los geht's!
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Topic/Passage Segments Popup (global overlay, outside any modal) -->
+  <div class="topic-popup" id="topicPopup" style="display: none;">
+    <div class="topic-popup-content">
+      <div class="topic-popup-header">
+        <span class="topic-popup-title" id="topicPopupTitle">Thema</span>
+        <button class="topic-popup-close" id="topicPopupClose">&times;</button>
+      </div>
+      <div class="topic-popup-segments" id="topicPopupSegments"></div>
     </div>
   </div>
 

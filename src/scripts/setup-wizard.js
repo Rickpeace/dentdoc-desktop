@@ -14,7 +14,7 @@ class SetupWizard {
       microphoneId: null, // Windows device name for FFmpeg
       microphoneSource: 'desktop', // 'desktop' or 'iphone'
       shortcut: 'F9',
-      docMode: 'single',
+      docMode: 'agent-v2',
       autoExport: true,
       transcriptPath: '',
       keepAudio: false,

@@ -673,6 +673,72 @@ async function getDocumentationMegaprompt(transcriptionId, token) {
   }
 }
 
+/**
+ * Generate documentation using Agent V2 (2-stage pipeline with GPT-4.1 thinking)
+ * Stage 1: Reconstruction - Clean raw transcript to factual work text
+ * Stage 2: Documentation - Create final medical record note
+ *
+ * @param {number} transcriptionId - Transcription ID
+ * @param {string} token - Auth token
+ * @returns {Promise<{documentation: string, transcript: string|null, reconstructedTranscript: string|null}>}
+ */
+async function getDocumentationAgentV2(transcriptionId, token) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-agent-v2`,
+      {},
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 180000 // 3 minutes (2 API calls with thinking model)
+      }
+    );
+
+    if (!response.data.documentation) {
+      throw new Error('NO_DOCUMENTATION');
+    }
+
+    return {
+      documentation: response.data.documentation,
+      transcript: response.data.transcript || null,
+      reconstructedTranscript: response.data.reconstructedTranscript || null,
+      stages: response.data.stages || null
+    };
+  } catch (error) {
+    console.error('Documentation Agent V2 error:', error.response?.data || error.message);
+
+    const serverError = error.response?.data?.error;
+
+    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
+      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+    }
+
+    if (serverError?.includes('processing') || serverError?.includes('pending')) {
+      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
+    }
+
+    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
+      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
+    }
+
+    if (serverError) {
+      throw new Error(`Fehler: ${serverError}`);
+    }
+
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
+    }
+
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
+    }
+
+    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
+  }
+}
+
 async function updateSpeakerMapping(transcriptionId, speakerMapping, token) {
   try {
     const url = `${API_BASE_URL}api/transcriptions/${transcriptionId}/update-speakers`;
@@ -993,6 +1059,121 @@ async function iphoneUnpair(token) {
   }
 }
 
+/**
+ * Segment transcript into semantic audio passages using AI
+ * Each passage is a thematically coherent 15-40 second audio clip.
+ *
+ * @param {string} token - Auth token
+ * @param {string} transcriptText - Full transcript text
+ * @param {Array} words - Word-level timestamps from AssemblyAI [{text, start, end}, ...]
+ * @returns {Promise<Object>} { passages: Passage[] }
+ */
+async function segmentPassages(token, transcriptText, words) {
+  try {
+    console.log('[apiClient] Segmenting transcript into passages...');
+    console.log('[apiClient] Transcript length:', transcriptText?.length || 0);
+    console.log('[apiClient] Words count:', words?.length || 0);
+
+    const response = await axios.post(
+      `${API_BASE_URL}api/segment-passages`,
+      { transcriptText, words },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 90000 // 90s timeout for AI processing (long transcripts can take time)
+      }
+    );
+
+    console.log('[apiClient] Passages created:', response.data.passages?.length || 0);
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Segment passages error:', error.response?.data || error.message);
+    // Return empty passages on error - don't fail the whole process
+    return { passages: [] };
+  }
+}
+
+/**
+ * Match documentation sections to audio passages using AI
+ * This creates clickable links from documentation text to audio clips.
+ *
+ * NEUER PASSAGEN-BASIERTER ANSATZ:
+ * - Statt einzelne Wörter zu matchen (fehleranfällig wegen Transkriptions-Typos)
+ * - Verknüpfen wir Dokumentations-Abschnitte mit semantischen Audio-Passagen
+ *
+ * @param {string} token - Auth token
+ * @param {string} documentation - Generated documentation text
+ * @param {Array} passages - Semantic passages from segmentPassages()
+ * @returns {Promise<Object>} { links: DocLink[], passages: Passage[] }
+ */
+async function matchDocToAudio(token, documentation, passages) {
+  try {
+    console.log('[apiClient] Matching documentation to audio passages...');
+    console.log('[apiClient] Documentation length:', documentation?.length || 0);
+    console.log('[apiClient] Passages count:', passages?.length || 0);
+
+    if (!passages || passages.length === 0) {
+      console.log('[apiClient] No passages provided, skipping match');
+      return { links: [], passages: [] };
+    }
+
+    const response = await axios.post(
+      `${API_BASE_URL}api/match-doc-to-audio`,
+      { documentation, passages },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000 // 60s timeout for AI processing
+      }
+    );
+
+    console.log('[apiClient] Doc links found:', response.data.links?.length || 0);
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Match doc to audio error:', error.response?.data || error.message);
+    // Return empty links on error - don't fail the whole process
+    return { links: [], passages: passages || [] };
+  }
+}
+
+/**
+ * Extract topic segments from transcript using AI
+ * @param {string} token - Auth token
+ * @param {string} transcriptText - Full transcript text
+ * @param {Array} words - Word-level timestamps from AssemblyAI [{text, start, end}, ...]
+ * @returns {Promise<Object>} { topics: TopicSegment[] }
+ */
+async function extractTopicSegments(token, transcriptText, words) {
+  try {
+    console.log('[apiClient] Extracting topic segments...');
+    console.log('[apiClient] Transcript length:', transcriptText?.length || 0);
+    console.log('[apiClient] Words count:', words?.length || 0);
+
+    const response = await axios.post(
+      `${API_BASE_URL}api/extract-topics`,
+      { transcriptText, words },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000 // 30s timeout for AI processing
+      }
+    );
+
+    console.log('[apiClient] Topics extracted:', response.data.topics?.length || 0);
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Extract topics error:', error.response?.data || error.message);
+    // Return empty topics on error - don't fail the whole transcription
+    return { topics: [] };
+  }
+}
+
 module.exports = {
   login,
   logout,
@@ -1004,6 +1185,7 @@ module.exports = {
   getDocumentationV1_2,
   getDocumentationV2,
   getDocumentationMegaprompt,
+  getDocumentationAgentV2,
   updateSpeakerMapping,
   getTranscription,
   getTranscriptionStatus,
@@ -1024,4 +1206,9 @@ module.exports = {
   iphonePairStatus,
   iphoneStatus,
   iphoneUnpair,
+  // Topic Extraction
+  extractTopicSegments,
+  // Passage Segmentation & Doc-Audio Matching
+  segmentPassages,
+  matchDocToAudio,
 };

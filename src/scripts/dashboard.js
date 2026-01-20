@@ -4199,6 +4199,723 @@ document.addEventListener('keydown', (e) => {
     if (modal?.classList.contains('active')) {
       closeSpeakerOptimizationModal();
     }
+    // Also close transcript modal
+    const transcriptModal = document.getElementById('transcriptModal');
+    if (transcriptModal?.style.display !== 'none') {
+      closeTranscriptModal();
+    }
   }
 });
+
+// =============================================================================
+// TRANSCRIPTS VIEW
+// =============================================================================
+
+let allTranscripts = [];
+let currentTranscriptData = null;
+
+// Load all transcripts
+async function loadTranscripts() {
+  try {
+    const result = await ipcRenderer.invoke('get-all-transcripts');
+    if (result.success) {
+      allTranscripts = result.transcripts;
+      renderTranscriptsList(allTranscripts);
+      document.getElementById('transcriptCount').textContent = allTranscripts.length;
+    } else {
+      console.error('Failed to load transcripts:', result.error);
+    }
+  } catch (error) {
+    console.error('Error loading transcripts:', error);
+  }
+}
+
+// Render transcripts list
+function renderTranscriptsList(transcripts) {
+  const listEl = document.getElementById('transcriptsList');
+  const emptyEl = document.getElementById('transcriptsEmpty');
+
+  // Clear existing cards (keep empty state)
+  const cards = listEl.querySelectorAll('.transcript-card');
+  cards.forEach(card => card.remove());
+
+  if (transcripts.length === 0) {
+    emptyEl.style.display = 'flex';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+
+  transcripts.forEach(transcript => {
+    const card = createTranscriptCard(transcript);
+    listEl.appendChild(card);
+  });
+}
+
+// Create a transcript card element
+function createTranscriptCard(transcript) {
+  const card = document.createElement('div');
+  card.className = 'transcript-card';
+  card.dataset.filePath = transcript.filePath;
+
+  // Format date
+  const date = new Date(transcript.createdAt);
+  const dateStr = date.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+  const timeStr = date.toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  // Get speakers
+  const speakers = transcript.speakers?.length > 0
+    ? transcript.speakers.join(', ')
+    : transcript.folderName || 'Unbekannt';
+
+  // Get summary preview (first 150 chars)
+  const summaryPreview = transcript.summary
+    ? transcript.summary.substring(0, 150) + (transcript.summary.length > 150 ? '...' : '')
+    : 'Keine Zusammenfassung verfügbar';
+
+  // Audio badge
+  const audioBadge = transcript.hasAudio
+    ? `<div class="transcript-card-audio-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        Audio
+      </div>`
+    : '';
+
+  card.innerHTML = `
+    <div class="transcript-card-header">
+      <div>
+        <div class="transcript-card-date">${dateStr}, ${timeStr}</div>
+        <div class="transcript-card-speakers">${speakers}</div>
+      </div>
+      ${audioBadge}
+    </div>
+    <div class="transcript-card-summary">${summaryPreview}</div>
+  `;
+
+  card.addEventListener('click', () => openTranscriptModal(transcript.filePath));
+
+  return card;
+}
+
+// Filter transcripts by search query
+function filterTranscripts(query) {
+  if (!query.trim()) {
+    renderTranscriptsList(allTranscripts);
+    document.getElementById('transcriptCount').textContent = allTranscripts.length;
+    return;
+  }
+
+  const lowerQuery = query.toLowerCase();
+  const filtered = allTranscripts.filter(t => {
+    const date = new Date(t.createdAt);
+    const dateStr = date.toLocaleDateString('de-DE');
+    const timeStr = date.toLocaleTimeString('de-DE');
+    const speakers = t.speakers?.join(' ') || '';
+    const folder = t.folderName || '';
+
+    return dateStr.includes(lowerQuery) ||
+           timeStr.includes(lowerQuery) ||
+           speakers.toLowerCase().includes(lowerQuery) ||
+           folder.toLowerCase().includes(lowerQuery);
+  });
+
+  renderTranscriptsList(filtered);
+  document.getElementById('transcriptCount').textContent = filtered.length;
+}
+
+// Open transcript detail modal
+async function openTranscriptModal(filePath) {
+  try {
+    const result = await ipcRenderer.invoke('get-transcript-detail', filePath);
+    if (!result.success) {
+      console.error('Failed to load transcript:', result.error);
+      return;
+    }
+
+    currentTranscriptData = result.transcript;
+    const transcript = result.transcript;
+
+    // Set modal title
+    const date = new Date(transcript.createdAt);
+    const dateStr = date.toLocaleDateString('de-DE', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    });
+    const timeStr = date.toLocaleTimeString('de-DE', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    document.getElementById('transcriptModalTitle').textContent = `${dateStr}, ${timeStr}`;
+
+    // Set summary with clickable passage links (if available)
+    const summaryEl = document.getElementById('transcriptSummary');
+    if (transcript.docLinks && transcript.docLinks.length > 0 && transcript.audioPath) {
+      // Render with clickable links to audio passages
+      summaryEl.innerHTML = renderDocumentationWithPassageLinks(
+        transcript.summary || 'Keine Zusammenfassung verfuegbar',
+        transcript.docLinks
+      );
+      // Attach click handlers for the links
+      attachPassageLinkHandlers(summaryEl);
+    } else {
+      // No links, just plain text
+      summaryEl.textContent = transcript.summary || 'Keine Zusammenfassung verfuegbar';
+    }
+
+    // Render topic tags if available
+    renderTopicTags(transcript.topicSegments);
+
+    // Render utterances (with word-level timestamps if available)
+    renderUtterances(transcript.utterances, transcript.words);
+
+    // Setup audio player if audio exists
+    if (transcript.audioPath) {
+      console.log('[Transcript] Loading audio from:', transcript.audioPath);
+      await setupAudioPlayer(transcript.audioPath);
+      document.getElementById('transcriptAudioPlayer').style.display = 'flex';
+    } else {
+      console.log('[Transcript] No audio file found for this transcript');
+      document.getElementById('transcriptAudioPlayer').style.display = 'none';
+      // Hide topic section if no audio (topics are useless without audio)
+      document.getElementById('topicSection').style.display = 'none';
+    }
+
+    // Show modal
+    document.getElementById('transcriptModal').style.display = 'flex';
+
+  } catch (error) {
+    console.error('Error opening transcript modal:', error);
+  }
+}
+
+// Close transcript modal
+function closeTranscriptModal() {
+  document.getElementById('transcriptModal').style.display = 'none';
+  // Stop audio if playing
+  const audio = document.getElementById('transcriptAudio');
+  if (audio) {
+    audio.pause();
+    audio.src = '';
+  }
+  // Hide topic popup and reset state
+  closeTopicPopup();
+  currentTranscriptData = null;
+  currentTopicSegments = null;
+}
+
+// Format milliseconds to mm:ss
+function formatTime(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+// Render utterances in modal (with optional word-level timestamps)
+function renderUtterances(utterances, words = null) {
+  const container = document.getElementById('transcriptUtterances');
+  container.innerHTML = '';
+
+  if (!utterances || utterances.length === 0) {
+    container.innerHTML = '<p class="text-muted">Keine Utterances verfügbar</p>';
+    return;
+  }
+
+  // Build word lookup map if words are available
+  // Map: wordText_startMs -> { start, end, text }
+  const wordMap = new Map();
+  if (words && words.length > 0) {
+    words.forEach(w => {
+      // Key by start time for lookup
+      wordMap.set(w.start, w);
+    });
+  }
+
+  utterances.forEach((utterance, index) => {
+    const div = document.createElement('div');
+    div.className = 'utterance';
+    div.dataset.index = index;
+    div.dataset.startMs = utterance.start;
+
+    const timeStr = formatTime(utterance.start);
+
+    // If we have words, render text with clickable words
+    let textHtml = utterance.text;
+    if (words && words.length > 0) {
+      // Find words that belong to this utterance (between start and end)
+      const utteranceWords = words.filter(w =>
+        w.start >= utterance.start && w.end <= utterance.end
+      );
+
+      if (utteranceWords.length > 0) {
+        // Render each word as clickable span
+        textHtml = utteranceWords.map(w =>
+          `<span class="clickable-word" data-start="${w.start}" title="[${formatTime(w.start)}]">${w.text}</span>`
+        ).join(' ');
+      }
+    }
+
+    div.innerHTML = `
+      <div class="utterance-header">
+        <span class="utterance-time" data-time-ms="${utterance.start}">[${timeStr}]</span>
+        <span class="utterance-speaker">${utterance.speaker || 'Sprecher'}</span>
+      </div>
+      <div class="utterance-text">${textHtml}</div>
+    `;
+
+    // Click on time to jump to audio position
+    const timeEl = div.querySelector('.utterance-time');
+    timeEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      jumpToTime(utterance.start);
+    });
+
+    // Click on words to jump to their position
+    div.querySelectorAll('.clickable-word').forEach(wordEl => {
+      wordEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const startMs = parseInt(wordEl.dataset.start);
+        jumpToTime(startMs);
+      });
+    });
+
+    container.appendChild(div);
+  });
+}
+
+// Setup audio player
+async function setupAudioPlayer(audioPath) {
+  const audio = document.getElementById('transcriptAudio');
+  const playBtn = document.getElementById('audioPlayBtn');
+  const progressBar = document.getElementById('audioProgressBar');
+  const progress = document.getElementById('audioProgress');
+  const currentTimeEl = document.getElementById('audioCurrentTime');
+  const durationEl = document.getElementById('audioDuration');
+
+  // Load audio as base64
+  const result = await ipcRenderer.invoke('get-transcript-audio', audioPath);
+  if (!result.success) {
+    console.error('Failed to load audio:', result.error);
+    return;
+  }
+
+  audio.src = `data:${result.mimeType};base64,${result.data}`;
+
+  // Play/Pause button
+  playBtn.onclick = () => {
+    if (audio.paused) {
+      audio.play();
+      playBtn.classList.add('playing');
+      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16"/>
+        <rect x="14" y="4" width="4" height="16"/>
+      </svg>`;
+    } else {
+      audio.pause();
+      playBtn.classList.remove('playing');
+      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>`;
+    }
+  };
+
+  // Update progress bar
+  audio.ontimeupdate = () => {
+    if (audio.duration) {
+      const percent = (audio.currentTime / audio.duration) * 100;
+      progressBar.style.width = `${percent}%`;
+      currentTimeEl.textContent = formatTime(audio.currentTime * 1000);
+    }
+  };
+
+  // Update duration when loaded
+  audio.onloadedmetadata = () => {
+    durationEl.textContent = formatTime(audio.duration * 1000);
+  };
+
+  // Reset when audio ends
+  audio.onended = () => {
+    playBtn.classList.remove('playing');
+    playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
+      <polygon points="5 3 19 12 5 21 5 3"/>
+    </svg>`;
+  };
+
+  // Click on progress bar to seek
+  progress.onclick = (e) => {
+    const rect = progress.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    audio.currentTime = percent * audio.duration;
+  };
+}
+
+// Jump to specific time in audio
+function jumpToTime(ms) {
+  const audio = document.getElementById('transcriptAudio');
+  if (audio && audio.src) {
+    audio.currentTime = ms / 1000;
+    if (audio.paused) {
+      audio.play();
+      const playBtn = document.getElementById('audioPlayBtn');
+      playBtn.classList.add('playing');
+      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16"/>
+        <rect x="14" y="4" width="4" height="16"/>
+      </svg>`;
+    }
+  }
+}
+
+// ===== Topic Tags Functions =====
+
+// Store topic segments for popup access
+let currentTopicSegments = null;
+
+// Render topic tags from extracted segments
+function renderTopicTags(topicSegments) {
+  const section = document.getElementById('topicSection');
+  const container = document.getElementById('topicTags');
+
+  if (!topicSegments || topicSegments.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  currentTopicSegments = topicSegments;
+  section.style.display = 'block';
+  container.innerHTML = '';
+
+  // Group segments by name
+  const groupedTopics = {};
+  topicSegments.forEach(segment => {
+    const key = segment.name;
+    if (!groupedTopics[key]) {
+      groupedTopics[key] = {
+        name: segment.name,
+        type: segment.type,
+        segments: []
+      };
+    }
+    groupedTopics[key].segments.push(segment);
+  });
+
+  // Create tags for each topic
+  Object.values(groupedTopics).forEach(topic => {
+    const tag = document.createElement('div');
+    tag.className = 'topic-tag';
+    tag.dataset.type = topic.type;
+    tag.dataset.name = topic.name;
+
+    const count = topic.segments.length;
+    tag.innerHTML = `
+      <span class="topic-name">${topic.name}</span>
+      ${count > 1 ? `<span class="topic-count">${count}x</span>` : ''}
+    `;
+
+    tag.addEventListener('click', () => {
+      showTopicPopup(topic.name, topic.segments);
+    });
+
+    container.appendChild(tag);
+  });
+}
+
+// Show popup with all segments for a topic
+function showTopicPopup(topicName, segments) {
+  const popup = document.getElementById('topicPopup');
+  const title = document.getElementById('topicPopupTitle');
+  const segmentsContainer = document.getElementById('topicPopupSegments');
+
+  title.textContent = `${topicName} - ${segments.length} ${segments.length === 1 ? 'Stelle' : 'Stellen'}`;
+  segmentsContainer.innerHTML = '';
+
+  segments.forEach((segment, index) => {
+    const segmentEl = document.createElement('div');
+    segmentEl.className = 'topic-segment';
+    segmentEl.dataset.startMs = segment.startMs;
+    segmentEl.dataset.endMs = segment.endMs;
+
+    const startTime = formatTime(segment.startMs);
+    const endTime = formatTime(segment.endMs);
+
+    segmentEl.innerHTML = `
+      <div class="topic-segment-play">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+      </div>
+      <div class="topic-segment-info">
+        <div class="topic-segment-time">[${startTime} - ${endTime}]</div>
+        <div class="topic-segment-summary">${segment.summary || 'Klicken zum Anhoeren'}</div>
+      </div>
+    `;
+
+    segmentEl.addEventListener('click', () => {
+      playSegment(segment.startMs, segment.endMs);
+    });
+
+    segmentsContainer.appendChild(segmentEl);
+  });
+
+  popup.style.display = 'flex';
+}
+
+// Close topic popup
+function closeTopicPopup() {
+  document.getElementById('topicPopup').style.display = 'none';
+}
+
+// ===== Clickable Documentation Terms =====
+// Render documentation/summary with clickable terms that link to audio
+
+/**
+ * Escape HTML special characters
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/**
+ * NEUER PASSAGEN-BASIERTER ANSATZ
+ *
+ * Render documentation text with clickable passage links.
+ * Each link connects documentation text to semantic audio passages (15-40 sec clips).
+ *
+ * @param {string} documentation - The documentation text
+ * @param {Array} docLinks - Array of doc links: { docText, positions, passages }
+ * @returns {string} HTML with clickable spans for passage links
+ */
+function renderDocumentationWithPassageLinks(documentation, docLinks) {
+  if (!docLinks || docLinks.length === 0 || !documentation) {
+    return escapeHtml(documentation || '');
+  }
+
+  // Collect all positions with their passage data
+  const allPositions = [];
+  docLinks.forEach(link => {
+    if (!link.positions || !link.passages || link.passages.length === 0) return;
+    link.positions.forEach(pos => {
+      // Validate position is within bounds
+      if (pos.start >= 0 && pos.end <= documentation.length && pos.start < pos.end) {
+        allPositions.push({
+          start: pos.start,
+          end: pos.end,
+          docText: link.docText,
+          passages: link.passages
+        });
+      }
+    });
+  });
+
+  // Sort by start position (ascending) to process in order
+  allPositions.sort((a, b) => a.start - b.start);
+
+  // Remove overlapping positions (keep first occurrence)
+  const nonOverlapping = [];
+  let lastEnd = 0;
+  allPositions.forEach(pos => {
+    if (pos.start >= lastEnd) {
+      nonOverlapping.push(pos);
+      lastEnd = pos.end;
+    }
+  });
+
+  // Build result string by replacing positions with clickable spans
+  let result = '';
+  let currentIndex = 0;
+
+  nonOverlapping.forEach(pos => {
+    // Add text before this position (escaped)
+    if (pos.start > currentIndex) {
+      result += escapeHtml(documentation.slice(currentIndex, pos.start));
+    }
+
+    // Add the linked text as a clickable span
+    const linkText = documentation.slice(pos.start, pos.end);
+    const passagesJson = JSON.stringify(pos.passages).replace(/"/g, '&quot;');
+    // Determine type from first passage's topic for styling
+    const topic = pos.passages[0]?.topic || 'Sonstiges';
+    result += `<span class="doc-audio-link" data-topic="${topic}" data-text="${escapeHtml(pos.docText)}" data-passages="${passagesJson}">${escapeHtml(linkText)}</span>`;
+
+    currentIndex = pos.end;
+  });
+
+  // Add remaining text (escaped)
+  if (currentIndex < documentation.length) {
+    result += escapeHtml(documentation.slice(currentIndex));
+  }
+
+  // Convert newlines to <br> for proper display
+  result = result.replace(/\n/g, '<br>');
+
+  return result;
+}
+
+/**
+ * Show popup for a clicked documentation link with its audio passages.
+ * Each passage is a semantic audio clip (15-40 seconds) about a specific topic.
+ */
+function showPassagePopup(linkText, passages, clickEvent) {
+  const popup = document.getElementById('topicPopup');
+  const title = document.getElementById('topicPopupTitle');
+  const segmentsContainer = document.getElementById('topicPopupSegments');
+
+  title.textContent = `"${linkText}" - ${passages.length} ${passages.length === 1 ? 'Audio-Passage' : 'Audio-Passagen'}`;
+  segmentsContainer.innerHTML = '';
+
+  passages.forEach((passage, index) => {
+    const segmentEl = document.createElement('div');
+    segmentEl.className = 'topic-segment';
+    segmentEl.dataset.startMs = passage.startMs;
+    segmentEl.dataset.endMs = passage.endMs;
+
+    const startTime = formatTime(passage.startMs);
+    const endTime = formatTime(passage.endMs);
+    const durationSec = Math.round((passage.endMs - passage.startMs) / 1000);
+
+    segmentEl.innerHTML = `
+      <div class="topic-segment-play">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+      </div>
+      <div class="topic-segment-info">
+        <div class="topic-segment-time">[${startTime} - ${endTime}] (${durationSec}s)</div>
+        <div class="topic-segment-topic">${passage.topic || 'Sonstiges'}</div>
+        <div class="topic-segment-summary">${passage.summary || passage.text?.substring(0, 100) + '...' || 'Klicken zum Anhoeren'}</div>
+      </div>
+    `;
+
+    segmentEl.addEventListener('click', () => {
+      playSegment(passage.startMs, passage.endMs);
+    });
+
+    segmentsContainer.appendChild(segmentEl);
+  });
+
+  popup.style.display = 'flex';
+}
+
+/**
+ * Attach click handlers to passage links in documentation
+ */
+function attachPassageLinkHandlers(container) {
+  container.querySelectorAll('.doc-audio-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = link.dataset.text;
+      const passagesJson = link.dataset.passages;
+      try {
+        const passages = JSON.parse(passagesJson);
+        if (passages && passages.length > 0) {
+          showPassagePopup(text, passages, e);
+        }
+      } catch (err) {
+        console.error('Failed to parse passages JSON:', err);
+      }
+    });
+  });
+}
+
+// Legacy functions for backwards compatibility
+function renderDocumentationWithLinks(documentation, linkedTerms) {
+  return renderDocumentationWithPassageLinks(documentation, linkedTerms);
+}
+
+function showDocTermPopup(termName, segments, clickEvent) {
+  // Convert old segment format to passage format
+  const passages = segments.map(seg => ({
+    id: 'legacy',
+    topic: 'Sonstiges',
+    startMs: seg.startMs,
+    endMs: seg.endMs,
+    text: seg.preview || '',
+    summary: seg.preview || ''
+  }));
+  showPassagePopup(termName, passages, clickEvent);
+}
+
+function attachDocLinkHandlers(container) {
+  attachPassageLinkHandlers(container);
+}
+
+// Play a specific audio segment
+function playSegment(startMs, endMs) {
+  const audio = document.getElementById('transcriptAudio');
+  if (!audio || !audio.src) return;
+
+  // Jump to start time
+  audio.currentTime = startMs / 1000;
+
+  // Start playing
+  audio.play();
+  const playBtn = document.getElementById('audioPlayBtn');
+  playBtn.classList.add('playing');
+  playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
+    <rect x="6" y="4" width="4" height="16"/>
+    <rect x="14" y="4" width="4" height="16"/>
+  </svg>`;
+
+  // Optional: Auto-stop at end of segment
+  // Uncomment if you want audio to stop at endMs
+  /*
+  const checkEnd = setInterval(() => {
+    if (audio.currentTime >= endMs / 1000) {
+      audio.pause();
+      playBtn.classList.remove('playing');
+      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>`;
+      clearInterval(checkEnd);
+    }
+  }, 100);
+  */
+
+  // Close popup after starting playback
+  closeTopicPopup();
+}
+
+// Event listeners for topic popup
+document.getElementById('topicPopupClose')?.addEventListener('click', closeTopicPopup);
+
+// Close popup when clicking outside
+document.getElementById('topicPopup')?.addEventListener('click', (e) => {
+  if (e.target.id === 'topicPopup') {
+    closeTopicPopup();
+  }
+});
+
+// Event listeners for transcript view
+document.getElementById('transcriptSearch')?.addEventListener('input', (e) => {
+  filterTranscripts(e.target.value);
+});
+
+document.getElementById('transcriptModalClose')?.addEventListener('click', closeTranscriptModal);
+
+document.getElementById('transcriptModal')?.addEventListener('click', (e) => {
+  if (e.target.id === 'transcriptModal') {
+    closeTranscriptModal();
+  }
+});
+
+// Load transcripts when view becomes active
+const navTranscripts = document.getElementById('nav-transcripts');
+if (navTranscripts) {
+  navTranscripts.addEventListener('click', () => {
+    loadTranscripts();
+  });
+}
 
