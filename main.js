@@ -1447,74 +1447,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     // Copy to clipboard
     clipboard.writeText(documentation);
 
-    // Extract topic segments using AI (for clickable audio navigation in dashboard)
-    let topicSegments = null;
-    if (words && words.length > 0) {
-      try {
-        console.log('  Extrahiere Themen-Segmente...');
-        const topicResult = await apiClient.extractTopicSegments(token, transcript, words);
-        topicSegments = topicResult.topics || null;
-        console.log(`  Themen-Segmente: ${topicSegments ? topicSegments.length : 0}`);
-      } catch (topicError) {
-        console.log('  [!] Themen-Extraktion fehlgeschlagen (nicht kritisch):', topicError.message);
-        // Continue without topic segments
-      }
-    }
-
-    // NEUER ANSATZ: Passagen-basiertes Matching
-    let passages = null;
-    let docLinks = null;
-    if (words && words.length > 0 && documentation) {
-      try {
-        // Step 1: Segment transcript into thematic passages
-        console.log('  Segmentiere Transkript in Passagen...');
-        const passageResult = await apiClient.segmentPassages(token, transcript, words);
-        passages = passageResult.passages || [];
-        console.log(`  Passagen erstellt: ${passages.length}`);
-
-        // Step 2: Match documentation sections to passages
-        if (passages.length > 0) {
-          console.log('  Matche Dokumentation mit Passagen...');
-          const matchResult = await apiClient.matchDocToAudio(token, documentation, passages);
-          docLinks = matchResult.links || null;
-          console.log(`  Doc-Links gefunden: ${docLinks ? docLinks.length : 0}`);
-        }
-      } catch (matchError) {
-        console.log('  [!] Passagen-Matching fehlgeschlagen (nicht kritisch):', matchError.message);
-        // Continue without links
-      }
-    }
-
-    // Auto-save if enabled
-    const autoExport = store.get('autoExport', true);
-    const keepAudio = store.get('keepAudio', false);
-    const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
-    const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
-
+    // Show success IMMEDIATELY - user can already paste the documentation
     console.log('  Dokumentation erstellt!');
     console.log('');
-
-    if ((autoExport || keepAudio) && finalTranscript) {
-      console.log('///// SCHRITT 6: SPEICHERN /////');
-      try {
-        saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
-          tempAudioPath: wavPath,
-          originalAudioPath: audioFilePath,  // Original before VAD
-          saveTranscript: autoExport,
-          saveAudio: keepAudio,
-          shortenings: shortenings,
-          utterances: utterances,
-          words: words,
-          topicSegments: topicSegments,
-          passages: passages,
-          docLinks: docLinks
-        });
-      } catch (error) {
-        console.log('  [!] Fehler beim Speichern:', error.message);
-      }
-    }
-
-    // Show success
     console.log('========================================');
     console.log('       VERARBEITUNG ABGESCHLOSSEN');
     console.log('========================================');
@@ -1533,6 +1468,74 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const normalIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(normalIconPath);
     tray.setToolTip('DentDoc - Bereit');
+
+    // === BACKGROUND TASKS (run async, don't block success) ===
+    const autoExport = store.get('autoExport', true);
+    const keepAudio = store.get('keepAudio', false);
+
+    (async () => {
+      let topicSegments = null;
+      let passages = null;
+      let docLinks = null;
+
+      // Extract topic segments using AI (for clickable audio navigation in dashboard)
+      if (words && words.length > 0) {
+        try {
+          console.log('  [Background] Extrahiere Themen-Segmente...');
+          const topicResult = await apiClient.extractTopicSegments(token, transcript, words);
+          topicSegments = topicResult.topics || null;
+          console.log(`  [Background] Themen-Segmente: ${topicSegments ? topicSegments.length : 0}`);
+        } catch (topicError) {
+          console.log('  [Background] Themen-Extraktion fehlgeschlagen (nicht kritisch):', topicError.message);
+        }
+      }
+
+      // Passagen-basiertes Matching
+      if (words && words.length > 0 && documentation) {
+        try {
+          console.log('  [Background] Segmentiere Transkript in Passagen...');
+          const passageResult = await apiClient.segmentPassages(token, transcript, words);
+          passages = passageResult.passages || [];
+          console.log(`  [Background] Passagen erstellt: ${passages.length}`);
+
+          if (passages.length > 0) {
+            console.log('  [Background] Matche Dokumentation mit Passagen...');
+            const matchResult = await apiClient.matchDocToAudio(token, documentation, passages);
+            docLinks = matchResult.links || null;
+            console.log(`  [Background] Doc-Links gefunden: ${docLinks ? docLinks.length : 0}`);
+          }
+        } catch (matchError) {
+          console.log('  [Background] Passagen-Matching fehlgeschlagen (nicht kritisch):', matchError.message);
+        }
+      }
+
+      // Save files with all data
+      const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
+      const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
+
+      if ((autoExport || keepAudio) && finalTranscript) {
+        console.log('  [Background] Speichere Dateien...');
+        try {
+          saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
+            tempAudioPath: wavPath,
+            originalAudioPath: audioFilePath,
+            saveTranscript: autoExport,
+            saveAudio: keepAudio,
+            shortenings: shortenings,
+            utterances: utterances,
+            words: words,
+            topicSegments: topicSegments,
+            passages: passages,
+            docLinks: docLinks
+          });
+          console.log('  [Background] Dateien gespeichert!');
+        } catch (error) {
+          console.log('  [Background] Fehler beim Speichern:', error.message);
+        }
+      }
+
+      console.log('  [Background] Alle Hintergrund-Tasks abgeschlossen');
+    })();
 
   } catch (error) {
     console.log('');
