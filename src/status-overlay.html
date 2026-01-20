@@ -662,6 +662,7 @@
     let currentState = null;
     let timerInterval = null;
     let recordingStartTime = null;
+    let lastClickedDoc = null; // Tracks which documentation was last clicked ('summary', 'full', 'keywords90', 'chef70', 'chef50', 'pvs40', 'zfa30', 'normalized')
 
     function formatTime(seconds) {
       const mins = Math.floor(seconds / 60);
@@ -830,6 +831,9 @@
 
             // Check for unrecognized speakers and show optimization button
             checkOptimizationAvailable();
+
+            // Auto-copy the last clicked documentation type
+            autoCopyLastClicked();
           }
           break;
         case 'error':
@@ -864,6 +868,8 @@
       if (currentDocumentation) {
         ipcRenderer.invoke('copy-to-clipboard', currentDocumentation);
         showCopied(copySummaryBtn);
+        lastClickedDoc = 'summary';
+        saveLastClickedDoc();
       }
     });
 
@@ -905,6 +911,8 @@
       if (fullText) {
         ipcRenderer.invoke('copy-to-clipboard', fullText.trim());
         showCopied(copyFullBtn);
+        lastClickedDoc = 'full';
+        saveLastClickedDoc();
       }
     });
 
@@ -913,6 +921,8 @@
       if (currentShortenings?.keywords90) {
         ipcRenderer.invoke('copy-to-clipboard', currentShortenings.keywords90);
         showCopied(document.getElementById('copyKeywords90'));
+        lastClickedDoc = 'keywords90';
+        saveLastClickedDoc();
       }
     });
 
@@ -920,6 +930,8 @@
       if (currentShortenings?.chef70) {
         ipcRenderer.invoke('copy-to-clipboard', currentShortenings.chef70);
         showCopied(document.getElementById('copyChef70'));
+        lastClickedDoc = 'chef70';
+        saveLastClickedDoc();
       }
     });
 
@@ -927,6 +939,8 @@
       if (currentShortenings?.chef50) {
         ipcRenderer.invoke('copy-to-clipboard', currentShortenings.chef50);
         showCopied(document.getElementById('copyChef50'));
+        lastClickedDoc = 'chef50';
+        saveLastClickedDoc();
       }
     });
 
@@ -934,6 +948,8 @@
       if (currentShortenings?.pvs40) {
         ipcRenderer.invoke('copy-to-clipboard', currentShortenings.pvs40);
         showCopied(document.getElementById('copyPvs40'));
+        lastClickedDoc = 'pvs40';
+        saveLastClickedDoc();
       }
     });
 
@@ -941,6 +957,8 @@
       if (currentShortenings?.zfa30) {
         ipcRenderer.invoke('copy-to-clipboard', currentShortenings.zfa30);
         showCopied(document.getElementById('copyZfa30'));
+        lastClickedDoc = 'zfa30';
+        saveLastClickedDoc();
       }
     });
 
@@ -948,6 +966,8 @@
       if (currentShortenings?.normalized) {
         ipcRenderer.invoke('copy-to-clipboard', currentShortenings.normalized);
         showCopied(document.getElementById('copyNormalized'));
+        lastClickedDoc = 'normalized';
+        saveLastClickedDoc();
       }
     });
 
@@ -957,6 +977,97 @@
         btn.classList.remove('copied');
       }, 2000);
     }
+
+    // Log to main process (visible in terminal)
+    function log(...args) {
+      console.log(...args);
+      ipcRenderer.send('log-from-renderer', '[AutoCopy]', ...args);
+    }
+
+    // Save last clicked doc preference to main process
+    function saveLastClickedDoc() {
+      log('Saving preference:', lastClickedDoc);
+      ipcRenderer.invoke('set-last-clicked-doc', lastClickedDoc);
+    }
+
+    // Load last clicked doc preference from main process
+    async function loadLastClickedDoc() {
+      const saved = await ipcRenderer.invoke('get-last-clicked-doc');
+      log('Loaded preference:', saved);
+      if (saved) {
+        lastClickedDoc = saved;
+      }
+    }
+
+    // Auto-copy the last clicked documentation type
+    function autoCopyLastClicked() {
+      log('Attempting auto-copy, lastClickedDoc:', lastClickedDoc);
+      if (!lastClickedDoc) {
+        log('No preference set, skipping auto-copy');
+        return;
+      }
+
+      let textToCopy = null;
+      let btnToHighlight = null;
+
+      switch (lastClickedDoc) {
+        case 'summary':
+          textToCopy = currentDocumentation;
+          btnToHighlight = copySummaryBtn;
+          break;
+        case 'full':
+          // Build full text same as copyFullBtn click handler
+          let fullText = '';
+          if (currentShortenings) {
+            if (currentShortenings.keywords90) fullText += '--- Stichworte (90% kürzer) ---\n\n' + currentShortenings.keywords90 + '\n\n';
+            if (currentShortenings.chef70) fullText += '--- Chef Ultra (70% kürzer) ---\n\n' + currentShortenings.chef70 + '\n\n';
+            if (currentShortenings.chef50) fullText += '--- Chef (50% kürzer) ---\n\n' + currentShortenings.chef50 + '\n\n';
+            if (currentShortenings.pvs40) fullText += '--- PVS (40% kürzer) ---\n\n' + currentShortenings.pvs40 + '\n\n';
+            if (currentShortenings.zfa30) fullText += '--- ZFA (30% kürzer) ---\n\n' + currentShortenings.zfa30 + '\n\n';
+            if (currentShortenings.normalized) fullText += '--- Normalisiert (sprachlich optimiert) ---\n\n' + currentShortenings.normalized + '\n\n';
+          }
+          if (currentDocumentation) fullText += '--- Dokumentation (Vollständig) ---\n\n' + currentDocumentation + '\n\n';
+          if (currentTranscript) fullText += '--- Transkript ---\n\n' + currentTranscript;
+          textToCopy = fullText.trim();
+          btnToHighlight = copyFullBtn;
+          break;
+        case 'keywords90':
+          textToCopy = currentShortenings?.keywords90;
+          btnToHighlight = document.getElementById('copyKeywords90');
+          break;
+        case 'chef70':
+          textToCopy = currentShortenings?.chef70;
+          btnToHighlight = document.getElementById('copyChef70');
+          break;
+        case 'chef50':
+          textToCopy = currentShortenings?.chef50;
+          btnToHighlight = document.getElementById('copyChef50');
+          break;
+        case 'pvs40':
+          textToCopy = currentShortenings?.pvs40;
+          btnToHighlight = document.getElementById('copyPvs40');
+          break;
+        case 'zfa30':
+          textToCopy = currentShortenings?.zfa30;
+          btnToHighlight = document.getElementById('copyZfa30');
+          break;
+        case 'normalized':
+          textToCopy = currentShortenings?.normalized;
+          btnToHighlight = document.getElementById('copyNormalized');
+          break;
+      }
+
+      if (textToCopy && btnToHighlight) {
+        log('Auto-copying:', lastClickedDoc, '- Text length:', textToCopy.length);
+        ipcRenderer.invoke('copy-to-clipboard', textToCopy);
+        showCopied(btnToHighlight);
+      } else {
+        log('Could not auto-copy - textToCopy:', !!textToCopy, 'btnToHighlight:', !!btnToHighlight);
+      }
+    }
+
+    // Load preference on startup
+    loadLastClickedDoc();
 
     // Listen for audio level updates (from local mic or iPhone)
     ipcRenderer.on('audio-level', (event, level) => {

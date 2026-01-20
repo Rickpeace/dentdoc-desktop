@@ -2759,6 +2759,21 @@ ipcMain.handle('copy-to-clipboard', (event, text) => {
   return true;
 });
 
+// Last clicked documentation preference (for auto-copy on success)
+ipcMain.handle('get-last-clicked-doc', () => {
+  return store.get('lastClickedDoc', null);
+});
+
+ipcMain.handle('set-last-clicked-doc', (event, docType) => {
+  store.set('lastClickedDoc', docType);
+  return true;
+});
+
+// Log from renderer processes (for debugging)
+ipcMain.on('log-from-renderer', (event, ...args) => {
+  console.log(...args);
+});
+
 // Feedback handler
 ipcMain.handle('submit-feedback', async (event, data) => {
   try {

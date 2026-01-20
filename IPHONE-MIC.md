@@ -1267,27 +1267,85 @@ async function stopRecordingWithIphone() {
 
 ## Stabilitäts-Features
 
-### Heartbeat / Keep-Alive
+### Heartbeat / Keep-Alive (5 Sekunden)
 
-iOS und WLAN können TCP-Verbindungen "einschlafen" lassen. Um stille Disconnects zu verhindern:
+iOS Safari killt WebSocket-Verbindungen nach ~30-90 Sekunden Inaktivität. Um das zu verhindern:
 
-- iPhone und Desktop senden alle **10 Sekunden** ein `PING`
+- iPhone und Desktop senden alle **5 Sekunden** ein `PING`
 - Relay antwortet mit `PONG`
 - Keine Weiterleitung an Partner (bleibt lokal)
 
 ```javascript
-// iPhone/Desktop
+// iPhone/Desktop - 5s Heartbeat (war vorher 10s)
 setInterval(() => {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'PING' }));
   }
-}, 10000);
+}, 5000);
 
 // Relay
 if (msg.type === 'PING') {
   socket.send(JSON.stringify({ type: 'PONG' }));
   return; // Don't forward
 }
+```
+
+### PONG-Timeout Erkennung
+
+Wenn der Relay nicht antwortet, ist die Verbindung tot:
+
+```javascript
+// Track last PONG
+const lastPongRef = useRef<number>(Date.now());
+
+// In onmessage
+if (msg.type === 'PONG') {
+  lastPongRef.current = Date.now();
+  return;
+}
+
+// In heartbeat interval - prüfen ob PONG zu lange her
+const timeSinceLastPong = Date.now() - lastPongRef.current;
+if (timeSinceLastPong > 15000) {  // > 15s = 3 missed PINGs
+  console.warn('[iPhone] No PONG - connection dead, reconnecting...');
+  ws.close();  // Trigger reconnect via onclose
+}
+```
+
+### Visuelle Verbindungs-Feedback
+
+| PONG-Alter | Status-Farbe | Text |
+|------------|--------------|------|
+| 0-10s | Grün | "Bereit" |
+| 10-15s | Gelb pulsierend | "Verbindung instabil..." |
+| > 15s | Rot pulsierend | "Verbindung unterbrochen - Reconnect..." |
+
+### Auto-Reconnect bei Verbindungsverlust
+
+```javascript
+ws.onclose = () => {
+  // ALWAYS auto-reconnect if we have credentials
+  // (Closure-Bug fix: prüft credentials statt status)
+  if (credentials) {
+    setTimeout(() => connectWebSocket(), 1000);
+  }
+};
+```
+
+### Auto-Aktivierung Mikrofon
+
+Kein "Mikrofon aktivieren" Button mehr nötig:
+
+```javascript
+// Auto-activate ALWAYS after credentials loaded
+useEffect(() => {
+  if (status !== 'need_activation' || !credentials) return;
+
+  const timer = setTimeout(() => {
+    handleActivate();  // iOS zeigt einmalig Berechtigungs-Dialog
+  }, 300);
+  return () => clearTimeout(timer);
+}, [status, credentials]);
 ```
 
 ### Graceful Degradation bei Disconnect
@@ -1701,11 +1759,43 @@ git push
 ## Autor & Datum
 
 Erstellt: Januar 2025
-Letzte Aktualisierung: 18. Januar 2025
+Letzte Aktualisierung: 20. Januar 2025
 
 ---
 
 ## Changelog
+
+### 20. Januar 2025 (v3) - WebSocket Stabilität & Auto-Aktivierung
+
+**WebSocket Keepalive verbessert:**
+
+1. **Heartbeat 10s → 5s**
+   - iOS Safari killt WebSockets nach ~30-90s Inaktivität
+   - 5s Heartbeat verhindert das zuverlässiger
+
+2. **PONG-Timeout Erkennung**
+   - `lastPongRef` trackt letzten PONG-Zeitstempel
+   - Wenn > 15s kein PONG → Verbindung tot → Auto-Reconnect
+   - Visuelle Feedback: Grün (OK) → Gelb pulsierend (10-15s) → Rot pulsierend (>15s)
+
+3. **Auto-Reconnect bei Verbindungsverlust**
+   - `onclose` Handler reconnected automatisch nach 1s
+   - Closure-Bug gefixt: prüft `credentials` statt `status` (status war stale)
+
+4. **Auto-Aktivierung Mikrofon**
+   - Kein "Mikrofon aktivieren" Button mehr nötig
+   - Aktiviert sich automatisch 300ms nach Credential-Load
+   - iOS zeigt einmalig Berechtigungs-Dialog
+
+**Dateien geändert:**
+- `saas-starter/app/mic/page.tsx`: Heartbeat, PONG-Tracking, Auto-Reconnect, Auto-Aktivierung
+- `dentdoc-desktop/main.js`: Heartbeat 10s → 5s
+
+**Ergebnis:**
+- ✅ iPhone bleibt stundenlang verbunden
+- ✅ Automatischer Reconnect bei WLAN-Wechsel
+- ✅ Visuelle Warnung bei instabiler Verbindung
+- ✅ Kein Button-Klick mehr nötig
 
 ### 18. Januar 2025 (v2) - Audio-Optimierung Refactoring
 
