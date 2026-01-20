@@ -2487,7 +2487,8 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     uploadProgress: extra.uploadProgress,
     documentation: extra.documentation || null,
     transcript: extra.transcript || null,
-    shortenings: extra.shortenings || null
+    shortenings: extra.shortenings || null,
+    hideSubtitle: extra.hideSubtitle || false
   };
 
   // Store the data to send
@@ -2542,12 +2543,13 @@ function showLastResult() {
 
   updateStatusOverlay(
     'Fertig!',
-    'Dokumentation bereit',
+    'Dokumentation in Zwischenablage kopiert (Strg+V)',
     'success',
     {
       documentation: lastDocumentation,
       transcript: lastTranscript,
-      shortenings: lastShortenings
+      shortenings: lastShortenings,
+      hideSubtitle: true
     }
   );
 }
