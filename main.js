@@ -402,11 +402,18 @@ function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping 
     return;
   }
 
-  // Extract unique job ID from temp audio filename (e.g., "recording-1705312345678.webm" -> "1705312345678")
+  // Extract unique job ID from temp audio filename
+  // Examples: "recording-1705312345678.webm" -> "1705312345678"
+  //           "speech_only_1705312345678.wav" -> "1705312345678"
   let jobId = Date.now().toString(); // Fallback if no temp audio path
   if (tempAudioPath) {
     const tempFilename = path.basename(tempAudioPath, path.extname(tempAudioPath));
-    jobId = tempFilename.replace('recording-', '');
+    // Remove common prefixes from pipeline temp files
+    jobId = tempFilename
+      .replace('recording-', '')
+      .replace('speech_only_', '')
+      .replace('converted_', '')
+      .replace('leveled_', '');
   }
 
   // Create filename with date and time + job ID for uniqueness
