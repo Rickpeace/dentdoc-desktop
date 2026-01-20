@@ -1436,7 +1436,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
     const documentation = docResponse.documentation;
     const finalTranscript = docResponse.transcript || transcript;  // Use formatted transcript with speaker labels
-    const shortenings = docResponse.shortenings || [];
+    const shortenings = docResponse.shortenings || null;
 
     // Store for potential retry/copy
     lastDocumentation = documentation;
@@ -2294,7 +2294,7 @@ function getOverlaySizeForState(type, extra = {}) {
     case 'success':
       // Smaller height if no shortenings (e.g., "Letzte Dokumentation anzeigen")
       const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
-      return { width: 402, height: hasShorts ? 417 : 320 };
+      return { width: 402, height: hasShorts ? 417 : 330 };
 
     case 'error':
       return { width: 402, height: 141 };
