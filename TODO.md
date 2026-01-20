@@ -2,6 +2,20 @@
 
 ## Feature Requests
 
+### Dashboard Transkript-Übersicht mit klickbaren Audio-Links (GEPLANT)
+**Übersicht:** Neue Dashboard-Sektion "Transkripte" mit Liste aller Transkripte, Suche nach Datum/Zeit/Sprecher, und klickbare Hyperlinks für zahnmedizinische Begriffe die zur Audio-Stelle springen.
+
+**Implementierung:**
+1. JSON-Metadaten pro Transkript speichern (utterances mit timestamps, keywords)
+2. KI-Keyword-Extraktion (Befunde, Zahnfarben, Materialien, etc.)
+3. Dashboard UI - "Transkripte" Tab mit Suche nach Datum/Uhrzeit/Sprecher
+4. Detail-Modal mit Audio-Player + klickbare Keywords → audio.currentTime Navigation
+
+**Dateien:** main.js, src/apiClient.js, src/dashboard.html, src/scripts/dashboard.js
+
+**Detaillierter Plan:** C:\Users\Richa\.claude\plans\curried-seeking-avalanche.md
+---
+
 
 
 knopf für aufnahme .... FLIC !? oder selber bauen ?
