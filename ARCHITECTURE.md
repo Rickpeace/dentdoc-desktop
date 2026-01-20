@@ -2137,9 +2137,9 @@ npm run build:win
    - ❌ Auto-Level / loudnorm / gain (DEAKTIVIERT)
 
 3. **Original-Audio Speicherung:**
-   - Bei aktivierter Audio-Speicherung wird jetzt auch die Original-Datei (vor VAD) gespeichert
-   - `filename.wav` = speech_only (nach VAD)
-   - `filename_original.wav` = Original (vor VAD)
+   - Bei aktivierter Audio-Speicherung werden jetzt beide Dateien gespeichert
+   - `filename.wav` = Original (vor VAD, unveränderte Aufnahme)
+   - `filename_speech_only.wav` = Nach VAD (Stille entfernt)
 
 **Um Auto-Level wieder zu aktivieren:**
 Code in `src/pipeline/index.js` Zeile 100-108 wieder einkommentieren.

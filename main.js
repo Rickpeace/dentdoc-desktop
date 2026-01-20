@@ -518,14 +518,15 @@ ${transcript}
 
     // Save audio if enabled and source exists
     if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) {
+      // Save speech_only (after VAD) with suffix
       const audioExt = path.extname(tempAudioPath) || '.wav';
-      const audioPath = path.join(folderPath, `${baseFilename}${audioExt}`);
-      fs.copyFileSync(tempAudioPath, audioPath);
+      const speechOnlyPath = path.join(folderPath, `${baseFilename}_speech_only${audioExt}`);
+      fs.copyFileSync(tempAudioPath, speechOnlyPath);
 
-      // Also save original audio (before VAD) if available
+      // Save original audio (before VAD) as main file - this is the unmodified recording
       if (originalAudioPath && fs.existsSync(originalAudioPath)) {
         const originalExt = path.extname(originalAudioPath) || '.wav';
-        const originalPath = path.join(folderPath, `${baseFilename}_original${originalExt}`);
+        const originalPath = path.join(folderPath, `${baseFilename}${originalExt}`);
         fs.copyFileSync(originalAudioPath, originalPath);
       }
     }
@@ -535,9 +536,9 @@ ${transcript}
   const savedItems = [];
   if (saveTranscript) savedItems.push('Transkript');
   if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) {
-    savedItems.push('Audio (speech_only)');
+    savedItems.push('Audio (original)');
     if (originalAudioPath && fs.existsSync(originalAudioPath)) {
-      savedItems.push('Audio (original)');
+      savedItems.push('Audio (speech_only)');
     }
   }
   if (savedItems.length > 0) {
