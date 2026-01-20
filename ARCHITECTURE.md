@@ -9,19 +9,20 @@
 5. [API Client](#api-client-srcapiclientjs)
 6. [Audio-Aufnahme](#audio-aufnahme-srcaudiorecorderjs)
 7. [Audio-Konvertierung](#audio-konvertierung-srcaudio-converterjs)
-8. [Speaker Recognition](#speaker-recognition)
-9. [Stimmprofile](#stimmprofile-srcspeaker-recognitionvoice-profilesjs)
-10. [Bausteine-System](#bausteine-system)
-11. [Benutzeroberflächen](#benutzeroberflächen)
-12. [IPC-Kommunikation](#ipc-kommunikation)
-13. [Datenfluss & Ablaufdiagramme](#datenfluss--ablaufdiagramme)
-14. [Speicherung & Persistenz](#speicherung--persistenz)
-15. [Auto-Update System](#auto-update-system)
-16. [Subscription & Trial-Logik](#subscription--trial-logik)
-17. [Fehlerbehandlung](#fehlerbehandlung)
-18. [Sicherheit](#sicherheit)
-19. [Build & Distribution](#build--distribution)
-20. [Changelog](#changelog)
+8. [iPhone als Mikrofon](#iphone-als-mikrofon)
+9. [Speaker Recognition](#speaker-recognition)
+10. [Stimmprofile](#stimmprofile-srcspeaker-recognitionvoice-profilesjs)
+11. [Bausteine-System](#bausteine-system)
+12. [Benutzeroberflächen](#benutzeroberflächen)
+13. [IPC-Kommunikation](#ipc-kommunikation)
+14. [Datenfluss & Ablaufdiagramme](#datenfluss--ablaufdiagramme)
+15. [Speicherung & Persistenz](#speicherung--persistenz)
+16. [Auto-Update System](#auto-update-system)
+17. [Subscription & Trial-Logik](#subscription--trial-logik)
+18. [Fehlerbehandlung](#fehlerbehandlung)
+19. [Sicherheit](#sicherheit)
+20. [Build & Distribution](#build--distribution)
+21. [Changelog](#changelog)
 
 ---
 
@@ -882,12 +883,25 @@ ffmpeg -i input.wav \
 
 **Aktualisiert Januar 2025** - Quellenbasierte Lautstärke-Anpassung mit unterschiedlichen Strategien für iPhone und Desktop Mic.
 
+> ⚠️ **TEMPORÄR DEAKTIVIERT (Januar 2025)**
+> Auto-Level ist aktuell für Debugging-Zwecke ausgeschaltet.
+> Audio wird 1:1 unverändert durch die Pipeline geschickt.
+> Siehe `src/pipeline/index.js` Zeile 96-108 (auskommentiert).
+>
+> Aktive Filter:
+> - ✅ Highpass 90Hz + Limiter (nur bei Live-Mic FFmpeg Recording)
+> - ❌ Auto-Level / loudnorm / gain (DEAKTIVIERT)
+
 #### Grundprinzip
 
 Alle Audio-Optimierung passiert NACH der Aufnahme auf dem Desktop. iPhone & Mic liefern Rohmaterial – die Pipeline macht es gut.
 
 ```
-RAW AUDIO → Auto-Level (quellenabhängig) → VAD → speech_only.wav → Bandpass → AssemblyAI
+# AKTUELL (Auto-Level deaktiviert):
+RAW AUDIO → VAD → speech_only.wav → AssemblyAI
+
+# NORMAL (wenn Auto-Level aktiv):
+RAW AUDIO → Auto-Level (quellenabhängig) → VAD → speech_only.wav → AssemblyAI
 ```
 
 #### Funktionen
@@ -1218,6 +1232,58 @@ Der `speechRenderer` erstellt eine `speechMap` die Zeitstempel vom speech-only A
 | `getTotalDuration(segments)` | Berechnet Gesamtdauer aller Segmente |
 | `mapToOriginalTime(speechTimeMs, speechMap)` | Mappt speech-only Zeit zu Original-Zeit |
 | `mapToSpeechTime(originalTimeMs, speechMap)` | Mappt Original-Zeit zu speech-only Zeit |
+
+---
+
+## iPhone als Mikrofon
+
+> **Vollständige Dokumentation:** Siehe [IPHONE-MIC.md](IPHONE-MIC.md)
+
+Das iPhone kann als kabelloses Mikrofon verwendet werden. Audio wird via WebSocket durch einen Railway Relay zum Desktop gestreamt.
+
+### Architektur
+
+```
+┌──────────────┐     PCM Stream     ┌─────────────────┐     PCM Stream     ┌─────────────────┐
+│   iPhone     │ ─────────────────► │ Railway Audio   │ ─────────────────► │ Desktop         │
+│   (Safari)   │                    │ Relay (WS)      │                    │ FFmpeg → .wav   │
+└──────────────┘                    └─────────────────┘                    └─────────────────┘
+```
+
+### Kernprinzipien
+
+| Komponente | Macht | Macht NICHT |
+|------------|-------|-------------|
+| **iPhone** | Audio aufnehmen, PCM streamen | VAD, Upload, Speichern, Account |
+| **Railway Relay** | WebSocket weiterleiten | Buffer, VAD, WAV schreiben |
+| **Desktop** | WAV schreiben, VAD, Upload | - |
+| **Backend** | Pairing verwalten, Token ausstellen | Audio verarbeiten |
+
+### WebSocket Stabilität
+
+- **5s Heartbeat:** iPhone sendet alle 5 Sekunden PING
+- **PONG-Timeout:** Wenn > 15s kein PONG → Verbindung tot → Auto-Reconnect
+- **Visuelle Feedback:** Grün (OK) → Gelb (instabil) → Rot (Reconnect)
+
+### Auto-Aktivierung
+
+Die iPhone Web Page (`/mic`) aktiviert das Mikrofon automatisch beim Laden - kein Button mehr nötig. iOS zeigt einmalig den Berechtigungs-Dialog.
+
+### PWA Support
+
+Die Seite kann als Home-Screen App installiert werden:
+- Persistente Mikrofon-Berechtigung
+- Kein Safari-Chrome, läuft standalone
+- Bessere WebSocket-Stabilität
+
+### Dateien
+
+| Datei | Beschreibung |
+|-------|--------------|
+| `main.js` | `startRecordingWithIphone()`, `stopRecordingWithIphone()` |
+| `src/dashboard.html` | Mikrofonquelle Radio-Buttons, Pairing UI |
+| `saas-starter/app/mic/page.tsx` | iPhone Web Page (React) |
+| `railway-audio-relay/server.js` | WebSocket Relay Server |
 
 ---
 
@@ -2056,6 +2122,27 @@ npm run build:win
 ---
 
 ## Changelog
+
+### Version 1.5.1 (2025-01-20)
+
+**Auto-Level temporär deaktiviert (Debugging):**
+
+1. **Audio-Modifikationen deaktiviert:**
+   - `src/pipeline/index.js`: `autoLevel()` Aufruf auskommentiert (Zeile 96-108)
+   - Audio wird jetzt 1:1 unverändert durch die Pipeline geschickt
+   - Gilt für: Live-Mic (F9), Datei-Upload, iPhone-Upload
+
+2. **Aktive Filter (bleiben erhalten):**
+   - ✅ Highpass 90Hz + Limiter 0.97 (nur bei Live-Mic FFmpeg Recording)
+   - ❌ Auto-Level / loudnorm / gain (DEAKTIVIERT)
+
+3. **Original-Audio Speicherung:**
+   - Bei aktivierter Audio-Speicherung wird jetzt auch die Original-Datei (vor VAD) gespeichert
+   - `filename.wav` = speech_only (nach VAD)
+   - `filename_original.wav` = Original (vor VAD)
+
+**Um Auto-Level wieder zu aktivieren:**
+Code in `src/pipeline/index.js` Zeile 100-108 wieder einkommentieren.
 
 ### Version 1.5.0 (2025-01-18)
 

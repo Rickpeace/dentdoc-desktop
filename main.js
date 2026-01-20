@@ -388,13 +388,14 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {string} transcript - Full transcript text
  * @param {Object} speakerMapping - Speaker mapping object
  * @param {Object} options - Save options
- * @param {string} options.tempAudioPath - Path to temporary audio file
+ * @param {string} options.tempAudioPath - Path to temporary audio file (speech_only after VAD)
+ * @param {string} options.originalAudioPath - Path to original audio file (before VAD, optional)
  * @param {boolean} options.saveTranscript - Whether to save transcript
  * @param {boolean} options.saveAudio - Whether to save audio
  * @param {Object} options.shortenings - Shortenings from v1.2 hybrid mode
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -520,13 +521,25 @@ ${transcript}
       const audioExt = path.extname(tempAudioPath) || '.wav';
       const audioPath = path.join(folderPath, `${baseFilename}${audioExt}`);
       fs.copyFileSync(tempAudioPath, audioPath);
+
+      // Also save original audio (before VAD) if available
+      if (originalAudioPath && fs.existsSync(originalAudioPath)) {
+        const originalExt = path.extname(originalAudioPath) || '.wav';
+        const originalPath = path.join(folderPath, `${baseFilename}_original${originalExt}`);
+        fs.copyFileSync(originalAudioPath, originalPath);
+      }
     }
   });
 
   // Nice formatted log for saved files
   const savedItems = [];
   if (saveTranscript) savedItems.push('Transkript');
-  if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) savedItems.push('Audio');
+  if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) {
+    savedItems.push('Audio (speech_only)');
+    if (originalAudioPath && fs.existsSync(originalAudioPath)) {
+      savedItems.push('Audio (original)');
+    }
+  }
   if (savedItems.length > 0) {
     const folderName = path.basename(targetFolders[0]);
     console.log('');
@@ -1340,6 +1353,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       try {
         saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
           tempAudioPath: wavPath,
+          originalAudioPath: audioFilePath,  // Original before VAD
           saveTranscript: autoExport,
           saveAudio: keepAudio,
           shortenings: shortenings

@@ -71,16 +71,12 @@ async function processFileWithVAD(audioPath, options = {}) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
-  // Log temp folder location and source strategy
+  // Log temp folder location
   console.log('');
   console.log('///// TEMP DATEIEN /////');
   console.log(`  Ordner: ${outputDir}`);
   console.log(`  Quelle: ${source}`);
-  if (source === 'iphone') {
-    console.log(`  >>> Auto-Level Strategie: IMMER loudnorm (iPhone)`);
-  } else {
-    console.log(`  >>> Auto-Level Strategie: RMS-basiert (loudnorm < -50dB | mild_gain -50 bis -28dB | none > -28dB)`);
-  }
+  console.log(`  >>> Auto-Level: DEAKTIVIERT (Debug-Modus)`);
 
   // Check if file needs conversion (not already WAV)
   const ext = path.extname(audioPath).toLowerCase();
@@ -97,20 +93,19 @@ async function processFileWithVAD(audioPath, options = {}) {
     console.log(`  [TEMP] Erstellt: ${path.basename(processPath)} (${convertedSize} MB)`);
   }
 
-  // Auto-Level: Measure RMS and apply appropriate gain/normalization
-  // Strategy depends on source: iPhone = always loudnorm, Mic = RMS-based
-  onProgress({ stage: 'autolevel', percent: 3, message: 'Audio wird optimiert...' });
-
-  const leveledPath = path.join(outputDir, `leveled_${Date.now()}.wav`);
-
-  try {
-    const levelResult = await audioConverter.autoLevel(processPath, leveledPath, { source });
-    console.log(`  [TEMP] Erstellt: ${path.basename(leveledPath)} (Auto-Level: ${levelResult.strategy})`);
-    processPath = levelResult.outputPath;
-  } catch (err) {
-    console.warn(`  [AutoLevel] Übersprungen: ${err.message}`);
-    // Continue with original file if auto-level fails
-  }
+  // TEMPORÄR DEAKTIVIERT: Auto-Level überspringen
+  // Audio soll 1:1 unverändert bleiben für Debugging
+  // Um wieder zu aktivieren: Code unten einkommentieren
+  //
+  // onProgress({ stage: 'autolevel', percent: 3, message: 'Audio wird optimiert...' });
+  // const leveledPath = path.join(outputDir, `leveled_${Date.now()}.wav`);
+  // try {
+  //   const levelResult = await audioConverter.autoLevel(processPath, leveledPath, { source });
+  //   console.log(`  [TEMP] Erstellt: ${path.basename(leveledPath)} (Auto-Level: ${levelResult.strategy})`);
+  //   processPath = levelResult.outputPath;
+  // } catch (err) {
+  //   console.warn(`  [AutoLevel] Übersprungen: ${err.message}`);
+  // }
 
   // Run offline VAD
   onProgress({ stage: 'vad', percent: 5, message: 'Stille wird entfernt...' });
