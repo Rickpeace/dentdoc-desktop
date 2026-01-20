@@ -2542,7 +2542,7 @@ function showLastResult() {
   }
 
   updateStatusOverlay(
-    'Fertig!',
+    'Tipp: Zuletzt gewählte Option wird automatisch kopiert',
     'Dokumentation in Zwischenablage kopiert (Strg+V)',
     'success',
     {
