@@ -2294,7 +2294,7 @@ function getOverlaySizeForState(type, extra = {}) {
     case 'success':
       // Smaller height if no shortenings (e.g., "Letzte Dokumentation anzeigen")
       const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
-      return { width: 402, height: hasShorts ? 417 : 330 };
+      return { width: 402, height: hasShorts ? 417 : 280 };
 
     case 'error':
       return { width: 402, height: 141 };
