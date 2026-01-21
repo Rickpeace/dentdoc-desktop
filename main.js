@@ -1877,7 +1877,14 @@ async function startRecordingWithIphone() {
         console.log('[iPhone] WebSocket closed:', code, reason?.toString());
         if (isIphoneSession && isRecording) {
           console.warn('[iPhone] Connection lost during recording!');
-          // Could show warning to user here
+
+          // Auto-reconnect to relay - so we can receive IPHONE_CONNECTED when phone reconnects
+          console.log('[iPhone] Reconnecting to relay...');
+          setTimeout(() => {
+            if (!isIphoneSession || !isRecording) return; // Recording ended, don't reconnect
+
+            reconnectToRelay(settings.iphoneDeviceId, settings.desktopToken, timeout, resolve);
+          }, 1000);
         }
       });
     });
@@ -2023,6 +2030,105 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
   // Handle PONG from relay (heartbeat response) - just log
   if (msg.type === 'PONG') {
     // Heartbeat response - connection is alive
+  }
+}
+
+/**
+ * Reconnect to relay server during an active recording
+ * Called when desktop WebSocket dies but recording is still active
+ */
+function reconnectToRelay(deviceId, desktopToken, timeout, resolve) {
+  if (!isIphoneSession || !isRecording) {
+    console.log('[iPhone] Recording ended, skipping reconnect');
+    return;
+  }
+
+  const relayUrl = store.get('iphoneRelayUrl') || 'wss://dentdoc-audio-relay-production.up.railway.app';
+  const wsUrl = `${relayUrl}/stream?device=${deviceId}&role=desktop&token=${desktopToken}`;
+  console.log('[iPhone] Reconnecting to relay:', wsUrl);
+
+  try {
+    iphoneRelayWs = new WebSocket(wsUrl);
+
+    iphoneRelayWs.on('open', () => {
+      console.log('[iPhone] Reconnected to relay, waiting for iPhone...');
+
+      // Show QR code for user to scan/reconnect
+      updateStatusOverlay(
+        'Smartphone getrennt',
+        'Bitte Browser öffnen oder QR-Code scannen',
+        'waiting-iphone',
+        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+      );
+
+      // Restart heartbeat
+      if (iphoneHeartbeatInterval) {
+        clearInterval(iphoneHeartbeatInterval);
+      }
+      iphoneHeartbeatInterval = setInterval(() => {
+        if (iphoneRelayWs && iphoneRelayWs.readyState === WebSocket.OPEN) {
+          iphoneRelayWs.send(JSON.stringify({ type: 'PING' }));
+        }
+      }, 5000);
+    });
+
+    iphoneRelayWs.on('message', (data) => {
+      if (Buffer.isBuffer(data) && data.length > 0) {
+        if (data[0] === 0x7b) { // '{'
+          try {
+            const msg = JSON.parse(data.toString());
+            handleIphoneControlMessage(msg, timeout, resolve);
+            return;
+          } catch (e) {}
+        }
+
+        // Binary audio data
+        if (isIphoneSession && iphoneFfmpegProcess && iphoneFfmpegProcess.stdin && !iphoneFfmpegProcess.stdin.destroyed) {
+          try {
+            iphoneFfmpegProcess.stdin.write(data);
+
+            // Audio level for UI
+            const now = Date.now();
+            if (!global.lastAudioLevelUpdate || now - global.lastAudioLevelUpdate > 100) {
+              global.lastAudioLevelUpdate = now;
+              const int16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
+              let sum = 0;
+              for (let i = 0; i < int16.length; i++) sum += int16[i] * int16[i];
+              const rawRms = Math.sqrt(sum / int16.length) / 32768;
+              const rms = Math.min(1, rawRms * 4);
+              if (statusOverlay && !statusOverlay.isDestroyed()) {
+                statusOverlay.webContents.send('iphone-audio-level', rms);
+              }
+            }
+          } catch (e) {}
+        }
+      } else if (typeof data === 'string') {
+        try {
+          const msg = JSON.parse(data);
+          handleIphoneControlMessage(msg, timeout, resolve);
+        } catch (e) {}
+      }
+    });
+
+    iphoneRelayWs.on('error', (err) => {
+      console.error('[iPhone] Reconnect error:', err.message);
+    });
+
+    iphoneRelayWs.on('close', (code, reason) => {
+      console.log('[iPhone] Reconnected WebSocket closed:', code, reason?.toString());
+      if (isIphoneSession && isRecording) {
+        console.log('[iPhone] Still recording, will reconnect again...');
+        setTimeout(() => {
+          reconnectToRelay(deviceId, desktopToken, timeout, resolve);
+        }, 2000);
+      }
+    });
+
+  } catch (error) {
+    console.error('[iPhone] Reconnect failed:', error);
+    setTimeout(() => {
+      reconnectToRelay(deviceId, desktopToken, timeout, resolve);
+    }, 2000);
   }
 }
 
