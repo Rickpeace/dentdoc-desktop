@@ -3124,7 +3124,7 @@ ipcMain.on('minimize-to-tray', () => {
       tray.displayBalloon({
         iconType: 'info',
         title: 'DentDoc läuft im Hintergrund',
-        content: 'Klicken Sie auf dieses Symbol, um DentDoc wieder zu öffnen.',
+        content: 'Klicken Sie auf dieses Symbol ^, um DentDoc wieder zu öffnen.',
         noSound: true
       });
     }
