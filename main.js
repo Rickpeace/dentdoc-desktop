@@ -2541,7 +2541,7 @@ function showLastResult() {
   }
 
   updateStatusOverlay(
-    'Tipp: Zuletzt gewählte Option wird automatisch kopiert',
+    'Tipp: Zuletzt gewählte Option wird beim nächsten Mal automatisch kopiert',
     '',
     'success',
     {
