@@ -2487,8 +2487,7 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     uploadProgress: extra.uploadProgress,
     documentation: extra.documentation || null,
     transcript: extra.transcript || null,
-    shortenings: extra.shortenings || null,
-    hideSubtitle: extra.hideSubtitle || false
+    shortenings: extra.shortenings || null
   };
 
   // Store the data to send
@@ -2543,13 +2542,12 @@ function showLastResult() {
 
   updateStatusOverlay(
     'Tipp: Zuletzt gewählte Option wird automatisch kopiert',
-    'Dokumentation in Zwischenablage kopiert (Strg+V)',
+    '',
     'success',
     {
       documentation: lastDocumentation,
       transcript: lastTranscript,
-      shortenings: lastShortenings,
-      hideSubtitle: true
+      shortenings: lastShortenings
     }
   );
 }

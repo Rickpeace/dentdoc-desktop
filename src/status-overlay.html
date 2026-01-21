@@ -811,8 +811,6 @@
           stopTimer();
           iconEmoji.textContent = '✅';
           message.textContent = data.message;
-          // Hide subtitle text but keep space (for consistent window height)
-          message.style.visibility = data.hideSubtitle ? 'hidden' : 'visible';
           progressContainer.classList.remove('visible');
           if (data.documentation) {
             currentDocumentation = data.documentation;
