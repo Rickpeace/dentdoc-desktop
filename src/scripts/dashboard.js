@@ -107,7 +107,21 @@ async function loadHomeStats() {
 
     const shortcut = await ipcRenderer.invoke('get-shortcut');
     document.getElementById('shortcutKey').textContent = shortcut || 'F9';
-    document.getElementById('homeShortcutKey').textContent = shortcut || 'F9';
+
+    // Load device usage
+    try {
+      const subData = await ipcRenderer.invoke('get-subscription-details');
+      const deviceUsage = `${subData.activeDevices || 0}/${subData.maxDevices || 0}`;
+      document.getElementById('deviceUsage').textContent = deviceUsage;
+    } catch (e) {
+      document.getElementById('deviceUsage').textContent = '-/-';
+    }
+
+    // Load onboarding card
+    await loadOnboardingCard(shortcut || 'F9');
+
+    // Load iPhone dashboard section if iPhone is selected
+    await loadIphoneDashboardSection(shortcut || 'F9');
 
     // Load last documentation
     await loadLastDocumentation();
@@ -115,6 +129,85 @@ async function loadHomeStats() {
     console.error('Error loading home stats:', error);
   }
 }
+
+// ===== Onboarding Tutorial Card =====
+async function loadOnboardingCard(shortcut) {
+  try {
+    const shouldShow = await ipcRenderer.invoke('check-onboarding-visible');
+    const onboardingCard = document.getElementById('onboardingCard');
+
+    if (shouldShow && onboardingCard) {
+      onboardingCard.style.display = 'block';
+
+      // Update shortcut keys in the onboarding steps
+      const startKey = document.getElementById('onboardingShortcutStart');
+      const stopKey = document.getElementById('onboardingShortcutStop');
+      if (startKey) startKey.textContent = shortcut;
+      if (stopKey) stopKey.textContent = shortcut;
+    } else if (onboardingCard) {
+      onboardingCard.style.display = 'none';
+    }
+  } catch (error) {
+    console.error('Error loading onboarding card:', error);
+  }
+}
+
+// Onboarding card event handlers
+function initOnboardingCard() {
+  const closeBtn = document.getElementById('onboardingCloseBtn');
+  const gotItBtn = document.getElementById('onboardingGotItBtn');
+  const dontShowCheckbox = document.getElementById('onboardingDontShowAgain');
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      hideOnboardingCard(false); // Don't permanently dismiss on X click
+    });
+  }
+
+  if (gotItBtn) {
+    gotItBtn.addEventListener('click', () => {
+      const dontShowAgain = dontShowCheckbox && dontShowCheckbox.checked;
+      hideOnboardingCard(dontShowAgain);
+    });
+  }
+}
+
+async function hideOnboardingCard(permanently) {
+  const onboardingCard = document.getElementById('onboardingCard');
+
+  if (onboardingCard) {
+    // Animate out
+    onboardingCard.style.animation = 'onboardingSlideOut 0.3s ease-out forwards';
+
+    setTimeout(async () => {
+      onboardingCard.style.display = 'none';
+      onboardingCard.style.animation = '';
+
+      if (permanently) {
+        await ipcRenderer.invoke('dismiss-onboarding-permanently');
+      }
+    }, 280);
+  }
+}
+
+// Add slide out animation dynamically
+const onboardingStyle = document.createElement('style');
+onboardingStyle.textContent = `
+  @keyframes onboardingSlideOut {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+  }
+`;
+document.head.appendChild(onboardingStyle);
+
+// Initialize onboarding card handlers
+initOnboardingCard();
 
 // Listen for recording completed to refresh dashboard
 ipcRenderer.on('recording-completed', async () => {
@@ -642,15 +735,6 @@ async function initSidebarLinks() {
 
 initSidebarLinks();
 
-// ===== Recording Quick Action =====
-document.getElementById('startRecordingCard').addEventListener('click', async () => {
-  try {
-    await ipcRenderer.invoke('toggle-recording');
-  } catch (error) {
-    console.error('Error toggling recording:', error);
-  }
-});
-
 // ===== Window Controls =====
 document.getElementById('minimizeBtn').addEventListener('click', () => {
   ipcRenderer.send('minimize-window');
@@ -759,15 +843,6 @@ async function startDashboardTour() {
         }
       },
       {
-        element: '#startRecordingCard',
-        popover: {
-          title: 'Schnellstart',
-          description: 'Klicken Sie hier oder drücken Sie F9, um eine Aufnahme zu starten. Die Dokumentation wird automatisch erstellt.',
-          side: 'bottom',
-          align: 'center'
-        }
-      },
-      {
         element: '#nav-settings',
         popover: {
           title: 'Einstellungen',
@@ -829,7 +904,8 @@ async function checkFirstRun() {
   }
 }
 
-checkFirstRun();
+// DISABLED: Dashboard tour temporarily disabled
+// checkFirstRun();
 
 
 // =============================================================================
@@ -2833,14 +2909,15 @@ function createSettingsTour() {
   });
 }
 
-document.getElementById('settingsStartTourBtn').addEventListener('click', () => {
-  const tourDriver = createSettingsTour();
-  if (tourDriver) {
-    tourDriver.drive();
-  } else {
-    alert('Tour-Funktion ist nicht verfügbar.');
-  }
-});
+// DISABLED: Settings tour temporarily disabled
+// document.getElementById('settingsStartTourBtn').addEventListener('click', () => {
+//   const tourDriver = createSettingsTour();
+//   if (tourDriver) {
+//     tourDriver.drive();
+//   } else {
+//     alert('Tour-Funktion ist nicht verfügbar.');
+//   }
+// });
 
 
 // =============================================================================
@@ -3023,41 +3100,6 @@ async function loadViewContent(viewName) {
       break;
   }
 }
-
-// Also load device usage on home stats
-const originalLoadHomeStats = loadHomeStats;
-async function loadHomeStatsWithDevices() {
-  try {
-    const stats = await ipcRenderer.invoke('get-dashboard-stats');
-
-    document.getElementById('todayRecordings').textContent = stats.todayRecordings || 0;
-    document.getElementById('profileCount').textContent = stats.profileCount || 0;
-
-    const shortcut = await ipcRenderer.invoke('get-shortcut');
-    document.getElementById('shortcutKey').textContent = shortcut || 'F9';
-    document.getElementById('homeShortcutKey').textContent = shortcut || 'F9';
-
-    // Load device usage
-    try {
-      const subData = await ipcRenderer.invoke('get-subscription-details');
-      const deviceUsage = `${subData.activeDevices || 0}/${subData.maxDevices || 0}`;
-      document.getElementById('deviceUsage').textContent = deviceUsage;
-    } catch (e) {
-      document.getElementById('deviceUsage').textContent = '-/-';
-    }
-
-    // Load iPhone dashboard section if iPhone is selected
-    await loadIphoneDashboardSection(shortcut || 'F9');
-
-    // Load last documentation
-    await loadLastDocumentation();
-  } catch (error) {
-    console.error('Error loading home stats:', error);
-  }
-}
-
-// Override loadHomeStats
-loadHomeStats = loadHomeStatsWithDevices;
 
 // =============================================================================
 // TEXTBAUSTEINE V1.2 VIEW

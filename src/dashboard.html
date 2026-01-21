@@ -166,27 +166,85 @@
           <p>Ihre intelligente Dokumentationslösung für die Zahnarztpraxis</p>
         </div>
 
-        <div class="quick-actions">
-          <div class="quick-action-card" id="startRecordingCard">
-            <div class="quick-action-icon recording">
+        <!-- Onboarding Tutorial Card - shown for new users -->
+        <div class="onboarding-card" id="onboardingCard" style="display: none;">
+          <div class="onboarding-header">
+            <div class="onboarding-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                <line x1="12" y1="19" x2="12" y2="23"/>
-                <line x1="8" y1="23" x2="16" y2="23"/>
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
               </svg>
             </div>
-            <div class="quick-action-content">
-              <h3>Aufnahme starten</h3>
-              <p>Drücken Sie <kbd id="homeShortcutKey">F9</kbd> oder klicken Sie hier</p>
-            </div>
-            <div class="quick-action-arrow">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M5 12h14M12 5l7 7-7 7"/>
-              </svg>
+            <div class="onboarding-title">
+              <h3>Wichtig: So nutzen Sie DentDoc richtig</h3>
+              <p>Kurzanleitung in 4 Schritten - bitte lesen!</p>
             </div>
           </div>
 
+          <div class="onboarding-content">
+            <!-- Step 1: Tray Setup -->
+            <div class="onboarding-step">
+              <div class="onboarding-step-number">1</div>
+              <div class="onboarding-step-content">
+                <h4>DentDoc läuft im System-Tray</h4>
+                <p>Schließen Sie dieses Fenster und arbeiten Sie ungestört. DentDoc läuft leise im Hintergrund, startet automatisch mit Ihrem PC und ist bei Bedarf nur einen Klick entfernt - <strong>Linksklick</strong> für das Dashboard, <strong>Rechtsklick</strong> für ein Schnellwahlmenü.</p>
+                <div class="onboarding-tray-hint">
+                  <div class="tray-visual">
+                    <span class="tray-arrow">^</span>
+                    <span class="tray-text">Klicken Sie hier in der Taskleiste</span>
+                  </div>
+                  <p class="tray-instruction"><strong>Wichtig:</strong> Ziehen Sie das DentDoc-Symbol aus dem versteckten Bereich (^) in die sichtbare Taskleiste, damit Sie es immer sehen können.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 2: Start Recording -->
+            <div class="onboarding-step">
+              <div class="onboarding-step-number">2</div>
+              <div class="onboarding-step-content">
+                <h4>Aufnahme starten</h4>
+                <p>Drücken Sie <kbd id="onboardingShortcutStart">F9</kbd> zu Beginn der Behandlung. Ein Statusfenster erscheint und zeigt den Aufnahmefortschritt.</p>
+                <p class="onboarding-note">Das Statusfenster ist verschiebbar und merkt sich seine Position.</p>
+              </div>
+            </div>
+
+            <!-- Step 3: Stop Recording -->
+            <div class="onboarding-step">
+              <div class="onboarding-step-number">3</div>
+              <div class="onboarding-step-content">
+                <h4>Aufnahme beenden</h4>
+                <p>Drücken Sie <kbd id="onboardingShortcutStop">F9</kbd> erneut am Ende der Behandlung. Warten Sie, bis die Verarbeitung abgeschlossen ist.</p>
+              </div>
+            </div>
+
+            <!-- Step 4: Paste Result -->
+            <div class="onboarding-step">
+              <div class="onboarding-step-number">4</div>
+              <div class="onboarding-step-content">
+                <h4>Dokumentation einfügen</h4>
+                <p>Die Zusammenfassung wird automatisch in die <strong>Zwischenablage</strong> kopiert. Wechseln Sie zu Ihrer PVS-Software und drücken Sie <kbd>Strg+V</kbd> zum Einfügen.</p>
+                <p class="onboarding-note">Im Statusfenster können Sie verschiedene Zusammenfassungsarten wählen. Ihre Auswahl wird für zukünftige Aufnahmen gespeichert.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="onboarding-footer">
+            <label class="onboarding-checkbox-label">
+              <input type="checkbox" id="onboardingDontShowAgain">
+              <span class="checkbox-custom"></span>
+              <span>Nicht mehr anzeigen</span>
+            </label>
+            <button class="btn btn-primary" id="onboardingGotItBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              Verstanden!
+            </button>
+          </div>
+        </div>
+
+        <div class="quick-actions">
           <div class="stats-grid stats-grid-3">
             <div class="stat-card">
               <div class="stat-icon">
@@ -330,26 +388,6 @@
           </div>
         </div>
 
-        <div class="info-section">
-          <h2>So funktioniert's</h2>
-          <div class="steps-grid">
-            <div class="step-card">
-              <div class="step-number">1</div>
-              <h4>Aufnahme starten</h4>
-              <p>Drücken Sie F9 oder klicken Sie auf den Aufnahme-Button</p>
-            </div>
-            <div class="step-card">
-              <div class="step-number">2</div>
-              <h4>Sprechen</h4>
-              <p>Diktieren Sie Ihre Behandlungsdokumentation</p>
-            </div>
-            <div class="step-card">
-              <div class="step-number">3</div>
-              <h4>Fertig</h4>
-              <p>Die Dokumentation wird automatisch erstellt und in die Zwischenablage kopiert</p>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- Transcripts View -->
@@ -724,11 +762,11 @@
             </div>
             <label class="checkbox-label">
               <input type="checkbox" id="settingsAutoExportCheckbox">
-              <span>Transkripte speichern (.txt)</span>
+              <span>Dokumentationen lokal speichern (Empfohlen)</span>
             </label>
             <label class="checkbox-label">
               <input type="checkbox" id="settingsKeepAudioCheckbox">
-              <span>Audioaufnahmen speichern (.webm)</span>
+              <span>Audiodateien lokal speichern (Empfohlen)</span>
             </label>
             <div id="settingsExportPathSection">
               <label for="settingsTranscriptPath">Speicherort</label>
@@ -2231,23 +2269,23 @@
               <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
             </svg>
           </div>
-          <h2>Transkripte speichern</h2>
-          <p>Möchten Sie die Rohtranskription Ihrer Aufnahmen automatisch als Textdatei speichern? Dies ist nützlich für Qualitätskontrolle oder als Backup.</p>
+          <h2>Lokale Datenspeicherung</h2>
+          <p>Speichern Sie Dokumentationen und Audiodateien <strong>lokal auf Ihrem Computer</strong> für späteres Nachhören und zur Qualitätskontrolle.</p>
         </div>
 
         <div class="wizard-card">
           <div class="wizard-toggle active" id="wizardTranscriptToggle">
             <div class="wizard-toggle-content">
-              <h4>Transkripte speichern (.txt)</h4>
-              <p>Speichert jede Rohtranskription als Textdatei</p>
+              <h4>Dokumentationen lokal speichern (Empfohlen)</h4>
+              <p>Speichert den Text jeder Dokumentation auf Ihrem Computer</p>
             </div>
             <div class="wizard-toggle-switch"></div>
           </div>
 
-          <div class="wizard-toggle" id="wizardAudioToggle" style="margin-top: var(--space-3);">
+          <div class="wizard-toggle active" id="wizardAudioToggle" style="margin-top: var(--space-3);">
             <div class="wizard-toggle-content">
-              <h4>Audioaufnahmen speichern (.webm)</h4>
-              <p>Behält die Original-Audiodateien nach der Verarbeitung</p>
+              <h4>Audiodateien lokal speichern (Empfohlen)</h4>
+              <p>Ermöglicht das Nachhören der Sprachaufnahme im Dashboard</p>
             </div>
             <div class="wizard-toggle-switch"></div>
           </div>
@@ -2526,12 +2564,12 @@
               <span class="wizard-summary-value" id="summaryMode">Single Prompt</span>
             </div>
             <div class="wizard-summary-item">
-              <span class="wizard-summary-label">Transkripte speichern</span>
+              <span class="wizard-summary-label">Dokumentationen speichern</span>
               <span class="wizard-summary-value" id="summaryTranscripts">Aktiviert</span>
             </div>
             <div class="wizard-summary-item">
               <span class="wizard-summary-label">Audiodateien speichern</span>
-              <span class="wizard-summary-value" id="summaryAudio">Deaktiviert</span>
+              <span class="wizard-summary-value" id="summaryAudio">Aktiviert</span>
             </div>
           </div>
         </div>

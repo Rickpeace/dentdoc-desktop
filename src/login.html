@@ -453,17 +453,19 @@
       }
     }
 
-    checkFirstRunLogin();
+    // DISABLED: Login tour temporarily disabled
+    // checkFirstRunLogin();
 
     // Zum Testen: Tour manuell starten mit Tastenkombination Strg+T
-    document.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.key === 't') {
-        e.preventDefault();
-        console.log('Manual tour start...');
-        const tourDriver = createLoginTour();
-        tourDriver.drive();
-      }
-    });
+    // DISABLED: Manual tour trigger temporarily disabled
+    // document.addEventListener('keydown', (e) => {
+    //   if (e.ctrlKey && e.key === 't') {
+    //     e.preventDefault();
+    //     console.log('Manual tour start...');
+    //     const tourDriver = createLoginTour();
+    //     tourDriver.drive();
+    //   }
+    // });
   </script>
 </body>
 </html>

@@ -1030,6 +1030,7 @@ async function iphoneStatus(token) {
     return {
       paired: response.data.paired || false,
       deviceName: response.data.deviceName,
+      iphoneDeviceId: response.data.iphoneDeviceId,  // Required for syncing to new devices
       lastSeen: response.data.lastSeen
     };
   } catch (error) {

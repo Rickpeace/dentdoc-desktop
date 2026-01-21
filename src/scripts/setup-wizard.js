@@ -20,7 +20,7 @@ class SetupWizard {
       docMode: 'agent-v2',
       autoExport: true,
       transcriptPath: '',
-      keepAudio: false,
+      keepAudio: true, // Enabled by default for full functionality
       profilesPath: ''
     };
 
@@ -60,9 +60,9 @@ class SetupWizard {
       this.settings.transcriptPath = settings.transcriptPath || '';
       this.settings.profilesPath = settings.profilesPath || '';
       this.settings.microphoneId = settings.microphoneId || null; // Windows device name
-      this.settings.docMode = settings.docMode || 'single';
+      this.settings.docMode = settings.docMode || 'agent-v2';
       this.settings.autoExport = settings.autoExport !== false;
-      this.settings.keepAudio = settings.keepAudio || false;
+      this.settings.keepAudio = settings.keepAudio !== false; // Default true
 
       // Update path input fields with actual paths
       this.updatePathDisplays();
@@ -1265,10 +1265,18 @@ class SetupWizard {
     // Update summary on final step
     if (this.currentStep !== this.totalSteps - 1) return;
 
+    const modeNames = {
+      'single': 'Single Prompt',
+      'single-v1.1': 'Single Prompt V1.1',
+      'hybrid-v1.2': 'Hybrid V1.2',
+      'megaprompt': 'Megaprompt',
+      'agent-chain': 'Agent-Kette',
+      'agent-v2': 'Agent V2 (Empfohlen)'
+    };
     const items = {
       'summaryMic': this.getMicrophoneName(),
       'summaryShortcut': this.settings.shortcut,
-      'summaryMode': this.settings.docMode === 'single' ? 'Single Prompt' : 'Agent-Kette',
+      'summaryMode': modeNames[this.settings.docMode] || this.settings.docMode,
       'summaryTranscripts': this.settings.autoExport ? 'Aktiviert' : 'Deaktiviert',
       'summaryAudio': this.settings.keepAudio ? 'Aktiviert' : 'Deaktiviert'
     };
@@ -1355,6 +1363,7 @@ class SetupWizard {
       await ipcRenderer.invoke('save-settings', {
         microphoneId: this.settings.microphoneId,
         microphoneName: this.settings.microphoneName,  // For FFmpeg (needs device name)
+        microphoneSource: this.settings.microphoneSource,  // 'desktop' | 'iphone' | 'none'
         shortcut: this.settings.shortcut,
         docMode: this.settings.docMode,
         autoExport: this.settings.autoExport,
@@ -1403,10 +1412,10 @@ async function restartSetupWizard() {
       window.setupWizard.settings = {
         microphoneId: null,
         shortcut: 'F9',
-        docMode: 'single',
+        docMode: 'agent-v2',
         autoExport: true,
         transcriptPath: '',
-        keepAudio: false,
+        keepAudio: true,
         profilesPath: ''
       };
 
@@ -1416,9 +1425,9 @@ async function restartSetupWizard() {
       window.setupWizard.settings.transcriptPath = settings.transcriptPath || '';
       window.setupWizard.settings.profilesPath = settings.profilesPath || '';
       window.setupWizard.settings.microphoneId = settings.microphoneId || null;
-      window.setupWizard.settings.docMode = settings.docMode || 'single';
+      window.setupWizard.settings.docMode = settings.docMode || 'agent-v2';
       window.setupWizard.settings.autoExport = settings.autoExport !== false;
-      window.setupWizard.settings.keepAudio = settings.keepAudio || false;
+      window.setupWizard.settings.keepAudio = settings.keepAudio !== false;
 
       // Update UI elements to match settings
       const shortcutKeyEl = document.getElementById('wizardShortcutKey');

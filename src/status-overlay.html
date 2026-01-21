@@ -125,6 +125,12 @@
       box-shadow: none;
     }
 
+    .icon.waiting-iphone {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      box-shadow: none;
+      animation: processingPulse 1.5s ease-in-out infinite;
+    }
+
     .content {
       flex: 1;
       min-width: 0;
@@ -530,6 +536,65 @@
       background: #f0fdf4;
       border-color: #bbf7d0;
     }
+
+    /* iPhone waiting state with QR code */
+    .iphone-waiting-section {
+      display: none;
+      margin-top: var(--space-4);
+      padding: var(--space-4);
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: var(--radius-lg);
+      text-align: center;
+    }
+
+    .iphone-waiting-section.visible {
+      display: block;
+    }
+
+    .iphone-waiting-section .qr-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-4);
+    }
+
+    .iphone-waiting-section .qr-code {
+      width: 100px;
+      height: 100px;
+      background: white;
+      border-radius: var(--radius-md);
+      padding: 6px;
+      flex-shrink: 0;
+    }
+
+    .iphone-waiting-section .qr-code canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .iphone-waiting-section .qr-instructions {
+      text-align: left;
+      flex: 1;
+    }
+
+    .iphone-waiting-section .qr-instructions p {
+      margin: 0 0 var(--space-2) 0;
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+    }
+
+    .iphone-waiting-section .qr-instructions .url-hint {
+      font-size: 0.75rem;
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      word-break: break-all;
+    }
+
+    [data-theme="light"] .iphone-waiting-section {
+      background: rgba(59, 130, 246, 0.08);
+      border-color: rgba(59, 130, 246, 0.15);
+    }
   </style>
 </head>
 <body>
@@ -558,6 +623,18 @@
     </div>
 
     <!-- Audio Level Bar removed - only icon animation is used -->
+
+    <!-- iPhone waiting section with QR code -->
+    <div id="iphoneWaitingSection" class="iphone-waiting-section">
+      <div class="qr-container">
+        <div id="iphoneQrCode" class="qr-code"></div>
+        <div class="qr-instructions">
+          <p><strong>iPhone ist gekoppelt</strong>, aber die Mikrofon-Seite muss geöffnet sein.</p>
+          <p>QR-Code scannen oder öffnen:</p>
+          <p class="url-hint" id="iphoneMicUrlHint">dentdoc-app.vercel.app/mic</p>
+        </div>
+      </div>
+    </div>
 
     <div id="progressContainer" class="progress-container">
       <div class="progress-bar">
@@ -743,6 +820,29 @@
       }
     }
 
+    // Generate QR code for iPhone mic URL
+    async function generateIphoneQrCode(url) {
+      const QRCode = require('qrcode');
+      const container = document.getElementById('iphoneQrCode');
+      container.innerHTML = '';
+
+      try {
+        const canvas = document.createElement('canvas');
+        await QRCode.toCanvas(canvas, url, {
+          width: 88,
+          margin: 0,
+          color: {
+            dark: '#000000',
+            light: '#ffffff'
+          }
+        });
+        container.appendChild(canvas);
+      } catch (err) {
+        console.error('Failed to generate iPhone QR code:', err);
+        container.innerHTML = '<span style="font-size: 10px; color: var(--text-tertiary);">QR-Code Fehler</span>';
+      }
+    }
+
     function updateAudioLevel(level) {
       // level should be between 0 and 1
       const normalizedLevel = Math.max(0, Math.min(1, level));
@@ -780,6 +880,9 @@
       icon.style.transform = 'scale(1)';
       icon.style.background = '';  // Reset to CSS default
       icon.style.boxShadow = '';   // Reset to CSS default
+
+      // Hide iPhone waiting section by default (will be shown only in waiting-iphone state)
+      document.getElementById('iphoneWaitingSection').classList.remove('visible');
 
       // Set emoji and progress based on type
       switch (data.type) {
@@ -851,12 +954,30 @@
             autoCopyLastClicked();
           }
           break;
+        case 'waiting-iphone':
+          // Waiting for iPhone to connect - show QR code
+          iconEmoji.textContent = '📱';
+          message.textContent = data.message;
+          progressContainer.classList.remove('visible');
+          actions.classList.remove('visible');
+          // Show iPhone waiting section with QR code
+          const iphoneSection = document.getElementById('iphoneWaitingSection');
+          iphoneSection.classList.add('visible');
+          // Generate QR code for /mic URL
+          if (data.micUrl) {
+            generateIphoneQrCode(data.micUrl);
+            document.getElementById('iphoneMicUrlHint').textContent = data.micUrl.replace('https://', '');
+          }
+          resetSteps();
+          break;
         case 'error':
           stopTimer();
           iconEmoji.textContent = '❌';
           message.innerHTML = data.message;
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
+          // Hide iPhone waiting section
+          document.getElementById('iphoneWaitingSection').classList.remove('visible');
           // Add click handler for settings link if present
           const settingsLink = message.querySelector('.settings-link');
           if (settingsLink) {
@@ -872,7 +993,7 @@
     });
 
     closeBtn.addEventListener('click', () => {
-      if (currentState === 'recording') {
+      if (currentState === 'recording' || currentState === 'waiting-iphone') {
         // Cancel recording - don't process
         ipcRenderer.send('cancel-recording');
       }

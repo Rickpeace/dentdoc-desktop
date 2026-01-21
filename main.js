@@ -635,11 +635,18 @@ function createLoginWindow() {
     title: 'DentDoc Login',
     frame: false,
     hasShadow: false,
-    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b'
+    backgroundColor: store.get('theme', 'dark') === 'light' ? '#ffffff' : '#0a0a0b',
+    show: false // Don't show until ready
   });
 
   loginWindow.loadFile('src/login.html');
   loginWindow.setMenu(null);
+
+  // Show window when ready and focus it prominently
+  loginWindow.once('ready-to-show', () => {
+    loginWindow.show();
+    loginWindow.focus();
+  });
 
   // Auto-resize to fit content after load
   loginWindow.webContents.on('did-finish-load', () => {
@@ -647,6 +654,15 @@ function createLoginWindow() {
       const [width] = loginWindow.getSize();
       loginWindow.setSize(width, Math.min(height, 800)); // Cap at 800px max
     });
+  });
+
+  // If user closes login window without logging in, quit the app entirely
+  // (don't let them hide to tray without authentication)
+  loginWindow.on('close', (e) => {
+    const token = store.get('authToken');
+    if (!token) {
+      app.quit();
+    }
   });
 
   loginWindow.on('closed', () => {
@@ -1132,7 +1148,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     // User already has their documentation in clipboard at this point
 
     const autoExport = store.get('autoExport', true);
-    const keepAudio = store.get('keepAudio', false);
+    const keepAudio = store.get('keepAudio', true);
     console.log('Save settings - autoExport:', autoExport, 'keepAudio:', keepAudio);
     console.log('currentRecordingPath:', currentRecordingPath);
 
@@ -1489,6 +1505,22 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       { documentation, transcript: finalTranscript, shortenings, autoClose }
     );
 
+    // Increment today's recording count
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStr = todayStart.toISOString().split('T')[0];
+    const todayRecordings = store.get('todayRecordings', { date: null, count: 0 });
+    if (todayRecordings.date === todayStr) {
+      store.set('todayRecordings', { date: todayStr, count: todayRecordings.count + 1 });
+    } else {
+      store.set('todayRecordings', { date: todayStr, count: 1 });
+    }
+
+    // Notify dashboard to refresh stats
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('recording-completed');
+    }
+
     // Reset tray
     const normalIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(normalIconPath);
@@ -1496,7 +1528,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
     // === BACKGROUND TASKS (run async, don't block success) ===
     const autoExport = store.get('autoExport', true);
-    const keepAudio = store.get('keepAudio', false);
+    const keepAudio = store.get('keepAudio', true);
 
     (async () => {
       let topicSegments = null;
@@ -1643,7 +1675,7 @@ async function startRecording() {
 
   // Get keepAudio setting - cleanup is handled by audioRecorder
   // keepAudio: false (default) = delete recordings, true = keep them
-  const keepAudio = store.get('keepAudio', false);
+  const keepAudio = store.get('keepAudio', true);
   const deleteAudio = !keepAudio;
   console.log('keepAudio setting:', keepAudio, '-> deleteAudio:', deleteAudio);
   debugLog(`keepAudio setting: ${keepAudio} -> deleteAudio: ${deleteAudio}`);
@@ -1754,13 +1786,21 @@ async function startRecordingWithIphone() {
     iphoneRelayWs = new WebSocket(`${relayUrl}/stream?device=${iphoneDeviceId}&role=desktop&token=${token}`);
 
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('iPhone antwortet nicht. Bitte Safari-Seite auf iPhone öffnen.'));
-      }, 15000);
+      // No timeout - user can cancel with F9 or X button
+      // The QR code is shown so they have time to scan it
+      const timeout = null;
 
       iphoneRelayWs.on('open', () => {
         console.log('[iPhone] Connected to relay, waiting for iPhone...');
         tray.setToolTip('DentDoc - Warte auf iPhone...');
+
+        // Show status overlay with QR code for /mic page
+        updateStatusOverlay(
+          'Warte auf iPhone...',
+          'Bitte öffnen Sie die Mikrofon-Seite auf Ihrem iPhone',
+          'waiting-iphone',
+          { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+        );
 
         // Start heartbeat to keep connection alive
         if (iphoneHeartbeatInterval) {
@@ -1877,9 +1917,23 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
 
   if (msg.type === 'IPHONE_CONNECTED') {
     clearTimeout(timeout);
-    console.log('[iPhone] iPhone connected, sending START');
     tray.setToolTip('DentDoc - iPhone verbunden, starte Aufnahme...');
-    iphoneRelayWs.send(JSON.stringify({ type: 'START' }));
+
+    // If recording already in progress, send RESUME instead of START
+    // This happens when iPhone tab reconnects mid-recording (e.g., new tab took over)
+    if (isIphoneSession && isRecording) {
+      console.log('[iPhone] iPhone reconnected during recording, sending RESUME');
+      iphoneRelayWs.send(JSON.stringify({ type: 'RESUME' }));
+      updateStatusOverlay(
+        'iPhone verbindet...',
+        'Warte auf Mikrofon-Bereitschaft',
+        'waiting-iphone',
+        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+      );
+    } else {
+      console.log('[iPhone] iPhone connected, sending START');
+      iphoneRelayWs.send(JSON.stringify({ type: 'START' }));
+    }
   }
 
   if (msg.type === 'IPHONE_READY') {
@@ -1890,6 +1944,38 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
     updateStatusOverlay('iPhone-Aufnahme...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
 
     resolve();
+  }
+
+  // Page visibility events from Safari - detect when mic page goes to background
+  // When hidden, mic is STOPPED (not just paused) - show QR for user to return
+  if (msg.type === 'PAGE_HIDDEN') {
+    console.warn('[iPhone] Safari page went to background - mic STOPPED');
+    if (isIphoneSession && isRecording) {
+      updateStatusOverlay(
+        'iPhone im Hintergrund',
+        'Bitte Safari öffnen oder QR-Code scannen',
+        'waiting-iphone',
+        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+      );
+    }
+  }
+
+  // PAGE_VISIBLE means same tab came back to foreground
+  // Send RESUME (not START) so iPhone knows to continue streaming to existing recording
+  if (msg.type === 'PAGE_VISIBLE') {
+    console.log('[iPhone] Safari page is visible again - sending RESUME');
+    if (isIphoneSession && isRecording) {
+      updateStatusOverlay(
+        'iPhone verbindet...',
+        'Warte auf Mikrofon-Bereitschaft',
+        'waiting-iphone',
+        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+      );
+      // Send RESUME (not START) - iPhone should continue streaming, not restart
+      if (iphoneRelayWs && iphoneRelayWs.readyState === WebSocket.OPEN) {
+        iphoneRelayWs.send(JSON.stringify({ type: 'RESUME' }));
+      }
+    }
   }
 
   if (msg.type === 'IPHONE_DISCONNECTED') {
@@ -2333,6 +2419,10 @@ function getOverlaySizeForState(type, extra = {}) {
     case 'processing':
       return { width: 402, height: 151 };
 
+    case 'waiting-iphone':
+      // Larger to accommodate QR code
+      return { width: 402, height: 295 };
+
     case 'success':
       // Smaller height if no shortenings (e.g., "Letzte Dokumentation anzeigen")
       const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
@@ -2529,7 +2619,8 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     uploadProgress: extra.uploadProgress,
     documentation: extra.documentation || null,
     transcript: extra.transcript || null,
-    shortenings: extra.shortenings || null
+    shortenings: extra.shortenings || null,
+    micUrl: extra.micUrl || null
   };
 
   // Store the data to send
@@ -2613,7 +2704,7 @@ ipcMain.on('open-microphone-settings', () => {
   }, 500);
 });
 
-// IPC handler for cancelling recording (X button during recording)
+// IPC handler for cancelling recording (X button during recording or waiting-iphone)
 ipcMain.on('cancel-recording', async () => {
   if (isRecording) {
     try {
@@ -2621,6 +2712,30 @@ ipcMain.on('cancel-recording', async () => {
       await audioRecorder.stopRecording();
     } catch (error) {
       console.log('Error stopping recorder:', error);
+    }
+
+    // Clean up iPhone connection if active
+    if (isIphoneSession) {
+      if (iphoneHeartbeatInterval) {
+        clearInterval(iphoneHeartbeatInterval);
+        iphoneHeartbeatInterval = null;
+      }
+      if (iphoneRelayWs) {
+        try {
+          iphoneRelayWs.close();
+        } catch (e) {}
+        iphoneRelayWs = null;
+      }
+      if (iphoneFfmpegProcess) {
+        try {
+          iphoneFfmpegProcess.stdin.end();
+          iphoneFfmpegProcess.kill();
+        } catch (e) {}
+        iphoneFfmpegProcess = null;
+      }
+      isIphoneSession = false;
+      iphoneRecordingPath = null;
+      console.log('[iPhone] Recording cancelled by user');
     }
 
     isRecording = false;
@@ -3066,6 +3181,24 @@ ipcMain.handle('reset-all-tours', () => {
   return true;
 });
 
+// Onboarding tutorial card handlers
+// Shows the tutorial to teach users how DentDoc works (tray, F9, clipboard)
+ipcMain.handle('check-onboarding-visible', () => {
+  // Show unless user has permanently dismissed it with checkbox
+  const dismissed = store.get('onboardingDismissed', false);
+  return !dismissed;
+});
+
+ipcMain.handle('dismiss-onboarding-permanently', () => {
+  store.set('onboardingDismissed', true);
+  return true;
+});
+
+ipcMain.handle('reset-onboarding', () => {
+  store.delete('onboardingDismissed');
+  return true;
+});
+
 ipcMain.handle('copy-to-clipboard', (event, text) => {
   clipboard.writeText(text);
   return true;
@@ -3347,7 +3480,7 @@ ipcMain.handle('get-settings', async () => {
     profilesPath: storedProfilesPath !== undefined && storedProfilesPath !== '' ? storedProfilesPath : defaultProfilesPath,
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
-    keepAudio: store.get('keepAudio', false),
+    keepAudio: store.get('keepAudio', true),
     docMode: store.get('docMode', 'single'),
     theme: store.get('theme', 'dark'),
     vadEnabled: store.get('vadEnabled', true)
