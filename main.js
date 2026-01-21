@@ -2053,11 +2053,12 @@ function reconnectToRelay(deviceId, desktopToken, timeout, resolve) {
     iphoneRelayWs.on('open', () => {
       console.log('[iPhone] Reconnected to relay, waiting for iPhone...');
 
-      // Simple waiting message - phone will auto-connect
+      // Show QR code for reconnection
       updateStatusOverlay(
-        'Smartphone verbindet...',
-        'Warte auf Mikrofon',
-        'warning'
+        'Smartphone getrennt',
+        'QR-Code scannen oder Browser öffnen',
+        'waiting-iphone',
+        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
       );
 
       // Restart heartbeat
