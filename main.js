@@ -1897,6 +1897,11 @@ async function startRecordingWithIphone() {
       iphoneFfmpegProcess = null;
     }
     if (iphoneRelayWs) {
+      try {
+        if (iphoneRelayWs.readyState === 1) {
+          iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
+        }
+      } catch (e) {}
       iphoneRelayWs.close();
       iphoneRelayWs = null;
     }
@@ -2086,6 +2091,11 @@ async function stopRecordingWithIphone() {
       iphoneFfmpegProcess = null;
     }
     if (iphoneRelayWs) {
+      try {
+        if (iphoneRelayWs.readyState === 1) {
+          iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
+        }
+      } catch (e) {}
       iphoneRelayWs.close();
       iphoneRelayWs = null;
     }
@@ -2724,6 +2734,11 @@ ipcMain.on('cancel-recording', async () => {
       }
       if (iphoneRelayWs) {
         try {
+          // Send STOP to iPhone BEFORE closing connection
+          if (iphoneRelayWs.readyState === 1) { // WebSocket.OPEN
+            console.log('[iPhone] Sending STOP before cancel');
+            iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
+          }
           iphoneRelayWs.close();
         } catch (e) {}
         iphoneRelayWs = null;
