@@ -6,6 +6,9 @@
 // Use existing ipcRenderer from dashboard.js (it's already declared there)
 // We just reference it directly since both scripts run in the same context
 
+// Shared audio utilities
+const wizardAudioUtils = require('./scripts/audio-utils');
+
 class SetupWizard {
   constructor() {
     this.currentStep = 0;
@@ -21,12 +24,8 @@ class SetupWizard {
       profilesPath: ''
     };
 
-    // Audio test state
-    this.isTesting = false;
-    this.audioContext = null;
-    this.mediaStream = null;
-    this.analyser = null;
-    this.micTestTimeout = null;  // Auto-stop timer
+    // Audio test state - uses shared MicTester from audio-utils
+    this.micTester = null;  // Created on first use
 
     // Shortcut recording state
     this.isRecordingShortcut = false;
@@ -136,10 +135,12 @@ class SetupWizard {
 
     // Microphone
     document.getElementById('wizardMicSelect')?.addEventListener('change', (e) => {
-      this.settings.microphoneId = e.target.value; // Windows device name
-      if (this.isTesting) {
-        this.stopMicTest();
-        this.startMicTest();
+      const mic = wizardAudioUtils.getSelectedMicrophone(e.target);
+      this.settings.microphoneId = mic.deviceId;
+      this.settings.microphoneName = mic.deviceName;
+      if (this.micTester && this.micTester.isRunning) {
+        this.micTester.stop();
+        this.resetMicTestUI();
       }
     });
     document.getElementById('wizardMicTestBtn')?.addEventListener('click', () => this.toggleMicTest());
@@ -951,40 +952,13 @@ class SetupWizard {
     const select = document.getElementById('wizardMicSelect');
     if (!select) return;
 
-    try {
-      // Use WebRTC to enumerate audio devices
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const mics = devices.filter(d => d.kind === 'audioinput');
-
-      select.innerHTML = '';
-
-      if (mics.length === 0) {
-        select.innerHTML = '<option value="">Kein Mikrofon gefunden</option>';
-        return;
-      }
-
-      mics.forEach((mic, index) => {
-        const option = document.createElement('option');
-        option.value = mic.deviceId;
-        option.textContent = mic.label || `Mikrofon ${index + 1}`;
-        if (mic.deviceId === this.settings.microphoneId) {
-          option.selected = true;
-        }
-        select.appendChild(option);
-      });
-
-      // Set first mic as default if none selected
-      if (!this.settings.microphoneId && mics.length > 0) {
-        this.settings.microphoneId = mics[0].deviceId;
-      }
-    } catch (error) {
-      console.error('Error loading microphones:', error);
-      select.innerHTML = '<option value="">Fehler beim Laden</option>';
-    }
+    const result = await wizardAudioUtils.loadMicrophones(select, this.settings.microphoneId);
+    this.settings.microphoneId = result.deviceId;
+    this.settings.microphoneName = result.deviceName;
   }
 
   toggleMicTest() {
-    if (this.isTesting) {
+    if (this.micTester && this.micTester.isRunning) {
       // Don't allow manual stop - wait for auto-stop
       return;
     } else {
@@ -992,135 +966,9 @@ class SetupWizard {
     }
   }
 
-  async startAudioMonitoring(deviceId) {
-    try {
-      // Use selected mic or default
-      const constraints = deviceId ? {
-        audio: {
-          deviceId: { ideal: deviceId },
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
-        }
-      } : {
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
-        }
-      };
-
-      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      this.audioContext = new AudioContext();
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
-
-      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-      source.connect(this.analyser);
-
-      const bufferLength = this.analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      const levelBar = document.getElementById('wizardMicLevelBar');
-
-      const updateLevel = () => {
-        if (!this.analyser || !this.isTesting) return;
-
-        this.analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / bufferLength;
-        const normalized = Math.min(average / 128 * 100, 100);
-        if (levelBar) levelBar.style.width = normalized + '%';
-        this.animationFrameId = requestAnimationFrame(updateLevel);
-      };
-
-      updateLevel();
-    } catch (error) {
-      console.error('Wizard audio monitoring error:', error);
-    }
-  }
-
-  stopAudioMonitoring() {
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
-    }
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-      this.analyser = null;
-    }
-  }
-
-  async startMicTest() {
+  resetMicTestUI() {
     const btn = document.getElementById('wizardMicTestBtn');
     const levelBar = document.getElementById('wizardMicLevelBar');
-    const status = document.getElementById('wizardMicStatus');
-    const playbackDiv = document.getElementById('wizardMicPlayback');
-
-    try {
-      this.isTesting = true;
-      btn.textContent = 'Aufnahme läuft...';
-      btn.classList.remove('wizard-btn-secondary');
-      btn.classList.add('wizard-btn-primary');
-      btn.disabled = true;
-      status.textContent = 'Aufnahme läuft... Sprechen Sie ins Mikrofon (5 Sek.)';
-      status.className = 'wizard-mic-status';
-
-      // Hide previous playback
-      if (playbackDiv) playbackDiv.style.display = 'none';
-
-      // Get selected microphone ID
-      const micSelect = document.getElementById('wizardMicSelect');
-      const deviceId = micSelect ? micSelect.value : null;
-
-      // Start real audio monitoring (local, like Stimmprofile)
-      await this.startAudioMonitoring(deviceId);
-
-      // Start real recording via IPC (FFmpeg)
-      const startResult = await ipcRenderer.invoke('start-mic-test', deviceId);
-      if (!startResult.success) {
-        throw new Error(startResult.error);
-      }
-
-      // Auto-stop after 5 seconds
-      this.micTestTimeout = setTimeout(async () => {
-        if (this.isTesting) {
-          await this.stopMicTest();
-        }
-      }, 5000);
-
-    } catch (error) {
-      console.error('Mic test error:', error);
-      status.textContent = 'Fehler: ' + error.message;
-      status.className = 'wizard-mic-status error';
-      this.stopMicTest();
-    }
-  }
-
-  async stopMicTest() {
-    const btn = document.getElementById('wizardMicTestBtn');
-    const levelBar = document.getElementById('wizardMicLevelBar');
-    const status = document.getElementById('wizardMicStatus');
-    const playbackDiv = document.getElementById('wizardMicPlayback');
-
-    const wasRecording = this.isTesting;
-    this.isTesting = false;
-
-    // Stop audio monitoring (local getUserMedia stream)
-    this.stopAudioMonitoring();
-
-    // Clear auto-stop timer
-    if (this.micTestTimeout) {
-      clearTimeout(this.micTestTimeout);
-      this.micTestTimeout = null;
-    }
 
     if (btn) {
       btn.textContent = 'Mikrofon testen (5 Sek.)';
@@ -1132,29 +980,64 @@ class SetupWizard {
     if (levelBar) {
       levelBar.style.width = '0%';
     }
+  }
 
-    // Only call stop-mic-test if we were actually recording
-    if (!wasRecording) {
-      return;
+  async startMicTest() {
+    const btn = document.getElementById('wizardMicTestBtn');
+    const status = document.getElementById('wizardMicStatus');
+    const playbackDiv = document.getElementById('wizardMicPlayback');
+
+    // Create mic tester if not exists
+    if (!this.micTester) {
+      this.micTester = new wizardAudioUtils.MicTester();
     }
+
+    btn.textContent = 'Aufnahme läuft...';
+    btn.classList.remove('wizard-btn-secondary');
+    btn.classList.add('wizard-btn-primary');
+    btn.disabled = true;
+    status.textContent = 'Aufnahme läuft... Sprechen Sie ins Mikrofon (5 Sek.)';
+    status.className = 'wizard-mic-status';
+
+    // Hide previous playback
+    if (playbackDiv) playbackDiv.style.display = 'none';
 
     try {
-      // Stop recording and get audio file
-      const stopResult = await ipcRenderer.invoke('stop-mic-test');
-      if (stopResult.success) {
-        status.textContent = 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen';
-        status.className = 'wizard-mic-status success';
-        // Show playback button
-        if (playbackDiv) playbackDiv.style.display = 'flex';
-      } else {
-        status.textContent = 'Fehler beim Stoppen: ' + stopResult.error;
-        status.className = 'wizard-mic-status error';
-      }
+      await this.micTester.start(
+        this.settings.microphoneId,    // WebRTC device ID for audio monitoring
+        this.settings.microphoneName,  // Device name for FFmpeg
+        (level) => {
+          // Update level bar
+          const levelBar = document.getElementById('wizardMicLevelBar');
+          if (levelBar) levelBar.style.width = level + '%';
+        },
+        (result) => {
+          // On complete callback
+          this.resetMicTestUI();
+          if (result.success) {
+            status.textContent = 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen';
+            status.className = 'wizard-mic-status success';
+            if (playbackDiv) playbackDiv.style.display = 'flex';
+          } else {
+            status.textContent = 'Fehler: ' + result.error;
+            status.className = 'wizard-mic-status error';
+          }
+        },
+        5000  // 5 second duration
+      );
     } catch (error) {
-      console.error('Stop mic test error:', error);
+      console.error('Mic test error:', error);
       status.textContent = 'Fehler: ' + error.message;
       status.className = 'wizard-mic-status error';
+      this.resetMicTestUI();
     }
+  }
+
+  stopMicTest() {
+    if (this.micTester) {
+      this.micTester.stop();
+    }
+    this.resetMicTestUI();
   }
 
   async playMicTest() {
@@ -1470,7 +1353,8 @@ class SetupWizard {
     // Save all settings
     try {
       await ipcRenderer.invoke('save-settings', {
-        microphoneId: this.settings.microphoneId, // Windows device name
+        microphoneId: this.settings.microphoneId,
+        microphoneName: this.settings.microphoneName,  // For FFmpeg (needs device name)
         shortcut: this.settings.shortcut,
         docMode: this.settings.docMode,
         autoExport: this.settings.autoExport,

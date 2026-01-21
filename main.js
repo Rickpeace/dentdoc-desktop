@@ -110,6 +110,13 @@ function openLocalDashboard() {
   }
 
   createDashboardWindow();
+  // Show the dashboard after creation
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.once('ready-to-show', () => {
+      dashboardWindow.show();
+      dashboardWindow.focus();
+    });
+  }
 }
 
 function createDashboardWindow() {
@@ -243,13 +250,15 @@ function registerShortcut(shortcut) {
       return;
     }
     shortcutLocked = true;
-    setTimeout(() => { shortcutLocked = false; }, 2000);  // 2 second cooldown
+    setTimeout(() => { shortcutLocked = false; }, 3000);  // 3 second cooldown
 
     console.log('[Shortcut] F9 pressed, isRecording:', isRecording);
 
     if (isRecording) {
       await stopRecording();
     } else {
+      // Show immediate feedback before startRecording() does async work
+      updateStatusOverlay('Aufnahme wird gestartet...', 'Bitte warten...', 'starting');
       await startRecording();
     }
   });
@@ -267,11 +276,13 @@ function registerShortcut(shortcut) {
       globalShortcut.register(oldShortcut, async () => {
         if (shortcutLocked) return;
         shortcutLocked = true;
-        setTimeout(() => { shortcutLocked = false; }, 2000);
+        setTimeout(() => { shortcutLocked = false; }, 3000);
 
         if (isRecording) {
           await stopRecording();
         } else {
+          // Show immediate feedback before startRecording() does async work
+          updateStatusOverlay('Aufnahme wird gestartet...', 'Bitte warten...', 'starting');
           await startRecording();
         }
       });
@@ -515,6 +526,20 @@ ${transcript}
     // Ensure folder exists
     if (!fs.existsSync(folderPath)) {
       fs.mkdirSync(folderPath, { recursive: true });
+
+      // Set folder type to "Documents" to prevent Windows from treating it as "Music" folder
+      // (Windows auto-detects .wav files and sets folder type to Music, which has bad sorting)
+      const desktopIniPath = path.join(folderPath, 'desktop.ini');
+      const desktopIniContent = '[.ShellClassInfo]\r\nFolderType=Documents\r\n';
+      fs.writeFileSync(desktopIniPath, desktopIniContent, 'utf8');
+      // Set desktop.ini as hidden and system file (required for Windows to read it)
+      try {
+        require('child_process').execSync(`attrib +s +h "${desktopIniPath}"`, { windowsHide: true });
+        // Also set the folder as system folder so desktop.ini is respected
+        require('child_process').execSync(`attrib +r "${folderPath}"`, { windowsHide: true });
+      } catch (e) {
+        // Ignore errors on non-Windows or if attrib fails
+      }
     }
 
     // Save transcript if enabled
@@ -1644,16 +1669,16 @@ async function startRecording() {
     tray.setImage(recordingIconPath);
     tray.setToolTip('DentDoc - 🔴 Aufnahme läuft...');
 
-    // Get selected microphone (browser device ID)
-    const microphoneId = store.get('microphoneId') || null;
-    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneId);
+    // Get selected microphone name (FFmpeg needs device name, not browser ID)
+    const microphoneName = store.get('microphoneName') || null;
+    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
 
     const shortcut = store.get('shortcut') || 'F9';
     updateStatusOverlay('Aufnahme läuft...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
 
     // Notify dashboard to start audio monitoring (for real level display in status overlay)
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-      dashboardWindow.webContents.send('recording-started', { microphoneId });
+      dashboardWindow.webContents.send('recording-started', { microphoneId: store.get('microphoneId') });
     }
   } catch (error) {
     console.error('Recording error:', error);
@@ -1994,9 +2019,9 @@ async function startRecordingWithVAD() {
   // VAD-Modus: Normale Aufnahme, danach Offline-VAD Analyse (wie bei File Upload)
   console.log('[VAD] ========== Start Recording (Offline-VAD Mode) ==========');
   try {
-    const microphoneId = store.get('microphoneId') || null;
+    const microphoneName = store.get('microphoneName') || null;
     const deleteAudio = store.get('deleteAudio', true);
-    console.log('[VAD] microphoneId:', microphoneId);
+    console.log('[VAD] microphoneName:', microphoneName);
 
     isRecording = true;
     isVadSession = true;
@@ -2007,8 +2032,8 @@ async function startRecordingWithVAD() {
     tray.setImage(recordingIconPath);
     tray.setToolTip('DentDoc - 🔴 Aufnahme läuft (VAD)...');
 
-    // Start normale FFmpeg Aufnahme (wie im Standard-Modus)
-    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneId);
+    // Start normale FFmpeg Aufnahme (wie im Standard-Modus) - use mic NAME for FFmpeg
+    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
     console.log('[VAD] Recording started:', currentRecordingPath);
 
     const shortcut = store.get('shortcut') || 'F9';
@@ -2016,7 +2041,7 @@ async function startRecordingWithVAD() {
 
     // Notify dashboard to start audio monitoring (for level display)
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-      dashboardWindow.webContents.send('recording-started', { microphoneId });
+      dashboardWindow.webContents.send('recording-started', { microphoneId: store.get('microphoneId') });
     }
 
     console.log('[VAD] ========== Recording Started ==========');
@@ -2285,6 +2310,7 @@ function getValidOverlayPosition() {
 function getOverlaySizeForState(type, extra = {}) {
   switch (type) {
     case 'recording':
+    case 'starting':  // Same size as recording
       return { width: 402, height: 96 };
 
     case 'processing':
@@ -3074,6 +3100,17 @@ ipcMain.on('close-window', (event) => {
 ipcMain.on('minimize-to-tray', () => {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     dashboardWindow.hide();
+
+    // Show balloon notification the first time user minimizes to tray
+    if (!store.get('hasSeenTrayHint') && tray) {
+      store.set('hasSeenTrayHint', true);
+      tray.displayBalloon({
+        iconType: 'info',
+        title: 'DentDoc läuft im Hintergrund',
+        content: 'Klicken Sie auf dieses Symbol, um DentDoc wieder zu öffnen.',
+        noSound: true
+      });
+    }
   }
 });
 
@@ -3208,6 +3245,13 @@ ipcMain.handle('login', async (event, email, password) => {
         'warning',
         () => openWebDashboard('/subscription')
       );
+    } else if (isTrialUser && !wasSubscriber && minutesRemaining > 10) {
+      // Demo/Trial user with plenty of minutes
+      showCustomNotification(
+        'Demo-Modus',
+        `Willkommen! Sie haben noch ${minutesRemaining} Testminuten.`,
+        'info'
+      );
     } else if (hasActiveSubscription) {
       // Pro user
       showCustomNotification('Angemeldet', `Willkommen! DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`, 'success');
@@ -3278,6 +3322,7 @@ ipcMain.handle('get-settings', async () => {
   return {
     shortcut: store.get('shortcut') || 'F9',
     microphoneId: store.get('microphoneId') || null,      // Browser device ID (WebRTC)
+    microphoneName: store.get('microphoneName') || null,  // Device name (for FFmpeg)
     microphoneSource: store.get('microphoneSource', 'desktop'),  // 'desktop' | 'iphone'
     iphoneDeviceId: store.get('iphoneDeviceId') || null,
     iphoneDeviceName: store.get('iphoneDeviceName') || null,
@@ -3299,6 +3344,12 @@ ipcMain.handle('save-settings', async (event, settings) => {
   if (settings.microphoneId !== undefined) {
     store.set('microphoneId', settings.microphoneId);
     console.log('Saved microphoneId:', settings.microphoneId);
+  }
+
+  // Save microphone name (for FFmpeg - needs device name, not browser ID)
+  if (settings.microphoneName !== undefined) {
+    store.set('microphoneName', settings.microphoneName);
+    console.log('Saved microphoneName:', settings.microphoneName);
   }
 
   // Save transcript path
@@ -4438,9 +4489,9 @@ ipcMain.handle('start-voice-enrollment', async (event, data) => {
       currentEnrollmentName = data.name;
       currentEnrollmentRole = data.role || 'Arzt';
     }
-    // Get selected microphone (browser device ID)
-    const microphoneId = store.get('microphoneId') || null;
-    currentEnrollmentPath = await audioRecorder.startRecording(false, microphoneId);
+    // Get selected microphone name (FFmpeg needs device name, not browser ID)
+    const microphoneName = store.get('microphoneName') || null;
+    currentEnrollmentPath = await audioRecorder.startRecording(false, microphoneName);
     return { success: true };
   } catch (error) {
     isEnrolling = false;
@@ -4652,13 +4703,18 @@ ipcMain.handle('start-mic-test', async (event, deviceId) => {
 // Stop mic test recording and return the audio file path
 ipcMain.handle('stop-mic-test', async () => {
   try {
+    // Check if actually recording before trying to stop
+    const state = audioRecorder.getState();
+    if (state === 'idle') {
+      // Nothing to stop - return success silently
+      return { success: true, path: micTestPath };
+    }
     const filePath = await audioRecorder.stopRecording();
     micTestPath = filePath;
     return { success: true, path: filePath };
   } catch (error) {
     // If recording was already stopped but file exists, return success
     if (micTestPath && fs.existsSync(micTestPath)) {
-      console.log('Mic test: Recording already stopped, using existing file');
       return { success: true, path: micTestPath };
     }
     console.error('Mic test stop error:', error);
@@ -5219,6 +5275,9 @@ ipcMain.handle('get-app-version', () => {
 });
 
 app.whenReady().then(() => {
+  // TODO: Remove this line after testing tray balloon
+  store.delete('hasSeenTrayHint');
+
   createTray();
 
   // Initialize VAD Controller

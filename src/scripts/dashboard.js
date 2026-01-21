@@ -5,17 +5,20 @@
  */
 
 const { ipcRenderer } = require('electron');
+const audioUtils = require('./scripts/audio-utils');
 
 // ===== View Navigation =====
 const navItems = document.querySelectorAll('.nav-item');
 const views = document.querySelectorAll('.view');
 
-function switchView(viewName) {
+async function switchView(viewName) {
   // Stop any running mic test and cleanup when leaving settings view
-  if (settingsIsTesting) {
+  if (typeof settingsMicTester !== 'undefined' && settingsMicTester.isRunning) {
+    await settingsMicTester.stop();
     settingsStopMicTest();
   }
-  // Clean up mic test audio file when leaving settings
+  // Also force stop any lingering FFmpeg recording and clean up file
+  await ipcRenderer.invoke('stop-mic-test').catch(() => {});
   ipcRenderer.invoke('cleanup-mic-test');
   document.getElementById('settingsMicPlayback').style.display = 'none';
 
@@ -650,7 +653,7 @@ document.getElementById('startRecordingCard').addEventListener('click', async ()
 
 // ===== Window Controls =====
 document.getElementById('minimizeBtn').addEventListener('click', () => {
-  ipcRenderer.send('minimize-to-tray');
+  ipcRenderer.send('minimize-window');
 });
 
 document.getElementById('closeBtn').addEventListener('click', () => {
@@ -834,15 +837,11 @@ checkFirstRun();
 // =============================================================================
 
 let settingsSelectedMicId = null;
+let settingsSelectedMicName = null;  // For FFmpeg (needs device name, not ID)
 let settingsNewShortcut = null;
 let settingsIsRecordingShortcut = false;
-let settingsIsTesting = false;
-let settingsAudioContext = null;
-let settingsMediaStream = null;
-let settingsAnalyser = null;
 let settingsHasUnsavedChanges = false;
 let settingsInitialSettings = {};
-let settingsMicTestTimeout = null;  // Auto-stop timer for mic test
 
 async function loadSettingsView() {
   const settings = await ipcRenderer.invoke('get-settings');
@@ -856,6 +855,7 @@ async function loadSettingsView() {
   document.getElementById('settingsCurrentShortcut').textContent = settings.shortcut || 'F9';
   document.getElementById('settingsShortcutDisplay').textContent = settings.shortcut || 'F9';
   settingsSelectedMicId = settings.microphoneId || null;
+  settingsSelectedMicName = settings.microphoneName || null;  // For FFmpeg
   document.getElementById('settingsTranscriptPath').value = settings.transcriptPath || '';
   document.getElementById('settingsProfilesPath').value = settings.profilesPath || '';
   document.getElementById('settingsAutoCloseCheckbox').checked = settings.autoClose || false;
@@ -899,42 +899,14 @@ async function loadSettingsMicrophones() {
   const micSelect = document.getElementById('settingsMicSelect');
   const noMicHint = document.getElementById('settingsNoMicrophoneHint');
 
-  try {
-    // Use WebRTC to enumerate audio devices
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const mics = devices.filter(d => d.kind === 'audioinput');
+  const result = await audioUtils.loadMicrophones(micSelect, settingsSelectedMicId);
 
-    micSelect.innerHTML = '';
+  settingsSelectedMicId = result.deviceId;
+  settingsSelectedMicName = result.deviceName;
 
-    if (mics.length === 0) {
-      micSelect.innerHTML = '<option value="">Kein Mikrofon gefunden</option>';
-      // Show the no microphone hint
-      if (noMicHint) noMicHint.style.display = 'block';
-      return;
-    }
-
-    // Hide the no microphone hint when mics are found
-    if (noMicHint) noMicHint.style.display = 'none';
-
-    mics.forEach((mic, index) => {
-      const option = document.createElement('option');
-      option.value = mic.deviceId;
-      option.textContent = mic.label || `Mikrofon ${index + 1}`;
-      if (mic.deviceId === settingsSelectedMicId) {
-        option.selected = true;
-      }
-      micSelect.appendChild(option);
-    });
-
-    // Set default if none selected
-    if (!settingsSelectedMicId && mics.length > 0) {
-      settingsSelectedMicId = mics[0].deviceId;
-    }
-  } catch (error) {
-    console.error('Error loading microphones:', error);
-    micSelect.innerHTML = '<option value="">Fehler beim Laden</option>';
-    // Show the no microphone hint on error
-    if (noMicHint) noMicHint.style.display = 'block';
+  // Show/hide no microphone hint
+  if (noMicHint) {
+    noMicHint.style.display = result.deviceId ? 'none' : 'block';
   }
 }
 
@@ -1526,151 +1498,62 @@ ipcRenderer.on('iphone-connection-status', (event, status) => {
   }
 });
 
-// Settings Mic Test - uses real recorder logic for realistic testing
-// Audio monitoring variables
-let settingsMicAnimationFrameId = null;
+// Settings Mic Test - uses shared MicTester from audio-utils
+const settingsMicTester = new audioUtils.MicTester();
 
-async function settingsStartAudioMonitoring() {
-  try {
-    // Use selected mic or default
-    const constraints = settingsSelectedMicId ? {
-      audio: {
-        deviceId: { ideal: settingsSelectedMicId },
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    } : {
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    };
-
-    settingsMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-    settingsAudioContext = new AudioContext();
-    settingsAnalyser = settingsAudioContext.createAnalyser();
-    settingsAnalyser.fftSize = 256;
-
-    const source = settingsAudioContext.createMediaStreamSource(settingsMediaStream);
-    source.connect(settingsAnalyser);
-
-    const bufferLength = settingsAnalyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-
-    function updateLevel() {
-      if (!settingsAnalyser || !settingsIsTesting) return;
-
-      settingsAnalyser.getByteFrequencyData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i];
-      }
-      const average = sum / bufferLength;
-      const normalized = Math.min(average / 128 * 100, 100);
-      document.getElementById('settingsMicLevelBar').style.width = normalized + '%';
-      settingsMicAnimationFrameId = requestAnimationFrame(updateLevel);
-    }
-
-    updateLevel();
-  } catch (error) {
-    console.error('Settings audio monitoring error:', error);
-  }
-}
-
-function settingsStopAudioMonitoring() {
-  if (settingsMicAnimationFrameId) {
-    cancelAnimationFrame(settingsMicAnimationFrameId);
-    settingsMicAnimationFrameId = null;
-  }
-  if (settingsMediaStream) {
-    settingsMediaStream.getTracks().forEach(track => track.stop());
-    settingsMediaStream = null;
-  }
-  if (settingsAudioContext) {
-    settingsAudioContext.close();
-    settingsAudioContext = null;
-    settingsAnalyser = null;
-  }
-}
-
-document.getElementById('settingsTestMicBtn').addEventListener('click', async () => {
-  if (settingsIsTesting) {
-    // Manual stop - just wait for auto-stop
-    return;
-  }
-
-  try {
-    settingsIsTesting = true;
-    const btn = document.getElementById('settingsTestMicBtn');
-    btn.textContent = 'Aufnahme läuft...';
-    btn.classList.remove('btn-secondary');
-    btn.classList.add('btn-danger');
-    btn.disabled = true;
-
-    // Hide previous playback
-    document.getElementById('settingsMicPlayback').style.display = 'none';
-
-    settingsShowStatus(document.getElementById('settingsMicStatus'), 'Aufnahme läuft... Sprechen Sie ins Mikrofon (5 Sek.)', 'info');
-
-    // Start real audio monitoring (local, like Stimmprofile)
-    await settingsStartAudioMonitoring();
-
-    // Start real recording via IPC (FFmpeg)
-    const startResult = await ipcRenderer.invoke('start-mic-test', settingsSelectedMicId);
-    if (!startResult.success) {
-      throw new Error(startResult.error);
-    }
-
-    // Auto-stop after 5 seconds
-    settingsMicTestTimeout = setTimeout(async () => {
-      if (settingsIsTesting) {
-        await settingsStopMicTest();
-      }
-    }, 5000);
-
-  } catch (error) {
-    console.error('Mic test error:', error);
-    settingsShowStatus(document.getElementById('settingsMicStatus'), 'Fehler: ' + error.message, 'error');
-    settingsStopMicTest();
-  }
-});
-
-async function settingsStopMicTest() {
-  settingsIsTesting = false;
-
-  // Stop audio monitoring (local getUserMedia stream)
-  settingsStopAudioMonitoring();
-
-  // Clear auto-stop timer
-  if (settingsMicTestTimeout) {
-    clearTimeout(settingsMicTestTimeout);
-    settingsMicTestTimeout = null;
-  }
-
+function settingsStopMicTest() {
+  // Reset UI
   const btn = document.getElementById('settingsTestMicBtn');
   btn.textContent = 'Test starten (5 Sek.)';
   btn.classList.remove('btn-danger');
   btn.classList.add('btn-secondary');
   btn.disabled = false;
   document.getElementById('settingsMicLevelBar').style.width = '0%';
+}
+
+document.getElementById('settingsTestMicBtn').addEventListener('click', async () => {
+  if (settingsMicTester.isRunning) {
+    // Manual stop - just wait for auto-stop
+    return;
+  }
+
+  const btn = document.getElementById('settingsTestMicBtn');
+  btn.textContent = 'Aufnahme läuft...';
+  btn.classList.remove('btn-secondary');
+  btn.classList.add('btn-danger');
+  btn.disabled = true;
+
+  // Hide previous playback
+  document.getElementById('settingsMicPlayback').style.display = 'none';
+
+  settingsShowStatus(document.getElementById('settingsMicStatus'), 'Aufnahme läuft... Sprechen Sie ins Mikrofon (5 Sek.)', 'info');
 
   try {
-    // Stop recording and get audio file
-    const stopResult = await ipcRenderer.invoke('stop-mic-test');
-    if (stopResult.success) {
-      settingsShowStatus(document.getElementById('settingsMicStatus'), 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen', 'success');
-      // Show playback button
-      document.getElementById('settingsMicPlayback').style.display = 'flex';
-    } else {
-      settingsShowStatus(document.getElementById('settingsMicStatus'), 'Fehler beim Stoppen: ' + stopResult.error, 'error');
-    }
+    await settingsMicTester.start(
+      settingsSelectedMicId,      // WebRTC device ID for audio monitoring
+      settingsSelectedMicName,    // Device name for FFmpeg
+      (level) => {
+        // Update level bar
+        document.getElementById('settingsMicLevelBar').style.width = level + '%';
+      },
+      (result) => {
+        // On complete callback
+        settingsStopMicTest();
+        if (result.success) {
+          settingsShowStatus(document.getElementById('settingsMicStatus'), 'Test abgeschlossen - Klicken Sie "Anhören" um die Qualität zu prüfen', 'success');
+          document.getElementById('settingsMicPlayback').style.display = 'flex';
+        } else {
+          settingsShowStatus(document.getElementById('settingsMicStatus'), 'Fehler: ' + result.error, 'error');
+        }
+      },
+      5000  // 5 second duration
+    );
   } catch (error) {
-    console.error('Stop mic test error:', error);
+    console.error('Mic test error:', error);
     settingsShowStatus(document.getElementById('settingsMicStatus'), 'Fehler: ' + error.message, 'error');
+    settingsStopMicTest();
   }
-}
+});
 
 // Playback button for settings mic test
 document.getElementById('settingsPlayMicBtn').addEventListener('click', async () => {
@@ -1706,8 +1589,12 @@ document.getElementById('settingsPlayMicBtn').addEventListener('click', async ()
 });
 
 document.getElementById('settingsMicSelect').addEventListener('change', () => {
-  settingsSelectedMicId = document.getElementById('settingsMicSelect').value;
-  if (settingsIsTesting) {
+  const select = document.getElementById('settingsMicSelect');
+  const mic = audioUtils.getSelectedMicrophone(select);
+  settingsSelectedMicId = mic.deviceId;
+  settingsSelectedMicName = mic.deviceName;
+  if (settingsMicTester.isRunning) {
+    settingsMicTester.stop();
     settingsStopMicTest();
   }
   settingsCheckForChanges();
@@ -1878,9 +1765,15 @@ document.getElementById('settingsCopyLogPathBtn').addEventListener('click', asyn
 
 // Settings Save/Cancel
 document.getElementById('settingsSaveBtn').addEventListener('click', async () => {
+  // Get mic name from the selected option (FFmpeg needs device name, not browser ID)
+  const micSelect = document.getElementById('settingsMicSelect');
+  const selectedMicOption = micSelect.options[micSelect.selectedIndex];
+  const micName = selectedMicOption ? selectedMicOption.dataset.micName : null;
+
   const settings = {
     shortcut: settingsNewShortcut || document.getElementById('settingsShortcutDisplay').textContent,
-    microphoneId: document.getElementById('settingsMicSelect').value,
+    microphoneId: micSelect.value,
+    microphoneName: micName,  // For FFmpeg
     microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
     profilesPath: document.getElementById('settingsProfilesPath').value,
@@ -1908,9 +1801,9 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
   }
 });
 
-document.getElementById('settingsCancelBtn').addEventListener('click', () => {
+document.getElementById('settingsCancelBtn').addEventListener('click', async () => {
   settingsHasUnsavedChanges = false;
-  switchView('home');
+  await switchView('home');
 });
 
 
