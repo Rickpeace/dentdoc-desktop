@@ -1883,7 +1883,7 @@ async function startRecordingWithIphone() {
           setTimeout(() => {
             if (!isIphoneSession || !isRecording) return; // Recording ended, don't reconnect
 
-            reconnectToRelay(settings.iphoneDeviceId, settings.desktopToken, timeout, resolve);
+            reconnectToRelay(iphoneDeviceId, token, relayUrl, timeout, resolve);
           }, 1000);
         }
       });
@@ -2037,14 +2037,13 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
  * Reconnect to relay server during an active recording
  * Called when desktop WebSocket dies but recording is still active
  */
-function reconnectToRelay(deviceId, desktopToken, timeout, resolve) {
+function reconnectToRelay(deviceId, token, relayUrl, timeout, resolve) {
   if (!isIphoneSession || !isRecording) {
     console.log('[iPhone] Recording ended, skipping reconnect');
     return;
   }
 
-  const relayUrl = store.get('iphoneRelayUrl') || 'wss://dentdoc-audio-relay-production.up.railway.app';
-  const wsUrl = `${relayUrl}/stream?device=${deviceId}&role=desktop&token=${desktopToken}`;
+  const wsUrl = `${relayUrl}/stream?device=${deviceId}&role=desktop&token=${token}`;
   console.log('[iPhone] Reconnecting to relay:', wsUrl);
 
   try {
@@ -2119,7 +2118,7 @@ function reconnectToRelay(deviceId, desktopToken, timeout, resolve) {
       if (isIphoneSession && isRecording) {
         console.log('[iPhone] Still recording, will reconnect again...');
         setTimeout(() => {
-          reconnectToRelay(deviceId, desktopToken, timeout, resolve);
+          reconnectToRelay(deviceId, token, relayUrl, timeout, resolve);
         }, 2000);
       }
     });
@@ -2127,7 +2126,7 @@ function reconnectToRelay(deviceId, desktopToken, timeout, resolve) {
   } catch (error) {
     console.error('[iPhone] Reconnect failed:', error);
     setTimeout(() => {
-      reconnectToRelay(deviceId, desktopToken, timeout, resolve);
+      reconnectToRelay(deviceId, token, relayUrl, timeout, resolve);
     }, 2000);
   }
 }
