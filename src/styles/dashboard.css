@@ -4044,10 +4044,181 @@ kbd {
 .transcripts-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
+  flex-wrap: wrap;
+  gap: var(--space-3);
   margin-bottom: var(--space-4);
   padding: 0 var(--space-2);
+  position: relative;
+}
+
+.date-filter-chips {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.date-chip {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.date-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.date-chip.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.date-chip svg {
+  flex-shrink: 0;
+}
+
+/* Date Range Picker */
+.date-range-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  min-width: 320px;
+}
+
+.date-range-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.date-range-header span {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.date-range-close {
+  background: none;
+  border: none;
+  padding: var(--space-1);
+  cursor: pointer;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.date-range-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.date-range-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.date-range-inputs {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.date-input-group {
+  flex: 1;
+}
+
+.date-input-group label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.date-input-group input[type="date"] {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.date-input-group input[type="date"]:hover {
+  border-color: var(--border-hover);
+}
+
+.date-input-group input[type="date"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.date-input-separator {
+  padding-bottom: var(--space-2);
+  color: var(--text-tertiary);
+}
+
+.date-input-separator svg {
+  width: 20px;
+  height: 20px;
+}
+
+.date-range-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.date-range-clear {
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.date-range-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.date-range-apply {
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-md);
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.date-range-apply:hover {
+  background: var(--accent-hover);
 }
 
 .search-box {
@@ -4121,6 +4292,33 @@ kbd {
 
 .transcripts-empty span {
   font-size: 0.875rem;
+}
+
+.load-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.load-more-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.load-more-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* Transcript Card */

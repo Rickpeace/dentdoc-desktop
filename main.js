@@ -1544,7 +1544,6 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     console.log('!!!!!!!!!!!!!!!!!!');
 
     updateStatusOverlay('Fehler', error.message, 'error');
-    showCustomNotification('Fehler', error.message, 'error');
 
     const normalIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(normalIconPath);
@@ -5114,19 +5113,32 @@ const { autoUpdater } = require('electron-updater');
 // Allow update checks in dev mode
 autoUpdater.forceDevUpdateConfig = true;
 
+// Track which version we already notified about (to avoid spam)
+let notifiedUpdateVersion = null;
+
 autoUpdater.on('update-available', (info) => {
   console.log('Update available:', info.version);
-
-  const notification = new Notification({
-    title: 'Update verfügbar',
-    body: `Version ${info.version} wird im Hintergrund heruntergeladen...`,
-    icon: path.join(__dirname, 'assets/icon.png')
-  });
-  notification.show();
+  // Only show feedback if user manually checked for updates
+  if (isManualUpdateCheck) {
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Update gefunden',
+      message: `Version ${info.version} wird heruntergeladen...`,
+      buttons: ['OK']
+    });
+  }
+  // Otherwise download silently - user will be notified when complete
 });
 
 autoUpdater.on('update-downloaded', (info) => {
   console.log('Update downloaded:', info.version);
+
+  // Only show dialog once per version
+  if (notifiedUpdateVersion === info.version) {
+    console.log('Already notified about this version, skipping dialog');
+    return;
+  }
+  notifiedUpdateVersion = info.version;
 
   dialog.showMessageBox({
     type: 'info',
@@ -5139,7 +5151,19 @@ autoUpdater.on('update-downloaded', (info) => {
   }).then((result) => {
     if (result.response === 0) {
       // Force quit all windows and install
-      autoUpdater.quitAndInstall(false, true);
+      setImmediate(() => {
+        // Prevent app from just minimizing to tray
+        app.removeAllListeners('window-all-closed');
+
+        // Close all windows explicitly
+        const allWindows = BrowserWindow.getAllWindows();
+        allWindows.forEach(win => {
+          win.removeAllListeners('close');
+          win.close();
+        });
+
+        autoUpdater.quitAndInstall(false, true);
+      });
     }
   });
 });

@@ -4212,7 +4212,15 @@ document.addEventListener('keydown', (e) => {
 // =============================================================================
 
 let allTranscripts = [];
+let filteredTranscripts = [];
 let currentTranscriptData = null;
+let currentDateFilter = 'all';
+let currentSearchQuery = '';
+let customDateFrom = null;
+let customDateTo = null;
+const TRANSCRIPTS_PER_PAGE = 30;
+let displayedTranscriptsCount = 0;
+let isLoadingMore = false;
 
 // Load all transcripts
 async function loadTranscripts() {
@@ -4220,8 +4228,7 @@ async function loadTranscripts() {
     const result = await ipcRenderer.invoke('get-all-transcripts');
     if (result.success) {
       allTranscripts = result.transcripts;
-      renderTranscriptsList(allTranscripts);
-      document.getElementById('transcriptCount').textContent = allTranscripts.length;
+      applyFilters();
     } else {
       console.error('Failed to load transcripts:', result.error);
     }
@@ -4230,26 +4237,241 @@ async function loadTranscripts() {
   }
 }
 
-// Render transcripts list
-function renderTranscriptsList(transcripts) {
+// Apply both date filter and search query
+function applyFilters() {
+  let result = allTranscripts;
+
+  // Apply date filter
+  if (currentDateFilter !== 'all') {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    result = result.filter(t => {
+      const transcriptDate = new Date(t.createdAt);
+
+      if (currentDateFilter === 'today') {
+        return transcriptDate >= today;
+      } else if (currentDateFilter === 'week') {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        return transcriptDate >= weekAgo;
+      } else if (currentDateFilter === 'month') {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        return transcriptDate >= monthAgo;
+      } else if (currentDateFilter === 'custom') {
+        // Custom date range filter
+        if (customDateFrom) {
+          const fromDate = new Date(customDateFrom);
+          fromDate.setHours(0, 0, 0, 0);
+          if (transcriptDate < fromDate) return false;
+        }
+        if (customDateTo) {
+          const toDate = new Date(customDateTo);
+          toDate.setHours(23, 59, 59, 999);
+          if (transcriptDate > toDate) return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  // Apply search query
+  if (currentSearchQuery.trim()) {
+    const lowerQuery = currentSearchQuery.toLowerCase();
+    result = result.filter(t => {
+      const date = new Date(t.createdAt);
+      const dateStr = date.toLocaleDateString('de-DE');
+      const timeStr = date.toLocaleTimeString('de-DE');
+      const speakers = t.speakers?.join(' ') || '';
+      const folder = t.folderName || '';
+
+      return dateStr.includes(lowerQuery) ||
+             timeStr.includes(lowerQuery) ||
+             speakers.toLowerCase().includes(lowerQuery) ||
+             folder.toLowerCase().includes(lowerQuery);
+    });
+  }
+
+  filteredTranscripts = result;
+  displayedTranscriptsCount = 0;
+  renderTranscriptsList(true);
+  document.getElementById('transcriptCount').textContent = filteredTranscripts.length;
+}
+
+// Set date filter
+function setDateFilter(filter) {
+  // If clicking custom, show the date picker popup
+  if (filter === 'custom') {
+    openDateRangePicker();
+    return;
+  }
+
+  currentDateFilter = filter;
+  customDateFrom = null;
+  customDateTo = null;
+
+  // Update active chip
+  document.querySelectorAll('.date-chip').forEach(chip => {
+    chip.classList.toggle('active', chip.dataset.filter === filter);
+  });
+
+  // Update custom button text
+  updateCustomDateButtonText();
+
+  applyFilters();
+}
+
+// Date Range Picker functions
+function openDateRangePicker() {
+  const picker = document.getElementById('dateRangePicker');
+  const dateFromInput = document.getElementById('dateFrom');
+  const dateToInput = document.getElementById('dateTo');
+
+  // Set current values if they exist
+  if (customDateFrom) dateFromInput.value = customDateFrom;
+  if (customDateTo) dateToInput.value = customDateTo;
+
+  // Set max date to today
+  const today = new Date().toISOString().split('T')[0];
+  dateFromInput.max = today;
+  dateToInput.max = today;
+
+  picker.style.display = 'block';
+}
+
+function closeDateRangePicker() {
+  document.getElementById('dateRangePicker').style.display = 'none';
+}
+
+function applyDateRange() {
+  const dateFromInput = document.getElementById('dateFrom');
+  const dateToInput = document.getElementById('dateTo');
+
+  customDateFrom = dateFromInput.value || null;
+  customDateTo = dateToInput.value || null;
+
+  // Only apply if at least one date is set
+  if (customDateFrom || customDateTo) {
+    currentDateFilter = 'custom';
+
+    // Update active chip
+    document.querySelectorAll('.date-chip').forEach(chip => {
+      chip.classList.toggle('active', chip.dataset.filter === 'custom');
+    });
+
+    updateCustomDateButtonText();
+    applyFilters();
+  }
+
+  closeDateRangePicker();
+}
+
+function clearDateRange() {
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value = '';
+  customDateFrom = null;
+  customDateTo = null;
+
+  currentDateFilter = 'all';
+
+  // Update active chip
+  document.querySelectorAll('.date-chip').forEach(chip => {
+    chip.classList.toggle('active', chip.dataset.filter === 'all');
+  });
+
+  updateCustomDateButtonText();
+  closeDateRangePicker();
+  applyFilters();
+}
+
+function updateCustomDateButtonText() {
+  const btn = document.getElementById('customDateBtn');
+  if (!btn) return;
+
+  if (customDateFrom || customDateTo) {
+    const fromStr = customDateFrom ? new Date(customDateFrom).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '...';
+    const toStr = customDateTo ? new Date(customDateTo).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : '...';
+    btn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      ${fromStr} - ${toStr}
+    `;
+  } else {
+    btn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+        <line x1="16" y1="2" x2="16" y2="6"/>
+        <line x1="8" y1="2" x2="8" y2="6"/>
+        <line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+      Zeitraum
+    `;
+  }
+}
+
+// Filter transcripts by search query
+function filterTranscripts(query) {
+  currentSearchQuery = query;
+  applyFilters();
+}
+
+// Render transcripts list with lazy loading
+function renderTranscriptsList(reset = false) {
   const listEl = document.getElementById('transcriptsList');
   const emptyEl = document.getElementById('transcriptsEmpty');
 
-  // Clear existing cards (keep empty state)
-  const cards = listEl.querySelectorAll('.transcript-card');
-  cards.forEach(card => card.remove());
+  // Remove load more button if exists
+  const existingLoadMore = listEl.querySelector('.load-more-btn');
+  if (existingLoadMore) existingLoadMore.remove();
 
-  if (transcripts.length === 0) {
+  if (reset) {
+    // Clear existing cards (keep empty state)
+    const cards = listEl.querySelectorAll('.transcript-card');
+    cards.forEach(card => card.remove());
+    displayedTranscriptsCount = 0;
+  }
+
+  if (filteredTranscripts.length === 0) {
     emptyEl.style.display = 'flex';
     return;
   }
 
   emptyEl.style.display = 'none';
 
-  transcripts.forEach(transcript => {
-    const card = createTranscriptCard(transcript);
+  // Calculate how many to show
+  const startIndex = displayedTranscriptsCount;
+  const endIndex = Math.min(startIndex + TRANSCRIPTS_PER_PAGE, filteredTranscripts.length);
+
+  // Render next batch
+  for (let i = startIndex; i < endIndex; i++) {
+    const card = createTranscriptCard(filteredTranscripts[i]);
     listEl.appendChild(card);
-  });
+  }
+
+  displayedTranscriptsCount = endIndex;
+
+  // Add "Load more" button if there are more transcripts
+  if (displayedTranscriptsCount < filteredTranscripts.length) {
+    const remaining = filteredTranscripts.length - displayedTranscriptsCount;
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.className = 'load-more-btn';
+    loadMoreBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+      Weitere ${Math.min(remaining, TRANSCRIPTS_PER_PAGE)} von ${remaining} laden
+    `;
+    loadMoreBtn.addEventListener('click', () => {
+      loadMoreBtn.remove();
+      renderTranscriptsList(false);
+    });
+    listEl.appendChild(loadMoreBtn);
+  }
 }
 
 // Create a transcript card element
@@ -4901,6 +5123,27 @@ document.getElementById('topicPopup')?.addEventListener('click', (e) => {
 // Event listeners for transcript view
 document.getElementById('transcriptSearch')?.addEventListener('input', (e) => {
   filterTranscripts(e.target.value);
+});
+
+// Date filter chips
+document.querySelectorAll('.date-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    setDateFilter(chip.dataset.filter);
+  });
+});
+
+// Date range picker buttons
+document.getElementById('dateRangeClose')?.addEventListener('click', closeDateRangePicker);
+document.getElementById('dateRangeClear')?.addEventListener('click', clearDateRange);
+document.getElementById('dateRangeApply')?.addEventListener('click', applyDateRange);
+
+// Close date picker when clicking outside
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('dateRangePicker');
+  const customBtn = document.getElementById('customDateBtn');
+  if (picker?.style.display === 'block' && !picker.contains(e.target) && !customBtn?.contains(e.target)) {
+    closeDateRangePicker();
+  }
 });
 
 document.getElementById('transcriptModalClose')?.addEventListener('click', closeTranscriptModal);
