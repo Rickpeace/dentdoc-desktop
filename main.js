@@ -1968,17 +1968,17 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
   }
 
   // PAGE_VISIBLE means same tab came back to foreground
-  // Send RESUME (not START) so iPhone knows to continue streaming to existing recording
+  // Mic was released when page was hidden, user needs to tap "Aktivieren" again
   if (msg.type === 'PAGE_VISIBLE') {
-    console.log('[iPhone] Safari page is visible again - sending RESUME');
+    console.log('[iPhone] Safari page is visible again - needs reactivation');
     if (isIphoneSession && isRecording) {
+      // Show activation message - mic was released, user must tap button
       updateStatusOverlay(
-        'Smartphone verbindet...',
-        'Warte auf Mikrofon-Bereitschaft',
-        'waiting-iphone',
-        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+        '⚠️ Smartphone reaktivieren',
+        'Tippen Sie auf dem Handy auf "Aktivieren"',
+        'warning'
       );
-      // Send RESUME (not START) - iPhone should continue streaming, not restart
+      // Send RESUME - phone will respond with IPHONE_NEEDS_ACTIVATION or start streaming
       if (iphoneRelayWs && iphoneRelayWs.readyState === WebSocket.OPEN) {
         iphoneRelayWs.send(JSON.stringify({ type: 'RESUME' }));
       }
@@ -2000,6 +2000,23 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
     // Notify dashboard
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
       dashboardWindow.webContents.send('iphone-connection-status', { connected: false });
+    }
+  }
+
+  // Handle IPHONE_NEEDS_ACTIVATION - phone mic was released (backgrounded), needs user tap
+  if (msg.type === 'IPHONE_NEEDS_ACTIVATION') {
+    console.warn('[iPhone] Phone needs reactivation - mic was released');
+
+    // Show warning overlay
+    updateStatusOverlay(
+      '⚠️ Smartphone reaktivieren',
+      'Tippen Sie auf dem Handy auf "Aktivieren"',
+      'warning'
+    );
+
+    // Notify dashboard
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('iphone-connection-status', { connected: false, needsActivation: true });
     }
   }
 
