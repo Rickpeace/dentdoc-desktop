@@ -2071,6 +2071,14 @@ async function stopRecordingWithVAD() {
     await audioRecorder.stopRecording();
     console.log('[VAD] Recording stopped:', currentRecordingPath);
 
+    // Downsample 48kHz to 16kHz for VAD/transcription
+    try {
+      await audioRecorder.downsampleTo16k(currentRecordingPath);
+      console.log('[VAD] Downsampled to 16kHz');
+    } catch (err) {
+      console.warn('[VAD] Downsampling failed, using original:', err.message);
+    }
+
     isRecording = false;
     isVadSession = false;
     updateTrayMenu();
@@ -2141,6 +2149,15 @@ async function stopRecording() {
     tray.setToolTip('DentDoc - Verarbeite Aufnahme...');
 
     await audioRecorder.stopRecording();
+
+    // Downsample 48kHz to 16kHz for transcription
+    try {
+      await audioRecorder.downsampleTo16k(currentRecordingPath);
+      console.log('[Recording] Downsampled to 16kHz');
+    } catch (err) {
+      console.warn('[Recording] Downsampling failed, using original:', err.message);
+    }
+
     isRecording = false;
     updateTrayMenu();
 
@@ -4711,6 +4728,14 @@ ipcMain.handle('stop-mic-test', async () => {
     }
     const filePath = await audioRecorder.stopRecording();
     micTestPath = filePath;
+
+    // Downsample 48kHz to 16kHz for playback consistency
+    try {
+      await audioRecorder.downsampleTo16k(filePath);
+    } catch (err) {
+      console.warn('[Mic Test] Downsampling failed:', err.message);
+    }
+
     return { success: true, path: filePath };
   } catch (error) {
     // If recording was already stopped but file exists, return success

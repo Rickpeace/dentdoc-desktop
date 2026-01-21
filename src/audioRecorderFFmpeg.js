@@ -78,6 +78,153 @@ function getState() {
 }
 
 /**
+ * Detect microphone type based on device name
+ * Used to choose optimal recording strategy (WASAPI vs DirectShow)
+ * @param {string} microphoneName - Device name from settings
+ * @returns {'usb' | 'laptop' | 'unknown'}
+ */
+function detectMicType(microphoneName) {
+  const name = (microphoneName || '').toLowerCase();
+
+  // USB/External microphones - work well with DirectShow + explicit name
+  const usbKeywords = [
+    'usb', 'logitech', 'blue', 'rode', 'shure', 'focusrite',
+    'scarlett', 'samson', 'pro x', 'wireless', 'yeti', 'at2020'
+  ];
+
+  // Laptop/Internal microphones - need WASAPI + default device
+  const laptopKeywords = [
+    'microphone array', 'internal', 'realtek', 'amd audio',
+    'intel', 'built-in', 'integrated', 'hd audio'
+  ];
+
+  if (usbKeywords.some(k => name.includes(k))) return 'usb';
+  if (laptopKeywords.some(k => name.includes(k))) return 'laptop';
+  return 'unknown';
+}
+
+/**
+ * Downsample WAV file to 16kHz for VAD/transcription
+ * Recording is done at 48kHz for stability, then downsampled
+ * @param {string} inputPath - Path to 48kHz WAV file
+ * @returns {Promise<string>} - Path to 16kHz WAV file (same path, replaced)
+ */
+async function downsampleTo16k(inputPath) {
+  const outputPath = inputPath.replace('.wav', '_16k.wav');
+
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-y', '-i', inputPath,
+      '-ar', '16000',
+      '-ac', '1',
+      '-acodec', 'pcm_s16le',
+      outputPath
+    ];
+
+    const proc = spawn(getFFmpegPath(), args);
+    let stderr = '';
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0 && fs.existsSync(outputPath)) {
+        try {
+          fs.unlinkSync(inputPath);
+          fs.renameSync(outputPath, inputPath);
+          console.log('[Recorder] Downsampled to 16kHz:', inputPath);
+          resolve(inputPath);
+        } catch (err) {
+          reject(new Error(`Downsampling rename failed: ${err.message}`));
+        }
+      } else {
+        reject(new Error(`Downsampling failed (code ${code}): ${stderr.slice(-200)}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Downsampling error: ${err.message}`));
+    });
+  });
+}
+
+/**
+ * Try to start recording with a specific backend/device combination
+ * Used for fallback system - tries one method and returns result
+ * @param {string} backend - 'wasapi' or 'dshow'
+ * @param {string} device - Device name or 'default'
+ * @param {string} outputPath - Path for WAV output
+ * @returns {Promise<{success: boolean, process?: ChildProcess, error?: string}>}
+ */
+function tryRecordWithBackend(backend, device, outputPath) {
+  return new Promise((resolve) => {
+    const args = backend === 'wasapi' ? [
+      '-f', 'wasapi',
+      '-thread_queue_size', '1024',
+      '-i', device,
+      '-ac', '1',
+      '-ar', '48000',
+      '-af', 'highpass=f=90,alimiter=limit=0.97',
+      '-acodec', 'pcm_s16le',
+      '-y',
+      outputPath
+    ] : [
+      '-f', 'dshow',
+      '-i', `audio=${device}`,
+      '-ac', '1',
+      '-ar', '48000',
+      '-af', 'highpass=f=90,alimiter=limit=0.97',
+      '-acodec', 'pcm_s16le',
+      '-y',
+      outputPath
+    ];
+
+    console.log(`[Recorder] Trying ${backend} with device: ${device}`);
+    const proc = spawn(getFFmpegPath(), args);
+    let resolved = false;
+    let errorOutput = '';
+
+    const resolveOnce = (result) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      resolve(result);
+    };
+
+    proc.stderr.on('data', (data) => {
+      const output = data.toString();
+      errorOutput += output;
+      // FFmpeg outputs progress to stderr - look for actual recording progress
+      // Resolve IMMEDIATELY when we see recording has started
+      if (!resolved && (output.includes('size=') || output.includes('time='))) {
+        resolveOnce({ success: true, process: proc });
+      }
+    });
+
+    // Timeout: If FFmpeg doesn't start within 3 seconds, fail
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        try { proc.kill(); } catch (e) { /* ignore */ }
+        console.log(`[Recorder] ${backend} failed to start:`, errorOutput.slice(-300));
+        resolveOnce({ success: false, error: errorOutput.slice(-500) });
+      }
+    }, 3000);
+
+    proc.on('error', (err) => {
+      resolveOnce({ success: false, error: err.message });
+    });
+
+    // If process exits before we resolve, it failed
+    proc.on('close', (code) => {
+      if (!resolved) {
+        resolveOnce({ success: false, error: `Process exited with code ${code}` });
+      }
+    });
+  });
+}
+
+/**
  * List all Windows audio input devices using both WASAPI and DirectShow
  * WASAPI is preferred as it supports wireless headsets and modern USB devices
  * @returns {Promise<Array<{id: string, name: string, backend: string}>>} Array of devices
@@ -215,13 +362,18 @@ function cleanupOldRecordings(tempDir) {
 }
 
 /**
- * Start audio recording using FFmpeg with WASAPI (preferred) or DirectShow fallback
+ * Start audio recording using FFmpeg with automatic fallback
  *
- * IMPORTANT: This function will REJECT if a recording is already in progress.
- * The caller must call stopRecording() first and wait for it to complete.
+ * Recording Strategy (based on mic type detection):
+ * - Laptop/Unknown mics: WASAPI + "default" first (most stable for internal mics)
+ * - USB mics: DirectShow + explicit name first (works well for external mics)
+ * - Automatic fallback if primary method fails
+ *
+ * IMPORTANT: Records at 48kHz for stability, call downsampleTo16k() after recording
  *
  * @param {boolean} deleteAudio - Whether to delete old recordings first
  * @param {string} deviceName - Windows audio device name (optional)
+ * @param {string} customOutputPath - Custom output path (optional, for VAD segments)
  * @returns {Promise<string>} Path to the output WAV file
  */
 function startRecording(deleteAudio = false, deviceName = null, customOutputPath = null) {
@@ -238,7 +390,6 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
     try {
       // Transition to 'starting' state
       recordingState = 'starting';
-      // Starting recording...
 
       // Create temp directory if it doesn't exist
       const tempDir = path.join(app.getPath('temp'), 'dentdoc');
@@ -246,9 +397,8 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
         fs.mkdirSync(tempDir, { recursive: true });
       }
 
-      // Clean up previous recordings if requested (safe because state is 'starting')
+      // Clean up previous recordings if requested
       if (deleteAudio) {
-        // Temporarily set to idle for cleanup, then back to starting
         const prevState = recordingState;
         recordingState = 'idle';
         cleanupOldRecordings(tempDir);
@@ -258,146 +408,126 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
       // Use custom output path if provided (for VAD segments), otherwise generate one
       if (customOutputPath) {
         currentFilePath = customOutputPath;
-        // Ensure parent directory exists
         const parentDir = path.dirname(customOutputPath);
         if (!fs.existsSync(parentDir)) {
           fs.mkdirSync(parentDir, { recursive: true });
         }
       } else {
-        // Generate unique filename - directly as WAV!
         const timestamp = Date.now();
         currentFilePath = path.join(tempDir, `recording-${timestamp}.wav`);
       }
 
-      // Get device and backend info
-      const devices = await listAudioDevices();
-      if (devices.length === 0) {
-        recordingState = 'idle';
-        throw new Error('Kein Mikrofon gefunden. Bitte schließen Sie ein Mikrofon an.');
-      }
+      // Detect mic type for optimal recording strategy
+      const micType = detectMicType(deviceName);
 
-      let audioDevice;
-      let backend;
-
-      // Try to find matching device if deviceName was provided
-      const matchedDevice = deviceName
-        ? devices.find(d => d.name === deviceName || d.id === deviceName)
-        : null;
-
-      if (matchedDevice) {
-        audioDevice = matchedDevice.name;
-        backend = matchedDevice.backend;
+      // IMPORTANT: microphoneName === null is NORMAL on laptops (no mic selected yet)
+      // This is NOT an error - we use WASAPI default as fallback
+      if (!deviceName) {
+        console.log('[Recorder] microphoneName is null → using WASAPI default fallback');
       } else {
-        // Use first available device (default)
-        audioDevice = devices[0].name;
-        backend = devices[0].backend;
+        console.log(`[Recorder] Mic type: ${micType}, name: "${deviceName}"`);
       }
 
-      // Log which microphone is being used
-      console.log(`[Recorder] Mikrofon: ${audioDevice}`);
+      // Clean device name for FFmpeg compatibility:
+      // 1. Remove WebRTC "Default - " prefix
+      // 2. Remove USB Vendor/Product ID suffix like "(046d:0aba)"
+      let cleanDeviceName = deviceName ? deviceName.replace(/^Default - /i, '') : null;
+      if (cleanDeviceName) {
+        // Remove USB ID pattern: space + (xxxx:xxxx) at end
+        cleanDeviceName = cleanDeviceName.replace(/\s+\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '');
+      }
 
-      currentAudioBackend = backend;
+      let result;
 
-      // Build FFmpeg arguments as array (avoids cmd.exe quote escaping issues)
-      // Audio filters: highpass removes rumble (chair, footsteps), alimiter prevents clipping
-      const ffmpegArgs = [
-        '-f', backend,
-        '-i', `audio=${audioDevice}`,
-        '-ar', '16000',
-        '-ac', '1',
-        '-af', 'highpass=f=90,alimiter=limit=0.97',
-        '-acodec', 'pcm_s16le',
-        '-y',
-        currentFilePath
-      ];
+      // ========================================================================
+      // RECORDING STRATEGY WITH AUTOMATIC FALLBACK
+      // ========================================================================
 
-      // Spawn FFmpeg directly (not via cmd.exe to avoid quote issues)
-      ffmpegProcess = spawn(getFFmpegPath(), ffmpegArgs);
+      // If no device name provided, go straight to WASAPI default (safest path)
+      if (!cleanDeviceName) {
+        console.log('[Recorder] Strategy: WASAPI default (no device specified)');
+        result = await tryRecordWithBackend('wasapi', 'default', currentFilePath);
 
-      let started = false;
-      let startTimeout = null;
-
-      // ======================================================================
-      // EVENT: FFmpeg successfully spawned
-      // ======================================================================
-      ffmpegProcess.once('spawn', () => {
-        // FFmpeg spawned - waiting for first audio data
-      });
-
-      // ======================================================================
-      // EVENT: FFmpeg stderr output (progress info)
-      // ======================================================================
-      ffmpegProcess.stderr.on('data', (data) => {
-        const output = data.toString();
-
-        // FFmpeg outputs progress info to stderr
-        if (output.includes('size=') || output.includes('time=')) {
-          if (!started) {
-            started = true;
-            if (startTimeout) clearTimeout(startTimeout);
-
-            // Transition to 'recording' state
-            recordingState = 'recording';
-            console.log('[Recorder] Recording started:', currentFilePath);
-
-            resolve(currentFilePath);
+        // Fallback: Try DirectShow device enumeration
+        if (!result.success) {
+          console.log('[Recorder] Fallback: DirectShow device enumeration');
+          const devices = await listAudioDevices();
+          if (devices.length > 0) {
+            result = await tryRecordWithBackend('dshow', devices[0].name, currentFilePath);
           }
         }
+      } else if (micType === 'laptop' || micType === 'unknown') {
+        // Laptop/Unknown: Try WASAPI with "default" first (most reliable for internal mics)
+        console.log('[Recorder] Strategy: WASAPI default (laptop/unknown mic)');
+        result = await tryRecordWithBackend('wasapi', 'default', currentFilePath);
 
-        // Only log errors - not normal progress output
-        if (output.includes('Error') || output.includes('Could not')) {
-          console.error('[Recorder] FFmpeg error:', output.trim());
+        if (!result.success) {
+          // Fallback 1: Try DirectShow with explicit name
+          if (cleanDeviceName) {
+            console.log('[Recorder] Fallback: DirectShow with explicit name');
+            result = await tryRecordWithBackend('dshow', cleanDeviceName, currentFilePath);
+          }
+
+          // Fallback 2: Try to find any device via DirectShow
+          if (!result.success) {
+            console.log('[Recorder] Fallback: DirectShow device enumeration');
+            const devices = await listAudioDevices();
+            if (devices.length > 0) {
+              result = await tryRecordWithBackend('dshow', devices[0].name, currentFilePath);
+            }
+          }
         }
-      });
+      } else {
+        // USB Mic: Try DirectShow with explicit name first (works well for external mics)
+        if (cleanDeviceName) {
+          console.log('[Recorder] Strategy: DirectShow with explicit name (USB mic)');
+          result = await tryRecordWithBackend('dshow', cleanDeviceName, currentFilePath);
+        }
 
-      // ======================================================================
-      // EVENT: FFmpeg process error
-      // ======================================================================
-      ffmpegProcess.on('error', (err) => {
-        console.error('[Recorder] FFmpeg error:', err);
-        if (startTimeout) clearTimeout(startTimeout);
-        ffmpegProcess = null;
+        if (!result || !result.success) {
+          // Fallback: Try WASAPI with "default"
+          console.log('[Recorder] Fallback: WASAPI default');
+          result = await tryRecordWithBackend('wasapi', 'default', currentFilePath);
+        }
+
+        if (!result.success) {
+          // Last resort: DirectShow device enumeration
+          console.log('[Recorder] Fallback: DirectShow device enumeration');
+          const devices = await listAudioDevices();
+          if (devices.length > 0) {
+            result = await tryRecordWithBackend('dshow', devices[0].name, currentFilePath);
+          }
+        }
+      }
+
+      // ========================================================================
+      // CHECK RESULT
+      // ========================================================================
+      if (!result || !result.success) {
         recordingState = 'idle';
+        const errorMsg = result?.error || 'Unknown error';
+        console.error('[Recorder] All recording methods failed:', errorMsg);
+        throw new Error('Aufnahme konnte nicht gestartet werden. Bitte Mikrofon in Windows-Einstellungen überprüfen.');
+      }
 
-        if (!started) {
-          reject(new Error(`Aufnahme konnte nicht gestartet werden: ${err.message}`));
-        }
-      });
+      // Recording started successfully
+      ffmpegProcess = result.process;
+      recordingState = 'recording';
+      console.log('[Recorder] Recording started:', currentFilePath);
 
-      // ======================================================================
-      // EVENT: FFmpeg process closed
-      // ======================================================================
+      // Setup close handler for cleanup
       ffmpegProcess.once('close', () => {
-        if (startTimeout) clearTimeout(startTimeout);
         ffmpegProcess = null;
-
-        // Only transition to idle if we're not already idle
         if (recordingState !== 'idle') {
           recordingState = 'idle';
         }
       });
 
-      // ======================================================================
-      // TIMEOUT: Fallback if FFmpeg doesn't report progress
-      // ======================================================================
-      startTimeout = setTimeout(() => {
-        // Also abort if stopRecording() was called during startup
-        if (recordingState === 'stopping' || recordingState === 'idle') {
-          // Timeout aborted - state changed
-          return;
-        }
-        if (!started && ffmpegProcess && recordingState === 'starting') {
-          started = true;
-          recordingState = 'recording';
-          // Audio level monitoring handled by Dashboard
-          resolve(currentFilePath);
-        }
-      }, 2000);
+      resolve(currentFilePath);
 
     } catch (error) {
       console.error('Start recording error:', error);
       recordingState = 'idle';
-      // Error during start
       reject(error);
     }
   });
@@ -601,5 +731,7 @@ module.exports = {
   forceStop,
   isRecording,
   getState,
-  getFFmpegPath
+  getFFmpegPath,
+  downsampleTo16k,  // Downsample 48kHz recording to 16kHz for VAD/transcription
+  detectMicType     // Detect mic type (usb/laptop/unknown) for debugging
 };
