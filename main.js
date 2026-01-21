@@ -1657,7 +1657,7 @@ async function startRecording() {
     console.log('[Recording] iPhone mode - starting iPhone recording');
     startRecordingWithIphone().catch(err => {
       console.error('[Recording] iPhone start failed:', err);
-      updateStatusOverlay('iPhone Fehler', err.message, 'error');
+      updateStatusOverlay('Smartphone Fehler', err.message, 'error');
     });
     return;
   }
@@ -1738,7 +1738,7 @@ async function startRecordingWithIphone() {
   const token = store.get('authToken');
 
   if (!iphoneDeviceId) {
-    throw new Error('Kein iPhone gekoppelt. Bitte erst in Einstellungen koppeln.');
+    throw new Error('Kein Smartphone gekoppelt. Bitte erst in Einstellungen koppeln.');
   }
 
   try {
@@ -1749,7 +1749,7 @@ async function startRecordingWithIphone() {
     // Change tray icon to recording state
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
     tray.setImage(recordingIconPath);
-    tray.setToolTip('DentDoc - iPhone-Aufnahme wird vorbereitet...');
+    tray.setToolTip('DentDoc - Smartphone-Aufnahme wird vorbereitet...');
 
     // Create output path for WAV
     const tempDir = path.join(app.getPath('temp'), 'dentdoc');
@@ -1792,12 +1792,12 @@ async function startRecordingWithIphone() {
 
       iphoneRelayWs.on('open', () => {
         console.log('[iPhone] Connected to relay, waiting for iPhone...');
-        tray.setToolTip('DentDoc - Warte auf iPhone...');
+        tray.setToolTip('DentDoc - Warte auf Smartphone...');
 
         // Show status overlay with QR code for /mic page
         updateStatusOverlay(
-          'Warte auf iPhone...',
-          'Bitte öffnen Sie die Mikrofon-Seite auf Ihrem iPhone',
+          'Warte auf Smartphone...',
+          'Bitte öffnen Sie die Mikrofon-Seite auf Ihrem Smartphone',
           'waiting-iphone',
           { micUrl: 'https://dentdoc-app.vercel.app/mic' }
         );
@@ -1844,7 +1844,9 @@ async function startRecordingWithIphone() {
                 for (let i = 0; i < int16.length; i++) {
                   sum += int16[i] * int16[i];
                 }
-                const rms = Math.sqrt(sum / int16.length) / 32768; // Normalize to 0-1
+                const rawRms = Math.sqrt(sum / int16.length) / 32768; // Normalize to 0-1
+                // Boost RMS for better visual feedback (speech is typically 0.01-0.1)
+                const rms = Math.min(1, rawRms * 4);
 
                 // Send to status overlay window (not mainWindow!)
                 if (statusOverlay && !statusOverlay.isDestroyed()) {
@@ -1917,15 +1919,15 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
 
   if (msg.type === 'IPHONE_CONNECTED') {
     clearTimeout(timeout);
-    tray.setToolTip('DentDoc - iPhone verbunden, starte Aufnahme...');
+    tray.setToolTip('DentDoc - Smartphone verbunden, starte Aufnahme...');
 
     // If recording already in progress, send RESUME instead of START
-    // This happens when iPhone tab reconnects mid-recording (e.g., new tab took over)
+    // This happens when phone tab reconnects mid-recording (e.g., new tab took over)
     if (isIphoneSession && isRecording) {
-      console.log('[iPhone] iPhone reconnected during recording, sending RESUME');
+      console.log('[iPhone] Phone reconnected during recording, sending RESUME');
       iphoneRelayWs.send(JSON.stringify({ type: 'RESUME' }));
       updateStatusOverlay(
-        'iPhone verbindet...',
+        'Smartphone verbindet...',
         'Warte auf Mikrofon-Bereitschaft',
         'waiting-iphone',
         { micUrl: 'https://dentdoc-app.vercel.app/mic' }
@@ -1938,10 +1940,10 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
 
   if (msg.type === 'IPHONE_READY') {
     console.log('[iPhone] Recording started on iPhone');
-    tray.setToolTip('DentDoc - 🔴 iPhone-Aufnahme läuft...');
+    tray.setToolTip('DentDoc - 🔴 Smartphone-Aufnahme läuft...');
 
     const shortcut = store.get('shortcut') || 'F9';
-    updateStatusOverlay('iPhone-Aufnahme...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
+    updateStatusOverlay('Smartphone-Aufnahme...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
 
     resolve();
   }
@@ -1952,8 +1954,8 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
     console.warn('[iPhone] Safari page went to background - mic STOPPED');
     if (isIphoneSession && isRecording) {
       updateStatusOverlay(
-        'iPhone im Hintergrund',
-        'Bitte Safari öffnen oder QR-Code scannen',
+        'Smartphone im Hintergrund',
+        'Bitte Browser öffnen oder QR-Code scannen',
         'waiting-iphone',
         { micUrl: 'https://dentdoc-app.vercel.app/mic' }
       );
@@ -1966,7 +1968,7 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
     console.log('[iPhone] Safari page is visible again - sending RESUME');
     if (isIphoneSession && isRecording) {
       updateStatusOverlay(
-        'iPhone verbindet...',
+        'Smartphone verbindet...',
         'Warte auf Mikrofon-Bereitschaft',
         'waiting-iphone',
         { micUrl: 'https://dentdoc-app.vercel.app/mic' }
@@ -1985,7 +1987,7 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
 
     // Show warning overlay
     updateStatusOverlay(
-      '⚠️ iPhone getrennt',
+      '⚠️ Smartphone getrennt',
       'Aufnahme läuft weiter. F9 zum Stoppen.',
       'warning'
     );
@@ -2009,7 +2011,7 @@ async function stopRecordingWithIphone() {
   isIphoneSession = false;
 
   try {
-    tray.setToolTip('DentDoc - Stoppe iPhone-Aufnahme...');
+    tray.setToolTip('DentDoc - Stoppe Smartphone-Aufnahme...');
 
     // Stop heartbeat
     if (iphoneHeartbeatInterval) {
@@ -2213,7 +2215,7 @@ async function stopRecording() {
       await processAudioFile(recordingPath, { source: 'iphone' });
     } catch (error) {
       console.error('[iPhone] Stop error:', error);
-      updateStatusOverlay('iPhone Fehler', error.message, 'error');
+      updateStatusOverlay('Smartphone Fehler', error.message, 'error');
     }
     return;
   }
@@ -3726,7 +3728,7 @@ ipcMain.handle('iphone-test-connection', async () => {
   const token = store.get('authToken');
 
   if (!iphoneDeviceId) {
-    return { connected: false, error: 'Kein iPhone gekoppelt' };
+    return { connected: false, error: 'Kein Smartphone gekoppelt' };
   }
 
   if (!token) {
@@ -3768,12 +3770,12 @@ ipcMain.handle('iphone-test-connection', async () => {
       return {
         connected: true,
         latency: latency,
-        message: 'iPhone ist verbunden!'
+        message: 'Smartphone ist verbunden!'
       };
     } else {
       return {
         connected: false,
-        error: 'Nicht mit Relay verbunden. Bitte Safari auf iPhone öffnen.'
+        error: 'Nicht mit Relay verbunden. Bitte Browser auf Smartphone öffnen.'
       };
     }
   } catch (err) {
@@ -3837,7 +3839,7 @@ ipcMain.handle('iphone-audio-test', async (event) => {
   const token = store.get('authToken');
 
   if (!iphoneDeviceId) {
-    return { success: false, error: 'Kein iPhone gekoppelt' };
+    return { success: false, error: 'Kein Smartphone gekoppelt' };
   }
 
   if (!token) {
@@ -3984,7 +3986,7 @@ ipcMain.handle('iphone-audio-test', async (event) => {
       if (resolved) return;
       resolved = true;
       cleanup();
-      resolve({ success: false, error: 'iPhone antwortet nicht. Bitte Safari öffnen.' });
+      resolve({ success: false, error: 'Smartphone antwortet nicht. Bitte Browser öffnen.' });
     }, 15000);
 
     try {

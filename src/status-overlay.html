@@ -97,6 +97,28 @@
       /* Glow and background controlled by CSS custom properties */
     }
 
+    /* Waveform canvas inside icon */
+    .wave-canvas {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 48px;
+      height: 48px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .icon.recording .wave-canvas {
+      opacity: 1;
+    }
+
+    /* Hide emoji when recording (waveform takes over) */
+    .icon.recording #iconEmoji {
+      opacity: 0;
+    }
+
     /* Starting state - greyed out version of recording */
     .icon.starting {
       background: linear-gradient(135deg, #6b7280, #4b5563);
@@ -610,6 +632,7 @@
     <div class="header">
       <div id="icon" class="icon processing">
         <span id="iconEmoji">⚡</span>
+        <canvas id="waveCanvas" class="wave-canvas"></canvas>
       </div>
       <div class="content">
         <div id="title" class="title">Verarbeitung...</div>
@@ -629,7 +652,7 @@
       <div class="qr-container">
         <div id="iphoneQrCode" class="qr-code"></div>
         <div class="qr-instructions">
-          <p><strong>iPhone ist gekoppelt</strong>, aber die Mikrofon-Seite muss geöffnet sein.</p>
+          <p><strong>Smartphone ist gekoppelt</strong>, aber die Mikrofon-Seite muss geöffnet sein.</p>
           <p>QR-Code scannen oder öffnen:</p>
           <p class="url-hint" id="iphoneMicUrlHint">dentdoc-app.vercel.app/mic</p>
         </div>
@@ -739,7 +762,152 @@
     const actions = document.getElementById('actions');
     const copySummaryBtn = document.getElementById('copySummaryBtn');
     const copyFullBtn = document.getElementById('copyFullBtn');
-    // Audio level bar removed - only icon animation used
+
+    // =============================================
+    // BREATHING DOT + RING METER (Modern KI-SaaS)
+    // =============================================
+    const waveCanvas = document.getElementById('waveCanvas');
+    const waveCtx = waveCanvas.getContext('2d');
+
+    const CSS_SIZE = 46;
+    const dpr = window.devicePixelRatio || 1;
+
+    waveCanvas.style.width = CSS_SIZE + 'px';
+    waveCanvas.style.height = CSS_SIZE + 'px';
+    waveCanvas.width = Math.round(CSS_SIZE * dpr);
+    waveCanvas.height = Math.round(CSS_SIZE * dpr);
+    waveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    let currentAudioLevel = 0;
+    let smoothedLevel = 0;
+    let waveAnimationId = null;
+
+    const levelAttack = 0.35;
+    const levelDecay = 0.90;
+
+    // Hysteresis gate
+    let gateOpen = false;
+    const OPEN_TH = 0.09;
+    const CLOSE_TH = 0.05;
+    const ABS_KILL = 0.02;
+
+    // Activity detector - the key to clean UI
+    let lastActiveMs = 0;
+    const ACTIVE_HOLD_MS = 280;
+    const ACTIVE_LEVEL_TH = 0.16;
+
+    // Smooth ring progress
+    let ringProgress = 0;
+    const ringAttack = 0.15;
+    const ringDecay = 0.94;
+
+    function drawIndicator() {
+      const ctx = waveCtx;
+      const w = CSS_SIZE;
+      const h = CSS_SIZE;
+      const cx = w / 2;
+      const cy = h / 2;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Smooth (attack/decay)
+      if (currentAudioLevel > smoothedLevel) {
+        smoothedLevel += (currentAudioLevel - smoothedLevel) * levelAttack;
+      } else {
+        smoothedLevel *= levelDecay;
+      }
+      if (smoothedLevel < 0.01) smoothedLevel = 0;
+
+      // Activity detector - the KEY to clean UI
+      const now = performance.now();
+      const isActive = (now - lastActiveMs) < ACTIVE_HOLD_MS;
+
+      // Visual level for animations
+      const visual = isActive ? Math.pow(smoothedLevel, 0.6) : 0;
+
+      // Smooth ring progress
+      const targetRing = isActive ? Math.pow(smoothedLevel, 0.6) : 0;
+      if (targetRing > ringProgress) {
+        ringProgress += (targetRing - ringProgress) * ringAttack;
+      } else {
+        ringProgress *= ringDecay;
+      }
+      if (ringProgress < 0.005) ringProgress = 0;
+
+      // ----- STYLE -----
+      const baseR = 6.2;
+      const scale = 1 + visual * 0.55;
+      const dotR = baseR * scale;
+
+      // Subtle glow behind dot (only when active)
+      if (isActive && visual > 0) {
+        const glowAlpha = 0.08 + visual * 0.22;
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(255,255,255,${glowAlpha})`;
+        ctx.arc(cx, cy, dotR + 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Filled dot (always visible)
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(255,255,255,${isActive ? 0.95 : 0.22})`;
+      ctx.arc(cx, cy, isActive ? dotR : baseR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // RING METER (only when active)
+      if (isActive && ringProgress > 0.01) {
+        const ringR = 16;
+        const ringW = 2.3;
+
+        // Faint full ring background
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+        ctx.lineWidth = ringW;
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Progress ring (meter)
+        const start = -Math.PI / 2;
+        const end = start + Math.PI * 2 * Math.min(1, ringProgress);
+
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(255,255,255,${0.70 + visual * 0.25})`;
+        ctx.lineWidth = ringW;
+        ctx.lineCap = 'round';
+        ctx.arc(cx, cy, ringR, start, end);
+        ctx.stroke();
+
+        // Outer glow ring
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(255,255,255,${0.10 + visual * 0.15})`;
+        ctx.lineWidth = ringW + 5;
+        ctx.arc(cx, cy, ringR, start, end);
+        ctx.stroke();
+      }
+
+      if (currentState === 'recording') {
+        waveAnimationId = requestAnimationFrame(drawIndicator);
+      }
+    }
+
+    function startWaveAnimation() {
+      if (waveAnimationId) cancelAnimationFrame(waveAnimationId);
+      waveAnimationId = requestAnimationFrame(drawIndicator);
+    }
+
+    function stopWaveAnimation() {
+      if (waveAnimationId) {
+        cancelAnimationFrame(waveAnimationId);
+        waveAnimationId = null;
+      }
+      currentAudioLevel = 0;
+      smoothedLevel = 0;
+      ringProgress = 0;
+      gateOpen = false;
+      lastActiveMs = 0;
+      // Clear canvas completely
+      waveCtx.clearRect(0, 0, CSS_SIZE, CSS_SIZE);
+    }
 
     let currentDocumentation = null;
     let currentTranscript = null;
@@ -844,35 +1012,38 @@
     }
 
     function updateAudioLevel(level) {
-      // level should be between 0 and 1
-      const normalizedLevel = Math.max(0, Math.min(1, level));
+      const x = Math.max(0, Math.min(1, level));
 
-      // Amplify the level for visible effect (keep sensitivity)
-      const amplified = Math.pow(normalizedLevel * 5, 0.6); // Amplify 5x, then compress
-      const clamped = Math.min(1, amplified);
+      // Absolute kill zone (removes mic hiss/DC)
+      if (x < ABS_KILL) {
+        gateOpen = false;
+        currentAudioLevel = 0;
+        return;
+      }
 
-      // Scale: 1.0 (silent) to 1.3 (loud) - subtle but visible effect
-      const scale = 1 + (clamped * 0.3);
-      icon.style.transform = `scale(${scale})`;
+      // Hysteresis gate
+      if (!gateOpen && x > OPEN_TH) gateOpen = true;
+      if (gateOpen && x < CLOSE_TH) gateOpen = false;
 
-      // Dynamic glow effect - subtle and contained
-      const glowIntensity = 8 + (clamped * 12); // 8px to 20px blur (reduced)
-      const glowOpacity = 0.25 + (clamped * 0.35); // 0.25 to 0.6 opacity (reduced)
+      if (!gateOpen) {
+        currentAudioLevel = 0;
+        return;
+      }
 
-      // Color shift: red (quiet) → orange (loud) - less extreme
-      const r = 239;
-      const g = Math.round(68 + (clamped * 80)); // 68 → 148 (less yellow)
-      const b = 68;
+      // Amplify (speech-friendly)
+      const adjusted = (x - CLOSE_TH) / (1 - CLOSE_TH);
+      const amplified = Math.pow(adjusted * 3.0, 0.65);
+      currentAudioLevel = Math.min(1, amplified);
 
-      icon.style.boxShadow = `0 0 ${glowIntensity}px rgba(${r}, ${g}, ${b}, ${glowOpacity})`;
-
-      // Subtle background gradient shift based on level
-      const bgG = Math.round(68 + (clamped * 40)); // Less dramatic shift
-      icon.style.background = `linear-gradient(135deg, rgba(239, ${bgG}, 68, 1) 0%, rgba(185, 28, 28, 1) 100%)`;
+      // Activity detector: only count "real audio"
+      if (currentAudioLevel > ACTIVE_LEVEL_TH) {
+        lastActiveMs = performance.now();
+      }
     }
 
     ipcRenderer.on('update-status', (event, data) => {
       title.textContent = data.title;
+      const wasRecording = currentState === 'recording';
       currentState = data.type;
 
       // Reset icon classes, scale, and any dynamic styles from audio level
@@ -880,6 +1051,11 @@
       icon.style.transform = 'scale(1)';
       icon.style.background = '';  // Reset to CSS default
       icon.style.boxShadow = '';   // Reset to CSS default
+
+      // Stop waveform animation when leaving recording state
+      if (wasRecording && data.type !== 'recording') {
+        stopWaveAnimation();
+      }
 
       // Hide iPhone waiting section by default (will be shown only in waiting-iphone state)
       document.getElementById('iphoneWaitingSection').classList.remove('visible');
@@ -895,12 +1071,12 @@
           resetSteps();
           break;
         case 'recording':
-          iconEmoji.textContent = '🔴';
+          iconEmoji.textContent = '🔴';  // Hidden by CSS, waveform shows instead
           message.innerHTML = data.message + ' <span id="timer" class="timer"></span>';
           startTimer();
+          startWaveAnimation();  // Start waveform animation
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
-          // Audio level shown via icon animation only
           resetSteps();
           break;
         case 'processing':
