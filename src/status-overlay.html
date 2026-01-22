@@ -912,6 +912,8 @@
     let currentDocumentation = null;
     let currentTranscript = null;
     let currentShortenings = null;
+    let currentReconstructedTranscript = null;
+    let currentTranscriptWithSpeakers = null;
     let currentState = null;
     let timerInterval = null;
     let recordingStartTime = null;
@@ -1110,6 +1112,8 @@
             currentDocumentation = data.documentation;
             currentTranscript = data.transcript;
             currentShortenings = data.shortenings || null;
+            currentReconstructedTranscript = data.reconstructedTranscript || null;
+            currentTranscriptWithSpeakers = data.transcriptWithSpeakers || null;
             actions.classList.add('visible');
             copySummaryBtn.classList.remove('copied');
             copyFullBtn.classList.remove('copied');
@@ -1188,35 +1192,21 @@
     copyFullBtn.addEventListener('click', () => {
       let fullText = '';
 
-      // Build full text with all versions (shortest to longest)
-      if (currentShortenings) {
-        if (currentShortenings.keywords90) {
-          fullText += '--- Stichworte (90% kürzer) ---\n\n' + currentShortenings.keywords90 + '\n\n';
-        }
-        if (currentShortenings.chef70) {
-          fullText += '--- Chef Ultra (70% kürzer) ---\n\n' + currentShortenings.chef70 + '\n\n';
-        }
-        if (currentShortenings.chef50) {
-          fullText += '--- Chef (50% kürzer) ---\n\n' + currentShortenings.chef50 + '\n\n';
-        }
-        if (currentShortenings.pvs40) {
-          fullText += '--- PVS (40% kürzer) ---\n\n' + currentShortenings.pvs40 + '\n\n';
-        }
-        if (currentShortenings.zfa30) {
-          fullText += '--- ZFA (30% kürzer) ---\n\n' + currentShortenings.zfa30 + '\n\n';
-        }
-        if (currentShortenings.normalized) {
-          fullText += '--- Normalisiert (sprachlich optimiert) ---\n\n' + currentShortenings.normalized + '\n\n';
-        }
-      }
-
-      // Full documentation
+      // 1. Zusammenfassung (Dokumentation)
       if (currentDocumentation) {
-        fullText += '--- Dokumentation (Vollständig) ---\n\n' + currentDocumentation + '\n\n';
+        fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
       }
 
-      // Transcript
-      if (currentTranscript) {
+      // 2. Normalisiertes Transkript (wenn vorhanden - Agent V2)
+      if (currentReconstructedTranscript) {
+        fullText += '--- Normalisiertes Transkript ---\n\n' + currentReconstructedTranscript + '\n\n';
+      }
+
+      // 3. Transkript mit Sprechern
+      if (currentTranscriptWithSpeakers) {
+        fullText += '--- Transkript mit Sprechern ---\n\n' + currentTranscriptWithSpeakers;
+      } else if (currentTranscript) {
+        // Fallback: Roh-Transkript wenn kein Speaker-Transkript verfügbar
         fullText += '--- Transkript ---\n\n' + currentTranscript;
       }
 
@@ -1330,16 +1320,16 @@
         case 'full':
           // Build full text same as copyFullBtn click handler
           let fullText = '';
-          if (currentShortenings) {
-            if (currentShortenings.keywords90) fullText += '--- Stichworte (90% kürzer) ---\n\n' + currentShortenings.keywords90 + '\n\n';
-            if (currentShortenings.chef70) fullText += '--- Chef Ultra (70% kürzer) ---\n\n' + currentShortenings.chef70 + '\n\n';
-            if (currentShortenings.chef50) fullText += '--- Chef (50% kürzer) ---\n\n' + currentShortenings.chef50 + '\n\n';
-            if (currentShortenings.pvs40) fullText += '--- PVS (40% kürzer) ---\n\n' + currentShortenings.pvs40 + '\n\n';
-            if (currentShortenings.zfa30) fullText += '--- ZFA (30% kürzer) ---\n\n' + currentShortenings.zfa30 + '\n\n';
-            if (currentShortenings.normalized) fullText += '--- Normalisiert (sprachlich optimiert) ---\n\n' + currentShortenings.normalized + '\n\n';
+          // 1. Zusammenfassung
+          if (currentDocumentation) fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
+          // 2. Normalisiertes Transkript (wenn vorhanden - Agent V2)
+          if (currentReconstructedTranscript) fullText += '--- Normalisiertes Transkript ---\n\n' + currentReconstructedTranscript + '\n\n';
+          // 3. Transkript mit Sprechern
+          if (currentTranscriptWithSpeakers) {
+            fullText += '--- Transkript mit Sprechern ---\n\n' + currentTranscriptWithSpeakers;
+          } else if (currentTranscript) {
+            fullText += '--- Transkript ---\n\n' + currentTranscript;
           }
-          if (currentDocumentation) fullText += '--- Dokumentation (Vollständig) ---\n\n' + currentDocumentation + '\n\n';
-          if (currentTranscript) fullText += '--- Transkript ---\n\n' + currentTranscript;
           textToCopy = fullText.trim();
           btnToHighlight = copyFullBtn;
           break;

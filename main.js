@@ -406,7 +406,7 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {Object} options.shortenings - Shortenings from v1.2 hybrid mode
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null, reconstructedTranscript = null, transcriptWithSpeakers = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -481,6 +481,22 @@ ${shorteningParts.join('\n\n')}
     }
   }
 
+  // Build normalized transcript section if available (Agent V2)
+  let normalizedSection = '';
+  if (reconstructedTranscript) {
+    normalizedSection = `
+
+────────────────────────────────────────────────────────────────────
+  NORMALISIERTES TRANSKRIPT
+────────────────────────────────────────────────────────────────────
+
+${reconstructedTranscript}
+`;
+  }
+
+  // Use transcriptWithSpeakers if available, otherwise fall back to raw transcript
+  const finalTranscriptText = transcriptWithSpeakers || transcript;
+
   // Create file content for transcript
   const content = `╔════════════════════════════════════════════════════════════════════╗
 ║                          DENTDOC TRANSKRIPT                        ║
@@ -494,13 +510,13 @@ Uhrzeit:  ${now.toLocaleTimeString('de-DE')}
 ────────────────────────────────────────────────────────────────────
 
 ${summary}
-${shorteningsSection}
+${shorteningsSection}${normalizedSection}
 
 ────────────────────────────────────────────────────────────────────
-  VOLLSTÄNDIGES TRANSKRIPT
+  TRANSKRIPT MIT SPRECHERN
 ────────────────────────────────────────────────────────────────────
 
-${transcript}
+${finalTranscriptText}
 
 
 ════════════════════════════════════════════════════════════════════
@@ -1115,6 +1131,8 @@ async function processAudioFile(audioFilePath, options = {}) {
     const documentation = result.documentation;
     const finalTranscript = result.transcript || transcript;
     const shortenings = result.shortenings || null;
+    const reconstructedTranscript = result.reconstructedTranscript || null;
+    const transcriptWithSpeakers = result.transcriptWithSpeakers || null;
 
     // Store for "show last result"
     lastDocumentation = documentation;
@@ -1131,7 +1149,7 @@ async function processAudioFile(audioFilePath, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, transcript: finalTranscript, shortenings, autoClose }
+      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers }
     );
 
     // Reset processing state immediately so user knows it's done
@@ -1205,7 +1223,9 @@ async function processAudioFile(audioFilePath, options = {}) {
             words: words,
             topicSegments: topicSegments,
             passages: passages,
-            docLinks: docLinks
+            docLinks: docLinks,
+            reconstructedTranscript: reconstructedTranscript,
+            transcriptWithSpeakers: transcriptWithSpeakers
           });
           debugLog('[Background] Files saved successfully');
         } catch (error) {
@@ -1478,6 +1498,8 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const documentation = docResponse.documentation;
     const finalTranscript = docResponse.transcript || transcript;  // Use formatted transcript with speaker labels
     const shortenings = docResponse.shortenings || null;
+    const reconstructedTranscript = docResponse.reconstructedTranscript || null;
+    const transcriptWithSpeakers = docResponse.transcriptWithSpeakers || null;
 
     // Store for potential retry/copy
     lastDocumentation = documentation;
@@ -1502,7 +1524,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, transcript: finalTranscript, shortenings, autoClose }
+      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers }
     );
 
     // Increment today's recording count
@@ -1583,7 +1605,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
             words: words,
             topicSegments: topicSegments,
             passages: passages,
-            docLinks: docLinks
+            docLinks: docLinks,
+            reconstructedTranscript: reconstructedTranscript,
+            transcriptWithSpeakers: transcriptWithSpeakers
           });
           console.log('  [Background] Dateien gespeichert!');
         } catch (error) {

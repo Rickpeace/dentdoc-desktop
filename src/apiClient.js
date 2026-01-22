@@ -680,7 +680,7 @@ async function getDocumentationMegaprompt(transcriptionId, token) {
  *
  * @param {number} transcriptionId - Transcription ID
  * @param {string} token - Auth token
- * @returns {Promise<{documentation: string, transcript: string|null, reconstructedTranscript: string|null}>}
+ * @returns {Promise<{documentation: string, transcript: string|null, reconstructedTranscript: string|null, transcriptWithSpeakers: string|null}>}
  */
 async function getDocumentationAgentV2(transcriptionId, token) {
   try {
@@ -704,6 +704,7 @@ async function getDocumentationAgentV2(transcriptionId, token) {
       documentation: response.data.documentation,
       transcript: response.data.transcript || null,
       reconstructedTranscript: response.data.reconstructedTranscript || null,
+      transcriptWithSpeakers: response.data.transcriptWithSpeakers || null,
       stages: response.data.stages || null
     };
   } catch (error) {
