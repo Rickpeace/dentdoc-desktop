@@ -2778,7 +2778,9 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     documentation: extra.documentation || null,
     transcript: extra.transcript || null,
     shortenings: extra.shortenings || null,
-    micUrl: extra.micUrl || null
+    micUrl: extra.micUrl || null,
+    reconstructedTranscript: extra.reconstructedTranscript || null,
+    transcriptWithSpeakers: extra.transcriptWithSpeakers || null
   };
 
   // Store the data to send
