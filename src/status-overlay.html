@@ -914,6 +914,7 @@
     let currentShortenings = null;
     let currentReconstructedTranscript = null;
     let currentTranscriptWithSpeakers = null;
+    let currentRecognizedSpeakers = [];
     let currentState = null;
     let timerInterval = null;
     let recordingStartTime = null;
@@ -1114,6 +1115,7 @@
             currentShortenings = data.shortenings || null;
             currentReconstructedTranscript = data.reconstructedTranscript || null;
             currentTranscriptWithSpeakers = data.transcriptWithSpeakers || null;
+            currentRecognizedSpeakers = data.recognizedSpeakers || [];
             actions.classList.add('visible');
             copySummaryBtn.classList.remove('copied');
             copyFullBtn.classList.remove('copied');
@@ -1191,6 +1193,11 @@
 
     copyFullBtn.addEventListener('click', () => {
       let fullText = '';
+
+      // 0. Erkannte Personen (nur Sherpa-erkannte mit Namen)
+      if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
+        fullText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
+      }
 
       // 1. Zusammenfassung (Dokumentation)
       if (currentDocumentation) {
@@ -1320,6 +1327,10 @@
         case 'full':
           // Build full text same as copyFullBtn click handler
           let fullText = '';
+          // 0. Erkannte Personen
+          if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
+            fullText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
+          }
           // 1. Zusammenfassung
           if (currentDocumentation) fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
           // 2. Normalisiertes Transkript (wenn vorhanden - Agent V2)

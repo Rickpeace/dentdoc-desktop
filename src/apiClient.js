@@ -705,6 +705,7 @@ async function getDocumentationAgentV2(transcriptionId, token) {
       transcript: response.data.transcript || null,
       reconstructedTranscript: response.data.reconstructedTranscript || null,
       transcriptWithSpeakers: response.data.transcriptWithSpeakers || null,
+      recognizedSpeakers: response.data.recognizedSpeakers || [],
       stages: response.data.stages || null
     };
   } catch (error) {
