@@ -14,7 +14,10 @@
     "documentation",
     "transcription"
   ],
-  "author": "DentDoc",
+  "author": {
+    "name": "DentDoc",
+    "email": "support@dentdoc.de"
+  },
   "license": "MIT",
   "dependencies": {
     "axios": "^1.6.2",
@@ -50,11 +53,14 @@
       "node_modules/sherpa-onnx-node/**/*",
       "node_modules/sherpa-onnx-win-x64/**/*"
     ],
+    "copyright": "Copyright © 2026 DentDoc",
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "publisherName": "DentDoc",
+      "legalTrademarks": "DentDoc"
     },
     "nsis": {
       "oneClick": false,
