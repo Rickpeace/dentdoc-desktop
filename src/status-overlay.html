@@ -1184,7 +1184,13 @@
 
     copySummaryBtn.addEventListener('click', () => {
       if (currentDocumentation) {
-        ipcRenderer.invoke('copy-to-clipboard', currentDocumentation);
+        let summaryText = '';
+        // Add recognized speakers at top if available
+        if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
+          summaryText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
+        }
+        summaryText += currentDocumentation;
+        ipcRenderer.invoke('copy-to-clipboard', summaryText);
         showCopied(copySummaryBtn);
         lastClickedDoc = 'summary';
         saveLastClickedDoc();
@@ -1321,7 +1327,13 @@
 
       switch (lastClickedDoc) {
         case 'summary':
-          textToCopy = currentDocumentation;
+          // Build summary with recognized speakers at top
+          let summaryText = '';
+          if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
+            summaryText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
+          }
+          summaryText += currentDocumentation;
+          textToCopy = summaryText;
           btnToHighlight = copySummaryBtn;
           break;
         case 'full':
