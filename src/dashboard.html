@@ -288,31 +288,20 @@
 
         <!-- iPhone Mic Setup Section (shown when iPhone is selected as mic source) -->
         <div class="iphone-dashboard-section" id="iphoneDashboardSection" style="display: none;">
-          <!-- Not paired state -->
+          <!-- Not paired state - link to settings -->
           <div id="iphoneDashboardUnpaired" class="iphone-dashboard-card">
             <div class="iphone-dashboard-content">
-              <div class="iphone-dashboard-icon">
+              <div class="iphone-dashboard-icon warning">
                 <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
                   <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
                   <line x1="12" y1="18" x2="12.01" y2="18"/>
                 </svg>
               </div>
               <div class="iphone-dashboard-text">
-                <h3>Smartphone als Mikrofon einrichten</h3>
-                <p>Scannen Sie den QR-Code mit Ihrem Smartphone, um es als kabelloses Mikrofon zu verwenden.</p>
+                <h3>Smartphone noch nicht gekoppelt</h3>
+                <p>Sie haben Smartphone als Mikrofon gewählt, aber noch kein Gerät gekoppelt.</p>
+                <a href="#" id="iphoneDashboardGoToSettings" class="link-primary">In den Einstellungen koppeln →</a>
               </div>
-            </div>
-            <div class="iphone-dashboard-qr">
-              <div id="iphoneDashboardPairingQR" class="qr-code-container"></div>
-              <p class="helper-text" id="iphoneDashboardPairingUrl"></p>
-            </div>
-            <div class="iphone-dashboard-hint">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="16" x2="12" y2="12"/>
-                <line x1="12" y1="8" x2="12.01" y2="8"/>
-              </svg>
-              <span>Einmalige Kopplung - danach verbindet sich das Smartphone automatisch</span>
             </div>
           </div>
 
@@ -575,29 +564,8 @@
               </svg>
               <h3>Mikrofon</h3>
             </div>
-            <label for="settingsMicSelect">Mikrofon auswählen</label>
-            <select id="settingsMicSelect">
-              <option value="">Lade Mikrofone...</option>
-            </select>
-            <div class="mic-test">
-              <button id="settingsTestMicBtn" class="btn btn-secondary">Test starten (5 Sek.)</button>
-              <div class="mic-level">
-                <div id="settingsMicLevelBar" class="mic-level-bar"></div>
-              </div>
-            </div>
-            <div class="mic-playback" id="settingsMicPlayback" style="display: none;">
-              <button id="settingsPlayMicBtn" class="btn btn-secondary">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;">
-                  <polygon points="5,3 19,12 5,21"/>
-                </svg>
-                Anhören
-              </button>
-              <audio id="settingsMicAudio" style="display: none;"></audio>
-            </div>
-            <div id="settingsMicStatus" class="status-message"></div>
-            <button id="settingsOpenSoundBtn" class="btn btn-secondary w-full mt-4">Windows Sound-Einstellungen öffnen</button>
 
-            <!-- Mikrofonquelle Auswahl -->
+            <!-- Mikrofonquelle Auswahl - ZUERST -->
             <div class="mic-source-section" id="settingsMicSourceSection">
               <label>Mikrofonquelle</label>
               <div class="radio-group">
@@ -612,22 +580,47 @@
               </div>
             </div>
 
-            <!-- Kein Mikrofon Hinweis (wird angezeigt wenn kein Mikrofon gefunden) -->
-            <div id="settingsNoMicrophoneHint" class="no-mic-hint" style="display: none;">
-              <div class="no-mic-hint-header">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <path d="M12 8v4M12 16h.01"/>
-                </svg>
-                <span>Kein USB-Mikrofon gefunden</span>
+            <!-- Lokales Mikrofon Section -->
+            <div id="settingsLocalMicSection">
+              <label for="settingsMicSelect">Mikrofon auswählen</label>
+              <select id="settingsMicSelect">
+                <option value="">Lade Mikrofone...</option>
+              </select>
+              <div class="mic-test">
+                <button id="settingsTestMicBtn" class="btn btn-secondary">Test starten (5 Sek.)</button>
+                <div class="mic-level">
+                  <div id="settingsMicLevelBar" class="mic-level-bar"></div>
+                </div>
               </div>
-              <p class="no-mic-hint-text">
-                Für beste Ergebnisse empfehlen wir ein USB-Konferenzmikrofon wie das
-                <a href="https://www.amazon.de/s?k=Beyerdynamic+SPACE+USB" target="_blank" rel="noopener">Beyerdynamic SPACE</a>.
-              </p>
-              <p class="no-mic-hint-tip">
-                <strong>Tipp:</strong> Rechtsklick auf das Tray-Icon ermöglicht auch das Hochladen von Audio-Dateien.
-              </p>
+              <div class="mic-playback" id="settingsMicPlayback" style="display: none;">
+                <button id="settingsPlayMicBtn" class="btn btn-secondary">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 4px;">
+                    <polygon points="5,3 19,12 5,21"/>
+                  </svg>
+                  Anhören
+                </button>
+                <audio id="settingsMicAudio" style="display: none;"></audio>
+              </div>
+              <div id="settingsMicStatus" class="status-message"></div>
+              <button id="settingsOpenSoundBtn" class="btn btn-secondary w-full mt-4">Windows Sound-Einstellungen öffnen</button>
+
+              <!-- Kein Mikrofon Hinweis (wird angezeigt wenn kein Mikrofon gefunden) -->
+              <div id="settingsNoMicrophoneHint" class="no-mic-hint" style="display: none;">
+                <div class="no-mic-hint-header">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 8v4M12 16h.01"/>
+                  </svg>
+                  <span>Kein USB-Mikrofon gefunden</span>
+                </div>
+                <p class="no-mic-hint-text">
+                  Für beste Ergebnisse empfehlen wir ein USB-Konferenzmikrofon wie das
+                  <a href="https://www.amazon.de/s?k=Beyerdynamic+SPACE+USB" target="_blank" rel="noopener">Beyerdynamic SPACE</a>.
+                </p>
+                <p class="no-mic-hint-tip">
+                  <strong>Tipp:</strong> Rechtsklick auf das Tray-Icon ermöglicht auch das Hochladen von Audio-Dateien.
+                </p>
+              </div>
             </div>
 
             <!-- iPhone Kopplung Section -->
@@ -1078,6 +1071,25 @@
           <span class="status-message" id="bausteineStatusMessage"></span>
           <button class="btn btn-secondary" id="bausteineCancelBtn">Abbrechen</button>
           <button class="btn btn-primary" id="bausteineSaveBtn" disabled>Speichern</button>
+        </div>
+      </div>
+
+      <!-- Warning Modal -->
+      <div class="modal-overlay" id="warningModal" style="display: none;">
+        <div class="modal warning-modal">
+          <div class="warning-modal-icon">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <h2 id="warningModalTitle">Warnung</h2>
+          <p id="warningModalMessage">Nachricht</p>
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="warningModalConfirm">Fortfahren</button>
+            <button class="btn btn-secondary" id="warningModalCancel">Abbrechen</button>
+          </div>
         </div>
       </div>
 

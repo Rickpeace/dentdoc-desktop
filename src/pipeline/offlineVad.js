@@ -21,7 +21,7 @@ const CONFIG = {
   postRollMs: 500,         // 500ms after speech (war 400)
   frameMs: 20,
   // Silero VAD parameters - weniger streng für bessere Erkennung
-  sileroThreshold: 0.4,    // War 0.5 - sensitiver für leise Anfänge
+  sileroThreshold: 0.25,   // War 0.4 - noch sensitiver damit weniger weggeschnitten wird
   minSpeechDuration: 0.1,  // War 0.15 - kürzere Sprache erkennen
   maxSpeechDuration: 300,
   // Minimum speech segment duration (ms)

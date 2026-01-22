@@ -11,7 +11,20 @@ const audioUtils = require('./scripts/audio-utils');
 const navItems = document.querySelectorAll('.nav-item');
 const views = document.querySelectorAll('.view');
 
+// Track current view for warning checks
+let currentView = 'home';
+
 async function switchView(viewName) {
+  // Check for smartphone mic warning when leaving settings
+  if (currentView === 'settings' && viewName !== 'settings') {
+    if (typeof checkSmartphoneMicWarning === 'function') {
+      const warning = checkSmartphoneMicWarning();
+      if (warning && !await showWarningModal(warning.title, warning.message)) {
+        return; // Stay on settings
+      }
+    }
+  }
+
   // Stop any running mic test and cleanup when leaving settings view
   if (typeof settingsMicTester !== 'undefined' && settingsMicTester.isRunning) {
     await settingsMicTester.stop();
@@ -29,6 +42,17 @@ async function switchView(viewName) {
   const iphoneTestResult = document.getElementById('settingsIphoneTestResult');
   if (iphoneTestProgress) iphoneTestProgress.style.display = 'none';
   if (iphoneTestResult) iphoneTestResult.style.display = 'none';
+
+  // Cancel any running iPhone pairing when leaving settings
+  if (currentView === 'settings') {
+    const qrState = document.getElementById('settingsIphoneQRState');
+    if (qrState && qrState.style.display !== 'none') {
+      console.log('Cancelling iPhone pairing - user navigated away');
+      if (typeof cancelIphonePairing === 'function') {
+        cancelIphonePairing();
+      }
+    }
+  }
 
   // Cancel any running voice enrollment when leaving profiles view
   if (profilesIsRecording) {
@@ -63,6 +87,9 @@ async function switchView(viewName) {
 
   // Load view content if needed
   loadViewContent(viewName);
+
+  // Track current view
+  currentView = viewName;
 }
 
 navItems.forEach(item => {
@@ -1260,104 +1287,22 @@ async function loadIphoneDashboardSection(shortcut) {
       // Generate QR code for /mic
       await generateDashboardMicQRCode();
     } else {
-      // Show unpaired state with pairing QR
+      // Show unpaired state with button (NOT auto-starting pairing)
       unpairedState.style.display = 'block';
       pairedState.style.display = 'none';
 
-      // Generate pairing QR code
-      await generateDashboardPairingQRCode();
+      // Reset to button state (don't auto-start pairing)
+      const buttonState = document.getElementById('iphoneDashboardPairButtonState');
+      const qrState = document.getElementById('iphoneDashboardQRState');
+      if (buttonState) buttonState.style.display = 'block';
+      if (qrState) qrState.style.display = 'none';
     }
   } catch (error) {
     console.error('[iPhone] Dashboard status check failed:', error);
-    // Default to unpaired state
+    // Default to unpaired state with button
     unpairedState.style.display = 'block';
     pairedState.style.display = 'none';
-    await generateDashboardPairingQRCode();
   }
-}
-
-// Generate pairing QR code for dashboard (starts pairing flow)
-async function generateDashboardPairingQRCode() {
-  try {
-    const QRCode = require('qrcode');
-
-    // Start pairing to get QR URL
-    const result = await ipcRenderer.invoke('iphone-pair-start');
-
-    if (!result.success) {
-      console.error('[iPhone] Dashboard pairing start failed:', result.error);
-      return;
-    }
-
-    const qrContainer = document.getElementById('iphoneDashboardPairingQR');
-    if (!qrContainer) return;
-
-    qrContainer.innerHTML = '';
-
-    const canvas = document.createElement('canvas');
-    await QRCode.toCanvas(canvas, result.pairingUrl, {
-      width: 180,
-      margin: 2,
-      color: {
-        dark: '#000000',
-        light: '#ffffff'
-      }
-    });
-    qrContainer.appendChild(canvas);
-
-    // Show URL
-    const urlEl = document.getElementById('iphoneDashboardPairingUrl');
-    if (urlEl) {
-      urlEl.textContent = result.pairingUrl;
-    }
-
-    // Start polling for pairing completion
-    startDashboardPairingPoll(result.pairingId);
-  } catch (error) {
-    console.error('[iPhone] Dashboard QR generation failed:', error);
-  }
-}
-
-// Poll for pairing completion on dashboard
-let dashboardPairingPollInterval = null;
-function startDashboardPairingPoll(pairingId) {
-  // Clear any existing poll
-  if (dashboardPairingPollInterval) {
-    clearInterval(dashboardPairingPollInterval);
-  }
-
-  dashboardPairingPollInterval = setInterval(async () => {
-    try {
-      const status = await ipcRenderer.invoke('iphone-pair-status', pairingId);
-
-      if (status.paired || status.status === 'paired') {
-        clearInterval(dashboardPairingPollInterval);
-        dashboardPairingPollInterval = null;
-
-        // Reload dashboard section to show paired state
-        const shortcut = await ipcRenderer.invoke('get-shortcut');
-        await loadIphoneDashboardSection(shortcut || 'F9');
-
-        // Also update settings view if visible
-        loadIphonePairingStatus({});
-      } else if (status.status === 'expired') {
-        clearInterval(dashboardPairingPollInterval);
-        dashboardPairingPollInterval = null;
-        // Regenerate QR code
-        await generateDashboardPairingQRCode();
-      }
-    } catch (error) {
-      console.error('[iPhone] Dashboard pairing poll error:', error);
-    }
-  }, 2000);
-
-  // Auto-stop after 10 minutes
-  setTimeout(() => {
-    if (dashboardPairingPollInterval) {
-      clearInterval(dashboardPairingPollInterval);
-      dashboardPairingPollInterval = null;
-    }
-  }, 10 * 60 * 1000);
 }
 
 // Generate QR code for /mic on dashboard (for paired iPhones)
@@ -1394,25 +1339,17 @@ async function generateDashboardMicQRCode() {
 
 // Update UI based on microphone source selection
 function updateMicSourceUI(source) {
-  const localMicSection = document.getElementById('settingsMicSelect').closest('.settings-section');
-  const micSelect = document.getElementById('settingsMicSelect');
-  const micTestBtn = document.getElementById('settingsTestMicBtn');
+  const localMicSection = document.getElementById('settingsLocalMicSection');
   const iphoneSection = document.getElementById('settingsIphonePairingSection');
 
   if (source === 'iphone') {
-    // Show iPhone pairing, hide local mic controls (but keep the section visible)
+    // Show iPhone pairing, hide local mic section
+    localMicSection.style.display = 'none';
     iphoneSection.style.display = 'block';
-    micSelect.disabled = true;
-    micSelect.style.opacity = '0.5';
-    micTestBtn.disabled = true;
-    micTestBtn.style.opacity = '0.5';
   } else {
-    // Show local mic controls, hide iPhone pairing
+    // Show local mic section, hide iPhone pairing
+    localMicSection.style.display = 'block';
     iphoneSection.style.display = 'none';
-    micSelect.disabled = false;
-    micSelect.style.opacity = '1';
-    micTestBtn.disabled = false;
-    micTestBtn.style.opacity = '1';
   }
 }
 
@@ -1552,9 +1489,18 @@ async function unpairIphone() {
 
 // Event Listeners for iPhone section
 document.querySelectorAll('input[name="micSource"]').forEach(radio => {
-  radio.addEventListener('change', (e) => {
+  radio.addEventListener('change', async (e) => {
+    // If switching away from iPhone, cancel any running pairing
+    if (e.target.value === 'desktop') {
+      const qrState = document.getElementById('settingsIphoneQRState');
+      if (qrState && qrState.style.display !== 'none') {
+        cancelIphonePairing();
+      }
+    }
+
     updateMicSourceUI(e.target.value);
-    settingsCheckForChanges();
+    // Auto-save microphone source immediately
+    await ipcRenderer.invoke('save-settings', { microphoneSource: e.target.value });
   });
 });
 
@@ -1839,8 +1785,55 @@ document.getElementById('settingsCopyLogPathBtn').addEventListener('click', asyn
   }
 });
 
+// Custom warning modal
+function showWarningModal(title, message) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('warningModal');
+    const titleEl = document.getElementById('warningModalTitle');
+    const messageEl = document.getElementById('warningModalMessage');
+    const confirmBtn = document.getElementById('warningModalConfirm');
+    const cancelBtn = document.getElementById('warningModalCancel');
+
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    modal.style.display = 'flex';
+
+    const cleanup = () => {
+      modal.style.display = 'none';
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+
+    const onConfirm = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
+// Check if smartphone is selected but not paired
+function checkSmartphoneMicWarning() {
+  const micSource = document.querySelector('input[name="micSource"]:checked')?.value;
+  const isPaired = document.getElementById('settingsIphonePairedState')?.style.display === 'block';
+
+  if (micSource === 'iphone' && !isPaired) {
+    return {
+      title: 'Kein Mikrofon aktiv',
+      message: 'Smartphone als Mikrofon ist ausgewählt, aber kein Gerät ist gekoppelt. Möchten Sie trotzdem fortfahren?'
+    };
+  }
+  return null;
+}
+
 // Settings Save/Cancel
 document.getElementById('settingsSaveBtn').addEventListener('click', async () => {
+  // Check for smartphone mic warning
+  const warning = checkSmartphoneMicWarning();
+  if (warning && !await showWarningModal(warning.title, warning.message)) {
+    return;
+  }
+
   // Get mic name from the selected option (FFmpeg needs device name, not browser ID)
   const micSelect = document.getElementById('settingsMicSelect');
   const selectedMicOption = micSelect.options[micSelect.selectedIndex];
@@ -1878,6 +1871,12 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
 });
 
 document.getElementById('settingsCancelBtn').addEventListener('click', async () => {
+  // Check for smartphone mic warning
+  const warning = checkSmartphoneMicWarning();
+  if (warning && !await showWarningModal(warning.title, warning.message)) {
+    return;
+  }
+
   settingsHasUnsavedChanges = false;
   await switchView('home');
 });
@@ -3071,6 +3070,12 @@ document.getElementById('subscriptionManageBtn').addEventListener('click', async
 // Device stat card click - navigate to subscription view
 document.getElementById('deviceStatCard').addEventListener('click', () => {
   switchView('subscription');
+});
+
+// Dashboard iPhone - go to settings link
+document.getElementById('iphoneDashboardGoToSettings')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  switchView('settings');
 });
 
 // Update loadViewContent to include subscription

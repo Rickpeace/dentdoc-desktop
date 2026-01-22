@@ -602,6 +602,11 @@ kbd {
   color: white;
 }
 
+.iphone-dashboard-icon.warning {
+  background: linear-gradient(135deg, var(--warning-500) 0%, var(--warning-600) 100%);
+  color: white;
+}
+
 .iphone-dashboard-icon .connected-badge {
   position: absolute;
   bottom: -4px;
@@ -628,6 +633,20 @@ kbd {
   font-size: 0.875rem;
   color: var(--text-secondary);
   line-height: 1.5;
+}
+
+.iphone-dashboard-text .link-primary {
+  display: inline-block;
+  margin-top: var(--space-2);
+  color: var(--primary-500);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.iphone-dashboard-text .link-primary:hover {
+  color: var(--primary-400);
+  text-decoration: underline;
 }
 
 .iphone-dashboard-qr {
@@ -665,6 +684,7 @@ kbd {
   flex-shrink: 0;
   color: var(--text-tertiary);
 }
+
 
 .iphone-dashboard-hint.success {
   background: rgba(16, 185, 129, 0.1);
@@ -2143,6 +2163,35 @@ kbd {
   display: flex;
   gap: var(--space-3);
   justify-content: flex-end;
+}
+
+/* Warning Modal */
+.warning-modal {
+  text-align: center;
+  max-width: 400px;
+}
+
+.warning-modal-icon {
+  margin-bottom: var(--space-4);
+  color: var(--warning-500);
+}
+
+.warning-modal-icon svg {
+  stroke: var(--warning-500);
+}
+
+.warning-modal h2 {
+  margin-bottom: var(--space-3);
+}
+
+.warning-modal p {
+  color: var(--text-secondary);
+  margin-bottom: var(--space-5);
+  line-height: 1.5;
+}
+
+.warning-modal .modal-actions {
+  justify-content: center;
 }
 
 /* Modal Header with Close Button */
@@ -3827,8 +3876,12 @@ kbd {
 
 /* Microphone Source Selection */
 .mic-source-section {
-  margin-top: var(--space-5);
-  padding-top: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+/* Local Mic Section */
+#settingsLocalMicSection {
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border-default);
 }
 
@@ -3862,11 +3915,39 @@ kbd {
   border-color: var(--border-strong);
 }
 
+/* Custom radio button - hide native input */
 .radio-option input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
   width: 18px;
   height: 18px;
-  accent-color: var(--primary-500);
+  border: 2px solid var(--text-tertiary);
+  border-radius: 50%;
   cursor: pointer;
+  position: relative;
+  background: transparent;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.radio-option:hover input[type="radio"] {
+  border-color: var(--text-secondary);
+}
+
+.radio-option input[type="radio"]:checked {
+  border-color: var(--primary-500);
+}
+
+.radio-option input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--primary-500);
 }
 
 .radio-option input[type="radio"]:checked + span {
@@ -3920,27 +4001,39 @@ kbd {
 
 /* iPhone Pairing Section */
 .iphone-pairing-section {
-  margin-top: var(--space-4);
-  padding: var(--space-4);
-  background: var(--glass-bg);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-default);
+}
+
+/* QR Code State - center content */
+#settingsIphoneQRState {
+  text-align: center;
+}
+
+#settingsIphoneQRState .btn {
+  margin-top: var(--space-3);
+}
+
+/* iPhone Mic QR Section (for paired devices) */
+.iphone-mic-qr-section {
+  text-align: center;
 }
 
 /* QR Code Container */
 .qr-code-container {
-  display: flex;
+  display: inline-flex;
   justify-content: center;
   align-items: center;
-  padding: var(--space-2);
+  padding: var(--space-4);
   background: white;
-  border-radius: var(--radius-md);
-  margin: 0;
+  border-radius: var(--radius-lg);
+  margin: var(--space-3) 0;
 }
 
 .qr-code-container canvas {
-  max-width: 150px;
-  height: auto;
+  width: 200px !important;
+  height: 200px !important;
+  display: block;
 }
 
 .pairing-url {
