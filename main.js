@@ -83,6 +83,9 @@ let autoHideTimeout = null;
 let lastDocumentation = null;
 let lastTranscript = null;
 let lastShortenings = null;
+let lastReconstructedTranscript = null;
+let lastTranscriptWithSpeakers = null;
+let lastRecognizedSpeakers = [];
 let heartbeatInterval = null;
 
 // Single instance lock
@@ -1144,6 +1147,9 @@ async function processAudioFile(audioFilePath, options = {}) {
     lastDocumentation = documentation;
     lastTranscript = finalTranscript;
     lastShortenings = shortenings;
+    lastReconstructedTranscript = reconstructedTranscript;
+    lastTranscriptWithSpeakers = transcriptWithSpeakers;
+    lastRecognizedSpeakers = recognizedSpeakers;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
@@ -1513,6 +1519,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     lastDocumentation = documentation;
     lastTranscript = finalTranscript;
     lastShortenings = shortenings;
+    lastReconstructedTranscript = reconstructedTranscript;
+    lastTranscriptWithSpeakers = transcriptWithSpeakers;
+    lastRecognizedSpeakers = recognizedSpeakers;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
@@ -2850,7 +2859,10 @@ function showLastResult() {
     {
       documentation: lastDocumentation,
       transcript: lastTranscript,
-      shortenings: lastShortenings
+      shortenings: lastShortenings,
+      reconstructedTranscript: lastReconstructedTranscript,
+      transcriptWithSpeakers: lastTranscriptWithSpeakers,
+      recognizedSpeakers: lastRecognizedSpeakers
     }
   );
 }
