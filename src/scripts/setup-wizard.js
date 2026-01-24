@@ -156,6 +156,7 @@ class SetupWizard {
         document.querySelectorAll('.wizard-option[data-mode]').forEach(o => o.classList.remove('selected'));
         option.classList.add('selected');
         this.settings.docMode = option.dataset.mode;
+        console.log('[Wizard] AI Mode selected:', this.settings.docMode);
       });
     });
 
@@ -952,9 +953,12 @@ class SetupWizard {
     const select = document.getElementById('wizardMicSelect');
     if (!select) return;
 
-    const result = await wizardAudioUtils.loadMicrophones(select, this.settings.microphoneId);
-    this.settings.microphoneId = result.deviceId;
-    this.settings.microphoneName = result.deviceName;
+    // Pass both ID and name - name is used as fallback if ID not found
+    const result = await wizardAudioUtils.loadMicrophones(select, this.settings.microphoneId, this.settings.microphoneName);
+    if (result.deviceId) {
+      this.settings.microphoneId = result.deviceId;
+      this.settings.microphoneName = result.deviceName;
+    }
   }
 
   toggleMicTest() {
@@ -1180,6 +1184,12 @@ class SetupWizard {
     this.updateMicNavigation(); // Reset mic-specific navigation state
     this.updateSummary();
 
+    // Scroll to top of wizard content
+    const wizardContent = document.querySelector('.wizard-content');
+    if (wizardContent) {
+      wizardContent.scrollTop = 0;
+    }
+
     // Load existing voice profiles when showing step 6
     if (index === 6) {
       this.loadExistingProfiles();
@@ -1271,8 +1281,11 @@ class SetupWizard {
       'hybrid-v1.2': 'Hybrid V1.2',
       'megaprompt': 'Megaprompt',
       'agent-chain': 'Agent-Kette',
-      'agent-v2': 'Agent V2 (Empfohlen)'
+      'agent-v2': 'Agent V2 (Empfohlen)',
+      'agent-v2.1': 'Agent V2.1 (Experimental)'
     };
+
+    console.log('[Wizard Summary] Current docMode:', this.settings.docMode);
     const items = {
       'summaryMic': this.getMicrophoneName(),
       'summaryShortcut': this.settings.shortcut,

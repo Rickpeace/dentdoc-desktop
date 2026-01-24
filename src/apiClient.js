@@ -674,6 +674,69 @@ async function getDocumentationMegaprompt(transcriptionId, token) {
 }
 
 /**
+ * Generate documentation using Agent-Chain (V2.1) with Bausteine
+ * Copy of V2 for development - allows iterating on V2.1 without breaking V2
+ * @param {number} transcriptionId - Transcription ID
+ * @param {string} token - Auth token
+ * @param {Object} bausteine - Bausteine object from settings
+ * @returns {Promise<{documentation: string, transcript: string|null}>}
+ */
+async function getDocumentationV2_1(transcriptionId, token, bausteine) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-v2.1`,
+      { bausteine },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 180000 // 3 minutes timeout for multi-agent processing
+      }
+    );
+
+    if (!response.data.documentation) {
+      throw new Error('NO_DOCUMENTATION');
+    }
+
+    return {
+      documentation: response.data.documentation,
+      transcript: response.data.transcript || null
+    };
+  } catch (error) {
+    console.error('Documentation V2.1 error:', error.response?.data || error.message);
+
+    const serverError = error.response?.data?.error;
+
+    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
+      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+    }
+
+    if (serverError?.includes('processing') || serverError?.includes('pending')) {
+      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
+    }
+
+    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
+      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
+    }
+
+    if (serverError) {
+      throw new Error(`Fehler: ${serverError}`);
+    }
+
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
+    }
+
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
+    }
+
+    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
+  }
+}
+
+/**
  * Generate documentation using Agent V2 (2-stage pipeline with GPT-4.1 thinking)
  * Stage 1: Reconstruction - Clean raw transcript to factual work text
  * Stage 2: Documentation - Create final medical record note
@@ -710,6 +773,84 @@ async function getDocumentationAgentV2(transcriptionId, token) {
     };
   } catch (error) {
     console.error('Documentation Agent V2 error:', error.response?.data || error.message);
+
+    const serverError = error.response?.data?.error;
+
+    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
+      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+    }
+
+    if (serverError?.includes('processing') || serverError?.includes('pending')) {
+      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
+    }
+
+    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
+      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
+    }
+
+    if (serverError) {
+      throw new Error(`Fehler: ${serverError}`);
+    }
+
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
+    }
+
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
+    }
+
+    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
+  }
+}
+
+/**
+ * Generate documentation using Agent V2.1 (Multi-Agent Pipeline)
+ *
+ * Pipeline:
+ * 1. Agent 1 (Rekonstruktion): Bereinigt das Roh-Transkript zu sachlichem Klartext
+ * 2. Agent X (Detektor): Erkennt ob 01-Befund / PA-Status im Text
+ * 3. 01-Extractor (optional): Extrahiert strukturierten Zahnstatus
+ * 4. PA-Extractor (optional): Extrahiert strukturierten PA-Status
+ * 5. Agent 2 (Dokumentation): Erstellt finale Behandlungsdokumentation
+ *
+ * @param {number} transcriptionId - Transcription ID
+ * @param {string} token - Auth token
+ * @returns {Promise<Object>} Full response with documentation, detection, status01, statusPA
+ */
+async function getDocumentationAgentV2_1(transcriptionId, token) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-agent-v2.1`,
+      {},
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 300000 // 5 minutes (multi-agent pipeline with extractors)
+      }
+    );
+
+    if (!response.data.documentation) {
+      throw new Error('NO_DOCUMENTATION');
+    }
+
+    return {
+      documentation: response.data.documentation,
+      transcript: response.data.transcript || null,
+      reconstructedTranscript: response.data.reconstructedTranscript || null,
+      transcriptWithSpeakers: response.data.transcriptWithSpeakers || null,
+      recognizedSpeakers: response.data.recognizedSpeakers || [],
+      stages: response.data.stages || null,
+      // NEU: Befund-Detektion
+      detection: response.data.detection || null,
+      // NEU: Strukturierte Befunde (01-Zahnstatus, PA-Parodontalstatus)
+      status01: response.data.status01 || null,
+      statusPA: response.data.statusPA || null,
+    };
+  } catch (error) {
+    console.error('Documentation Agent V2.1 error:', error.response?.data || error.message);
 
     const serverError = error.response?.data?.error;
 
@@ -1187,8 +1328,10 @@ module.exports = {
   getDocumentationV1_1,
   getDocumentationV1_2,
   getDocumentationV2,
+  getDocumentationV2_1,
   getDocumentationMegaprompt,
   getDocumentationAgentV2,
+  getDocumentationAgentV2_1,
   updateSpeakerMapping,
   getTranscription,
   getTranscriptionStatus,

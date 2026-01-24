@@ -777,6 +777,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHomeStats();
   loadAppVersion();
   initUpdateButton();
+  initBefundSectionHandlers();
 });
 
 // ===== Version & Updates =====
@@ -964,7 +965,7 @@ async function loadSettingsView() {
   document.getElementById('settingsAutoCloseCheckbox').checked = settings.autoClose || false;
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
   document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
-  document.getElementById('settingsDocModeSelect').value = settings.docMode || 'single';
+  document.getElementById('settingsDocModeSelect').value = settings.docMode || 'agent-v2';
   document.getElementById('settingsVadEnabled').checked = settings.vadEnabled !== false;
 
   // iPhone microphone settings
@@ -1001,17 +1002,61 @@ async function loadSettingsView() {
 async function loadSettingsMicrophones() {
   const micSelect = document.getElementById('settingsMicSelect');
   const noMicHint = document.getElementById('settingsNoMicrophoneHint');
+  const micNotFoundWarning = document.getElementById('settingsMicNotFoundWarning');
+  const micNotFoundName = document.getElementById('settingsMicNotFoundName');
 
-  const result = await audioUtils.loadMicrophones(micSelect, settingsSelectedMicId);
+  // Remember what was configured before loading
+  const configuredMicName = settingsSelectedMicName;
+  const hadConfiguredMic = !!(settingsSelectedMicId || settingsSelectedMicName);
 
-  settingsSelectedMicId = result.deviceId;
-  settingsSelectedMicName = result.deviceName;
+  // Pass both ID and name - name is used as fallback if ID not found (device was reconnected)
+  const result = await audioUtils.loadMicrophones(micSelect, settingsSelectedMicId, settingsSelectedMicName);
 
-  // Show/hide no microphone hint
+  // Update stored values if mic was found
+  if (result.deviceId) {
+    settingsSelectedMicId = result.deviceId;
+    settingsSelectedMicName = result.deviceName;
+  }
+
+  // Show warning if configured mic was not found
+  const micNotFound = hadConfiguredMic && !result.deviceId;
+  if (micNotFoundWarning) {
+    micNotFoundWarning.style.display = micNotFound ? 'flex' : 'none';
+    if (micNotFound && micNotFoundName) {
+      micNotFoundName.textContent = configuredMicName ? `"${configuredMicName}" ist nicht angeschlossen` : 'Bitte Mikrofon auswählen';
+    }
+  }
+
+  // Show/hide no microphone hint (only if no mics at all)
   if (noMicHint) {
-    noMicHint.style.display = result.deviceId ? 'none' : 'block';
+    const noMicsAvailable = micSelect.options.length === 0 ||
+      (micSelect.options.length === 1 && micSelect.options[0].value === '');
+    noMicHint.style.display = noMicsAvailable ? 'block' : 'none';
   }
 }
+
+// Listen for device changes (mic plugged in/out) and refresh the list
+let deviceChangeDebounce = null;
+navigator.mediaDevices?.addEventListener('devicechange', () => {
+  // Debounce to avoid multiple rapid refreshes
+  clearTimeout(deviceChangeDebounce);
+  deviceChangeDebounce = setTimeout(() => {
+    // Only refresh if settings view is active
+    const settingsView = document.getElementById('view-settings');
+    if (!settingsView || !settingsView.classList.contains('active')) {
+      return;
+    }
+
+    // Don't refresh during mic test
+    if (settingsMicTester && settingsMicTester.isRunning) {
+      console.log('Device change detected, but mic test running - skipping refresh');
+      return;
+    }
+
+    console.log('Device change detected, refreshing microphone list...');
+    loadSettingsMicrophones();
+  }, 500);
+});
 
 function settingsCheckForChanges() {
   const currentSettings = {
@@ -1615,6 +1660,13 @@ document.getElementById('settingsMicSelect').addEventListener('change', () => {
   const mic = audioUtils.getSelectedMicrophone(select);
   settingsSelectedMicId = mic.deviceId;
   settingsSelectedMicName = mic.deviceName;
+
+  // Hide "mic not found" warning when user selects a new mic
+  const micNotFoundWarning = document.getElementById('settingsMicNotFoundWarning');
+  if (micNotFoundWarning) {
+    micNotFoundWarning.style.display = 'none';
+  }
+
   if (settingsMicTester.isRunning) {
     settingsMicTester.stop();
     settingsStopMicTest();
@@ -4442,14 +4494,33 @@ function createTranscriptCard(transcript) {
     ? transcript.summary.substring(0, 150) + (transcript.summary.length > 150 ? '...' : '')
     : 'Keine Zusammenfassung verfügbar';
 
+  // Badges container
+  const badges = [];
+
   // Audio badge
-  const audioBadge = transcript.hasAudio
-    ? `<div class="transcript-card-audio-badge">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-        Audio
-      </div>`
+  if (transcript.hasAudio) {
+    badges.push(`<div class="transcript-card-badge audio">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+      Audio
+    </div>`);
+  }
+
+  // 01-Status badge (Zahnstatus) - clickable to open tooth chart
+  if (transcript.status01) {
+    const status01Json = JSON.stringify(transcript.status01).replace(/"/g, '&quot;');
+    badges.push(`<div class="transcript-card-badge status01 clickable" title="Klicken um Zahnstatus anzuzeigen" data-status01="${status01Json}">01</div>`);
+  }
+
+  // PA-Status badge (Parodontalstatus) - clickable to copy PA JSON
+  if (transcript.statusPA) {
+    const statusPAJson = JSON.stringify(transcript.statusPA).replace(/"/g, '&quot;');
+    badges.push(`<div class="transcript-card-badge statuspa clickable" title="Klicken um PA-JSON zu kopieren" data-statuspa="${statusPAJson}">PA</div>`);
+  }
+
+  const badgesHtml = badges.length > 0
+    ? `<div class="transcript-card-badges">${badges.join('')}</div>`
     : '';
 
   card.innerHTML = `
@@ -4458,12 +4529,52 @@ function createTranscriptCard(transcript) {
         <div class="transcript-card-date">${dateStr}, ${timeStr}</div>
         <div class="transcript-card-speakers">${speakers}</div>
       </div>
-      ${audioBadge}
+      ${badgesHtml}
     </div>
     <div class="transcript-card-summary">${summaryPreview}</div>
   `;
 
   card.addEventListener('click', () => openTranscriptModal(transcript.filePath));
+
+  // Add click handlers for status badges (prevent opening modal)
+  const status01Badge = card.querySelector('.transcript-card-badge.status01');
+  if (status01Badge) {
+    status01Badge.addEventListener('click', (e) => {
+      e.stopPropagation(); // Don't open transcript modal
+      const status01Str = status01Badge.dataset.status01;
+      if (status01Str) {
+        try {
+          const status01 = JSON.parse(status01Str);
+          ipcRenderer.send('open-tooth-chart', { status01 });
+        } catch (err) {
+          console.error('Failed to parse status01:', err);
+        }
+      }
+    });
+  }
+
+  const statusPABadge = card.querySelector('.transcript-card-badge.statuspa');
+  if (statusPABadge) {
+    statusPABadge.addEventListener('click', async (e) => {
+      e.stopPropagation(); // Don't open transcript modal
+      const statusPAStr = statusPABadge.dataset.statuspa;
+      if (statusPAStr) {
+        try {
+          const statusPA = JSON.parse(statusPAStr);
+          const jsonStr = JSON.stringify(statusPA, null, 2);
+          await ipcRenderer.invoke('copy-to-clipboard', jsonStr);
+          // Show brief feedback
+          const originalText = statusPABadge.textContent;
+          statusPABadge.textContent = '✓';
+          setTimeout(() => {
+            statusPABadge.textContent = originalText;
+          }, 1500);
+        } catch (err) {
+          console.error('Failed to copy PA status:', err);
+        }
+      }
+    });
+  }
 
   return card;
 }
@@ -4542,9 +4653,11 @@ async function openTranscriptModal(filePath) {
     renderUtterances(transcript.utterances, transcript.words);
 
     // Setup audio player if audio exists
-    if (transcript.audioPath) {
-      console.log('[Transcript] Loading audio from:', transcript.audioPath);
-      await setupAudioPlayer(transcript.audioPath);
+    // Prefer speechOnlyPath (VAD-processed) because timestamps match this version
+    const audioToPlay = transcript.speechOnlyPath || transcript.audioPath;
+    if (audioToPlay) {
+      console.log('[Transcript] Loading audio from:', audioToPlay, transcript.speechOnlyPath ? '(speech_only)' : '(original)');
+      await setupAudioPlayer(audioToPlay);
       document.getElementById('transcriptAudioPlayer').style.display = 'flex';
     } else {
       console.log('[Transcript] No audio file found for this transcript');
@@ -4552,6 +4665,9 @@ async function openTranscriptModal(filePath) {
       // Hide topic section if no audio (topics are useless without audio)
       document.getElementById('topicSection').style.display = 'none';
     }
+
+    // Setup Befund section (status01 / statusPA)
+    setupBefundSection(transcript.status01, transcript.statusPA);
 
     // Show modal
     document.getElementById('transcriptModal').style.display = 'flex';
@@ -4574,6 +4690,98 @@ function closeTranscriptModal() {
   closeTopicPopup();
   currentTranscriptData = null;
   currentTopicSegments = null;
+}
+
+// Setup Befund section in transcript modal
+function setupBefundSection(status01, statusPA) {
+  const section = document.getElementById('transcriptBefundSection');
+  const show01Btn = document.getElementById('transcriptShow01Status');
+  const copy01Btn = document.getElementById('transcriptCopy01Json');
+  const copyPABtn = document.getElementById('transcriptCopyPAJson');
+
+  // Hide all initially
+  section.style.display = 'none';
+  show01Btn.style.display = 'none';
+  copy01Btn.style.display = 'none';
+  copyPABtn.style.display = 'none';
+
+  const hasStatus01 = status01 && typeof status01 === 'object';
+  const hasStatusPA = statusPA && typeof statusPA === 'object';
+
+  if (!hasStatus01 && !hasStatusPA) {
+    return; // Nothing to show
+  }
+
+  // Show section
+  section.style.display = 'block';
+
+  // Setup 01-Status buttons
+  if (hasStatus01) {
+    show01Btn.style.display = 'inline-flex';
+    copy01Btn.style.display = 'inline-flex';
+
+    // Store status01 for button handlers
+    show01Btn.dataset.status01 = JSON.stringify(status01);
+    copy01Btn.dataset.status01 = JSON.stringify(status01);
+  }
+
+  // Setup PA-Status button
+  if (hasStatusPA) {
+    copyPABtn.style.display = 'inline-flex';
+    copyPABtn.dataset.statusPA = JSON.stringify(statusPA);
+  }
+}
+
+// Initialize Befund section button handlers
+function initBefundSectionHandlers() {
+  // Show 01-Status in Tooth Chart
+  document.getElementById('transcriptShow01Status')?.addEventListener('click', function() {
+    const status01Str = this.dataset.status01;
+    if (status01Str) {
+      try {
+        const status01 = JSON.parse(status01Str);
+        ipcRenderer.send('open-tooth-chart', { status01 });
+      } catch (e) {
+        console.error('Failed to parse status01:', e);
+      }
+    }
+  });
+
+  // Copy 01-JSON
+  document.getElementById('transcriptCopy01Json')?.addEventListener('click', async function() {
+    const status01Str = this.dataset.status01;
+    if (status01Str) {
+      try {
+        const status01 = JSON.parse(status01Str);
+        const jsonStr = JSON.stringify(status01, null, 2);
+        await ipcRenderer.invoke('copy-to-clipboard', jsonStr);
+        this.querySelector('span').textContent = 'Kopiert!';
+        setTimeout(() => {
+          this.querySelector('span').textContent = '01-JSON kopieren';
+        }, 2000);
+      } catch (e) {
+        console.error('Failed to copy status01:', e);
+      }
+    }
+  });
+
+  // Copy PA-JSON
+  document.getElementById('transcriptCopyPAJson')?.addEventListener('click', async function() {
+    const statusPAStr = this.dataset.statusPA;
+    if (statusPAStr) {
+      try {
+        const statusPA = JSON.parse(statusPAStr);
+        const jsonStr = JSON.stringify(statusPA, null, 2);
+        await ipcRenderer.invoke('copy-to-clipboard', jsonStr);
+        this.querySelector('span').textContent = 'Kopiert!';
+        setTimeout(() => {
+          this.querySelector('span').textContent = 'PA-JSON kopieren';
+        }, 2000);
+      } catch (e) {
+        console.error('Failed to copy statusPA:', e);
+      }
+    }
+  });
 }
 
 // Format milliseconds to mm:ss

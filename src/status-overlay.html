@@ -143,8 +143,20 @@
     }
 
     .icon.error {
-      background: linear-gradient(135deg, var(--error-500), var(--error-600));
+      background: transparent;
       box-shadow: none;
+    }
+
+    .icon.error .error-x {
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--error-500);
+      text-shadow: 0 0 12px rgba(239, 68, 68, 0.6), 0 0 24px rgba(239, 68, 68, 0.4);
+    }
+
+    /* Error state - red border on container (no shadow to avoid bleed) */
+    .container.error-state {
+      border: 2px solid var(--error-500);
     }
 
     .icon.waiting-iphone {
@@ -176,15 +188,15 @@
       display: block;
       margin-top: 8px;
       color: var(--accent);
-      text-decoration: none;
+      text-decoration: underline;
       font-size: 0.8125rem;
       cursor: pointer;
       transition: opacity 0.15s ease;
+      -webkit-app-region: no-drag;
     }
 
     .settings-link:hover {
       opacity: 0.8;
-      text-decoration: underline;
     }
 
     .timer {
@@ -324,13 +336,39 @@
       gap: var(--space-3);
       position: relative;
       z-index: 10;
-      max-height: 280px;
+      max-height: 320px;
       overflow-y: auto;
       -webkit-app-region: no-drag;
     }
 
     .actions.visible {
       display: flex;
+    }
+
+    /* Scrollbar styling for actions */
+    .actions::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    .actions::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .actions::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+    }
+
+    .actions::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    [data-theme="light"] .actions::-webkit-scrollbar-thumb {
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+    [data-theme="light"] .actions::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 0, 0, 0.2);
     }
 
     .action-btn {
@@ -488,6 +526,85 @@
     [data-theme="light"] .optimization-section .action-btn.optimize:hover {
       background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.15));
       border-color: rgba(99, 102, 241, 0.4);
+    }
+
+    /* Befund Section (01/PA Status) */
+    .befund-section {
+      display: none;
+      margin-top: var(--space-4);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--glass-border);
+      position: relative;
+      z-index: 1;
+    }
+
+    .befund-section.visible {
+      display: block;
+    }
+
+    .befund-label {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-2);
+    }
+
+    .befund-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+
+    .befund-btn {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      color: var(--text-secondary);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-md);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      -webkit-app-region: no-drag;
+    }
+
+    .befund-btn:hover {
+      background: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
+      color: var(--text-primary);
+    }
+
+    .befund-btn.copied {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: var(--success-500);
+    }
+
+    .befund-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .befund-btn .befund-icon {
+      font-size: 0.875rem;
+    }
+
+    [data-theme="light"] .befund-btn {
+      background: #ffffff;
+      border-color: #e5e7eb;
+    }
+
+    [data-theme="light"] .befund-btn:hover {
+      background: #f9fafb;
+      border-color: #60a5fa;
+    }
+
+    [data-theme="light"] .befund-btn.copied {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
     }
 
     .action-btn .btn-text {
@@ -732,6 +849,25 @@
         </div>
       </div>
 
+      <!-- Befund Section (01/PA Status) -->
+      <div id="befundSection" class="befund-section">
+        <div class="befund-label">Strukturierte Befunde</div>
+        <div class="befund-buttons">
+          <button id="show01Status" class="befund-btn" title="Zahnstatus visuell anzeigen" disabled>
+            <span class="befund-icon">🦷</span>
+            <span>Zahnstatus</span>
+          </button>
+          <button id="copy01Status" class="befund-btn" title="01-Befund als JSON kopieren" disabled>
+            <span class="befund-icon">📄</span>
+            <span>01 JSON</span>
+          </button>
+          <button id="copyPAStatus" class="befund-btn" title="PA-Status als JSON kopieren" disabled>
+            <span class="befund-icon">📋</span>
+            <span>PA JSON</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Speaker Optimization Section -->
       <div id="optimizationSection" class="optimization-section" style="display: none;">
         <button id="optimizeBtn" class="action-btn optimize">
@@ -915,6 +1051,9 @@
     let currentReconstructedTranscript = null;
     let currentTranscriptWithSpeakers = null;
     let currentRecognizedSpeakers = [];
+    let currentDetection = null;
+    let currentStatus01 = null;
+    let currentStatusPA = null;
     let currentState = null;
     let timerInterval = null;
     let recordingStartTime = null;
@@ -1055,6 +1194,10 @@
       icon.style.background = '';  // Reset to CSS default
       icon.style.boxShadow = '';   // Reset to CSS default
 
+      // Reset error-specific styling
+      iconEmoji.className = '';
+      document.querySelector('.container').classList.remove('error-state');
+
       // Stop waveform animation when leaving recording state
       if (wasRecording && data.type !== 'recording') {
         stopWaveAnimation();
@@ -1116,6 +1259,9 @@
             currentReconstructedTranscript = data.reconstructedTranscript || null;
             currentTranscriptWithSpeakers = data.transcriptWithSpeakers || null;
             currentRecognizedSpeakers = data.recognizedSpeakers || [];
+            currentDetection = data.detection || null;
+            currentStatus01 = data.status01 || null;
+            currentStatusPA = data.statusPA || null;
             actions.classList.add('visible');
             copySummaryBtn.classList.remove('copied');
             copyFullBtn.classList.remove('copied');
@@ -1127,6 +1273,25 @@
               document.querySelectorAll('.shortening-btn').forEach(btn => btn.classList.remove('copied'));
             } else {
               shorteningSection.classList.remove('visible');
+            }
+
+            // Show befund section if 01 or PA status available
+            const befundSection = document.getElementById('befundSection');
+            const show01Btn = document.getElementById('show01Status');
+            const copy01Btn = document.getElementById('copy01Status');
+            const copyPABtn = document.getElementById('copyPAStatus');
+            if (currentStatus01 || currentStatusPA) {
+              befundSection.classList.add('visible');
+              // Enable/disable buttons based on available data
+              show01Btn.disabled = !currentStatus01;
+              copy01Btn.disabled = !currentStatus01;
+              copyPABtn.disabled = !currentStatusPA;
+              // Reset copied state
+              show01Btn.classList.remove('copied');
+              copy01Btn.classList.remove('copied');
+              copyPABtn.classList.remove('copied');
+            } else {
+              befundSection.classList.remove('visible');
             }
 
             // Check for unrecognized speakers and show optimization button
@@ -1154,20 +1319,23 @@
           break;
         case 'error':
           stopTimer();
-          iconEmoji.textContent = '❌';
-          message.innerHTML = data.message;
+          iconEmoji.textContent = '✕';
+          iconEmoji.className = 'error-x';
+          // Show error message with settings link
+          message.innerHTML = data.message + '<a href="#" class="settings-link">Einstellungen öffnen</a>';
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
+          // Add red border to container
+          document.querySelector('.container').classList.add('error-state');
+          // Play Windows error sound
+          ipcRenderer.send('play-error-sound');
           // Hide iPhone waiting section
           document.getElementById('iphoneWaitingSection').classList.remove('visible');
-          // Add click handler for settings link if present
-          const settingsLink = message.querySelector('.settings-link');
-          if (settingsLink) {
-            settingsLink.addEventListener('click', (e) => {
-              e.preventDefault();
-              ipcRenderer.send('open-microphone-settings');
-            });
-          }
+          // Add click handler for settings link
+          message.querySelector('.settings-link').addEventListener('click', (e) => {
+            e.preventDefault();
+            ipcRenderer.send('open-microphone-settings');
+          });
           break;
       }
 
@@ -1283,6 +1451,33 @@
         showCopied(document.getElementById('copyNormalized'));
         lastClickedDoc = 'normalized';
         saveLastClickedDoc();
+      }
+    });
+
+    // Befund buttons (01-Status / PA-Status)
+    // Show tooth chart button - opens visual chart in dashboard
+    document.getElementById('show01Status').addEventListener('click', () => {
+      if (currentStatus01) {
+        ipcRenderer.send('open-tooth-chart', { status01: currentStatus01 });
+        showCopied(document.getElementById('show01Status'));
+      }
+    });
+
+    // Copy 01 JSON button
+    document.getElementById('copy01Status').addEventListener('click', () => {
+      if (currentStatus01) {
+        const jsonStr = JSON.stringify(currentStatus01, null, 2);
+        ipcRenderer.invoke('copy-to-clipboard', jsonStr);
+        showCopied(document.getElementById('copy01Status'));
+      }
+    });
+
+    // Copy PA JSON button
+    document.getElementById('copyPAStatus').addEventListener('click', () => {
+      if (currentStatusPA) {
+        const jsonStr = JSON.stringify(currentStatusPA, null, 2);
+        ipcRenderer.invoke('copy-to-clipboard', jsonStr);
+        showCopied(document.getElementById('copyPAStatus'));
       }
     });
 

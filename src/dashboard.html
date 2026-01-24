@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="styles/design-system.css">
   <link rel="stylesheet" href="styles/dashboard.css">
   <link rel="stylesheet" href="styles/setup-wizard.css">
+  <link rel="stylesheet" href="styles/tooth-chart.css">
   <link rel="stylesheet" href="../node_modules/driver.js/dist/driver.css">
   <link rel="stylesheet" href="styles/onboarding-tour.css">
 </head>
@@ -503,6 +504,35 @@
               <div class="transcript-summary" id="transcriptSummary"></div>
             </div>
 
+            <!-- Strukturierte Befunde Section (if available) -->
+            <div class="transcript-section befund-section" id="transcriptBefundSection" style="display: none;">
+              <h3>Strukturierte Befunde</h3>
+              <div class="befund-buttons-row">
+                <button class="befund-detail-btn" id="transcriptShow01Status" style="display: none;">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2C8 2 5 5 5 9c0 2.5 1.5 5 3 6.5V22h8v-6.5c1.5-1.5 3-4 3-6.5 0-4-3-7-7-7z"/>
+                    <line x1="9" y1="22" x2="15" y2="22"/>
+                    <line x1="9" y1="18" x2="15" y2="18"/>
+                  </svg>
+                  <span>Zahnstatus anzeigen</span>
+                </button>
+                <button class="befund-detail-btn secondary" id="transcriptCopy01Json" style="display: none;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  <span>01-JSON kopieren</span>
+                </button>
+                <button class="befund-detail-btn secondary" id="transcriptCopyPAJson" style="display: none;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  <span>PA-JSON kopieren</span>
+                </button>
+              </div>
+            </div>
+
             <!-- Topic Tags Section (clickable audio segments) -->
             <div class="transcript-section topic-section" id="topicSection" style="display: none;">
               <h3>Themen <span class="topic-hint">(klicken zum Anhoeren)</span></h3>
@@ -602,6 +632,20 @@
                 <audio id="settingsMicAudio" style="display: none;"></audio>
               </div>
               <div id="settingsMicStatus" class="status-message"></div>
+
+              <!-- Warnung wenn konfiguriertes Mikrofon nicht gefunden -->
+              <div id="settingsMicNotFoundWarning" class="mic-not-found-warning" style="display: none;">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <div class="mic-not-found-content">
+                  <strong>Mikrofon nicht gefunden</strong>
+                  <span id="settingsMicNotFoundName"></span>
+                </div>
+              </div>
+
               <button id="settingsOpenSoundBtn" class="btn btn-secondary w-full mt-4">Windows Sound-Einstellungen öffnen</button>
 
               <!-- Kein Mikrofon Hinweis (wird angezeigt wenn kein Mikrofon gefunden) -->
@@ -826,13 +870,15 @@
               <option value="megaprompt">Megaprompt (7-Step Pipeline)</option>
               <option value="agent-chain">Agent-Kette mit Bausteinen</option>
               <option value="agent-v2">Agent V2 (Empfohlen)</option>
+              <option value="agent-v2.1">Agent V2.1 (Multi-Agent Pipeline)</option>
             </select>
             <p class="helper-text">
               <strong>Single Prompt:</strong> Ein KI-Aufruf für die gesamte Dokumentation.<br>
               <strong>Hybrid V1.2:</strong> Optimiert - 60% schneller, erkennt automatisch Themen.<br>
               <strong>Megaprompt:</strong> 7-Schritt-Pipeline mit 10 parallelen Extraktoren.<br>
               <strong>Agent-Kette:</strong> Erkennt Behandlungskategorien und fügt Standard-Aufklärungstexte hinzu.<br>
-              <strong>Agent V2:</strong> 2-stufig: Erst Rekonstruktion, dann Dokumentation. Nutzt GPT-4.1 Thinking.
+              <strong>Agent V2:</strong> 2-stufig: Erst Rekonstruktion, dann Dokumentation. Nutzt GPT-4.1 Thinking.<br>
+              <strong>Agent V2.1:</strong> 5-Agent-Pipeline mit 01-Befund und PA-Status Extraktion (Experimental).
             </p>
           </div>
 
@@ -2261,6 +2307,17 @@
               <p class="wizard-option-desc">Erweiterte Kontrolle: Die KI erkennt Behandlungskategorien und fügt automatisch vordefinierte Aufklärungstexte (Bausteine) hinzu. Für erfahrene Nutzer, die standardisierte Textbausteine verwenden möchten.</p>
             </div>
           </div>
+
+          <div class="wizard-option" data-mode="agent-v2.1">
+            <div class="wizard-option-radio"></div>
+            <div class="wizard-option-content">
+              <div class="wizard-option-header">
+                <span class="wizard-option-title">Agent V2.1</span>
+                <span class="wizard-option-badge" style="background: #f59e0b;">Experimental</span>
+              </div>
+              <p class="wizard-option-desc">5-Agent-Pipeline: Rekonstruktion → Befund-Detektor → 01-Extractor → PA-Extractor → Dokumentation. Extrahiert strukturierte Zahnstatus- und PA-Daten als JSON.</p>
+            </div>
+          </div>
         </div>
 
         <div class="wizard-info">
@@ -2652,7 +2709,72 @@
     </div>
   </div>
 
+  <!-- Tooth Chart Modal -->
+  <div class="tooth-chart-modal" id="toothChartModal" style="display: none;">
+    <div class="tooth-chart-backdrop" id="toothChartBackdrop"></div>
+    <div class="tooth-chart-container">
+      <div class="tooth-chart-header">
+        <h2>🦷 Zahnstatus (01-Befund)</h2>
+        <button class="tooth-chart-close" id="toothChartClose">&times;</button>
+      </div>
+      <div class="tooth-chart-content">
+        <!-- Oberkiefer -->
+        <div class="jaw-section upper">
+          <div class="jaw-label">Oberkiefer</div>
+          <div class="tooth-row" id="upperRight">
+            <!-- 18-11 (right to center) -->
+          </div>
+          <div class="tooth-row" id="upperLeft">
+            <!-- 21-28 (center to left) -->
+          </div>
+        </div>
+        <!-- Unterkiefer -->
+        <div class="jaw-section lower">
+          <div class="tooth-row" id="lowerRight">
+            <!-- 48-41 (right to center) -->
+          </div>
+          <div class="tooth-row" id="lowerLeft">
+            <!-- 31-38 (center to left) -->
+          </div>
+          <div class="jaw-label">Unterkiefer</div>
+        </div>
+      </div>
+      <!-- Legend -->
+      <div class="tooth-chart-legend">
+        <div class="legend-item"><span class="legend-dot healthy"></span> Gesund</div>
+        <div class="legend-item"><span class="legend-dot caries"></span> Karies</div>
+        <div class="legend-item"><span class="legend-dot filling"></span> Füllung</div>
+        <div class="legend-item"><span class="legend-dot crown"></span> Krone</div>
+        <div class="legend-item"><span class="legend-dot endo"></span> Endo</div>
+        <div class="legend-item"><span class="legend-dot endo-insuff"></span> Endo insuff.</div>
+        <div class="legend-item"><span class="legend-dot post"></span> Stift</div>
+        <div class="legend-item"><span class="legend-dot missing"></span> Fehlend</div>
+        <div class="legend-item"><span class="legend-dot implant"></span> Implantat</div>
+        <div class="legend-item"><span class="legend-dot apical"></span> Apikal</div>
+      </div>
+      <!-- Tooth Detail Panel -->
+      <div class="tooth-detail-panel" id="toothDetailPanel" style="display: none;">
+        <div class="tooth-detail-header">
+          <span class="tooth-detail-number" id="toothDetailNumber">--</span>
+          <span class="tooth-detail-status" id="toothDetailStatus"></span>
+        </div>
+        <div class="tooth-detail-content" id="toothDetailContent"></div>
+      </div>
+      <!-- Actions -->
+      <div class="tooth-chart-actions">
+        <button class="btn btn-secondary" id="toothChartCopyJson">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          JSON kopieren
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="scripts/dashboard.js"></script>
   <script src="scripts/setup-wizard.js"></script>
+  <script src="scripts/tooth-chart.js"></script>
 </body>
 </html>

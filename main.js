@@ -3,6 +3,11 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env.local'), override: true });
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, dialog, shell } = require('electron');
+
+// Set app user model ID for Windows notifications (must be before app ready)
+if (process.platform === 'win32') {
+  app.setAppUserModelId('DentDoc');
+}
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -86,6 +91,9 @@ let lastShortenings = null;
 let lastReconstructedTranscript = null;
 let lastTranscriptWithSpeakers = null;
 let lastRecognizedSpeakers = [];
+let lastDetection = null;
+let lastStatus01 = null;
+let lastStatusPA = null;
 let heartbeatInterval = null;
 
 // Single instance lock
@@ -409,7 +417,7 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {Object} options.shortenings - Shortenings from v1.2 hybrid mode
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [] } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -589,7 +597,9 @@ ${finalTranscriptText}
           shortenings: shortenings || null,
           topicSegments: topicSegments || null, // KI-extracted topic segments for audio navigation
           passages: passages || null, // Semantic audio passages (15-40 sec thematic clips)
-          docLinks: docLinks || null // Links from documentation text to audio passages
+          docLinks: docLinks || null, // Links from documentation text to audio passages
+          status01: status01 || null, // Strukturierter 01-Befund (Zahnstatus)
+          statusPA: statusPA || null // Strukturierter PA-Status (Parodontalstatus)
         };
         const jsonPath = path.join(folderPath, `${baseFilename}.json`);
         fs.writeFileSync(jsonPath, JSON.stringify(jsonMetadata, null, 2), 'utf8');
@@ -1106,7 +1116,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     }
 
     // Generate documentation
-    const docMode = store.get('docMode', 'single');
+    const docMode = store.get('docMode', 'agent-v2');
     let result;
 
     if (docMode === 'agent-chain') {
@@ -1130,6 +1140,15 @@ async function processAudioFile(audioFilePath, options = {}) {
       // Agent V2: 2-stufige Pipeline mit GPT-4.1 Thinking
       updateStatusOverlay('Dokumentation...', 'Agent V2: Rekonstruktion + Dokumentation...', 'processing', { step: 4 });
       result = await apiClient.getDocumentationAgentV2(transcriptionId, token);
+    } else if (docMode === 'agent-chain-v2.1') {
+      // Agent-Kette V2.1: Kopie von V2 für Entwicklung
+      updateStatusOverlay('Dokumentation wird erstellt...', 'Agent-Kette V2.1 analysiert Kategorien...', 'processing', { step: 4 });
+      const bausteine = bausteineManager.getAllBausteine();
+      result = await apiClient.getDocumentationV2_1(transcriptionId, token, bausteine);
+    } else if (docMode === 'agent-v2.1') {
+      // Agent V2.1: Kopie von Agent V2 für Entwicklung
+      updateStatusOverlay('Dokumentation...', 'Agent V2.1: Rekonstruktion + Dokumentation...', 'processing', { step: 4 });
+      result = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
     } else {
       // Single Prompt: Use standard endpoint
       updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
@@ -1142,6 +1161,9 @@ async function processAudioFile(audioFilePath, options = {}) {
     const reconstructedTranscript = result.reconstructedTranscript || null;
     const transcriptWithSpeakers = result.transcriptWithSpeakers || null;
     const recognizedSpeakers = result.recognizedSpeakers || [];
+    const detection = result.detection || null;
+    const status01 = result.status01 || null;
+    const statusPA = result.statusPA || null;
 
     // Store for "show last result"
     lastDocumentation = documentation;
@@ -1150,6 +1172,9 @@ async function processAudioFile(audioFilePath, options = {}) {
     lastReconstructedTranscript = reconstructedTranscript;
     lastTranscriptWithSpeakers = transcriptWithSpeakers;
     lastRecognizedSpeakers = recognizedSpeakers;
+    lastDetection = detection;
+    lastStatus01 = status01;
+    lastStatusPA = statusPA;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
@@ -1161,7 +1186,7 @@ async function processAudioFile(audioFilePath, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers }
+      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Reset processing state immediately so user knows it's done
@@ -1238,7 +1263,9 @@ async function processAudioFile(audioFilePath, options = {}) {
             docLinks: docLinks,
             reconstructedTranscript: reconstructedTranscript,
             transcriptWithSpeakers: transcriptWithSpeakers,
-            recognizedSpeakers: recognizedSpeakers
+            recognizedSpeakers: recognizedSpeakers,
+            status01: status01,
+            statusPA: statusPA
           });
           debugLog('[Background] Files saved successfully');
         } catch (error) {
@@ -1490,7 +1517,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     console.log('  KI erstellt Dokumentation...');
     updateStatusOverlay('Verarbeitung...', 'Dokumentation wird erstellt...', 'processing', { step: 4 });
 
-    const docMode = store.get('docMode', 'single');
+    const docMode = store.get('docMode', 'agent-v2');
     let docResponse;
 
     if (docMode === 'agent-chain') {
@@ -1504,6 +1531,11 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       docResponse = await apiClient.getDocumentationMegaprompt(transcriptionId, token);
     } else if (docMode === 'agent-v2') {
       docResponse = await apiClient.getDocumentationAgentV2(transcriptionId, token);
+    } else if (docMode === 'agent-chain-v2.1') {
+      const bausteine = bausteineManager.getAllBausteine();
+      docResponse = await apiClient.getDocumentationV2_1(transcriptionId, token, bausteine);
+    } else if (docMode === 'agent-v2.1') {
+      docResponse = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
     } else {
       docResponse = await apiClient.getDocumentation(transcriptionId, token);
     }
@@ -1514,6 +1546,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const reconstructedTranscript = docResponse.reconstructedTranscript || null;
     const transcriptWithSpeakers = docResponse.transcriptWithSpeakers || null;
     const recognizedSpeakers = docResponse.recognizedSpeakers || [];
+    const detection = docResponse.detection || null;
+    const status01 = docResponse.status01 || null;
+    const statusPA = docResponse.statusPA || null;
 
     // Store for potential retry/copy
     lastDocumentation = documentation;
@@ -1522,6 +1557,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     lastReconstructedTranscript = reconstructedTranscript;
     lastTranscriptWithSpeakers = transcriptWithSpeakers;
     lastRecognizedSpeakers = recognizedSpeakers;
+    lastDetection = detection;
+    lastStatus01 = status01;
+    lastStatusPA = statusPA;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
@@ -1541,7 +1579,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers }
+      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Increment today's recording count
@@ -1625,7 +1663,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
             docLinks: docLinks,
             reconstructedTranscript: reconstructedTranscript,
             transcriptWithSpeakers: transcriptWithSpeakers,
-            recognizedSpeakers: recognizedSpeakers
+            recognizedSpeakers: recognizedSpeakers,
+            status01: status01,
+            statusPA: statusPA
           });
           console.log('  [Background] Dateien gespeichert!');
         } catch (error) {
@@ -1735,17 +1775,16 @@ async function startRecording() {
       }
     }
 
+    // Start recording first - only update UI state if successful
+    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
+
+    // Recording started successfully - now update UI
     isRecording = true;
     updateTrayMenu();
 
-    // Change tray icon to recording state
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
     tray.setImage(recordingIconPath);
     tray.setToolTip('DentDoc - 🔴 Aufnahme läuft...');
-
-    // Get selected microphone name (FFmpeg needs device name, not browser ID)
-    const microphoneName = store.get('microphoneName') || null;
-    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
 
     const shortcut = store.get('shortcut') || 'F9';
     updateStatusOverlay('Aufnahme läuft...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
@@ -1756,9 +1795,7 @@ async function startRecording() {
     }
   } catch (error) {
     console.error('Recording error:', error);
-    updateStatusOverlay('Fehler', 'Aufnahme konnte nicht gestartet werden', 'error');
-    isRecording = false;
-    updateTrayMenu();
+    updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestartet werden', 'error');
   }
 }
 
@@ -2285,18 +2322,18 @@ async function startRecordingWithVAD() {
     const deleteAudio = store.get('deleteAudio', true);
     console.log('[VAD] microphoneName:', microphoneName);
 
+    // Start recording first - only update UI state if successful
+    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
+    console.log('[VAD] Recording started:', currentRecordingPath);
+
+    // Recording started successfully - now update UI
     isRecording = true;
     isVadSession = true;
     updateTrayMenu();
 
-    // Change tray icon to recording state
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
     tray.setImage(recordingIconPath);
     tray.setToolTip('DentDoc - 🔴 Aufnahme läuft (VAD)...');
-
-    // Start normale FFmpeg Aufnahme (wie im Standard-Modus) - use mic NAME for FFmpeg
-    currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
-    console.log('[VAD] Recording started:', currentRecordingPath);
 
     const shortcut = store.get('shortcut') || 'F9';
     updateStatusOverlay('🎤 Aufnahme läuft', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
@@ -2310,10 +2347,7 @@ async function startRecordingWithVAD() {
 
   } catch (error) {
     console.error('[VAD] Start error:', error);
-    updateStatusOverlay('Fehler', 'Aufnahme konnte nicht gestartet werden', 'error');
-    isRecording = false;
-    isVadSession = false;
-    updateTrayMenu();
+    updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestartet werden', 'error');
   }
 }
 
@@ -2600,9 +2634,18 @@ function getOverlaySizeForState(type, extra = {}) {
       return { width: 402, height: 295 };
 
     case 'success':
-      // Smaller height if no shortenings (e.g., "Letzte Dokumentation anzeigen")
+      // Calculate height based on which sections are visible
       const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
-      return { width: 402, height: hasShorts ? 417 : 300 };
+      const hasBefund = extra.status01 || extra.statusPA;
+
+      // Base height: 300 (header + 2 main buttons)
+      // + 117 for shortenings section
+      // + 85 for befund section
+      let successHeight = 300;
+      if (hasShorts) successHeight += 117;
+      if (hasBefund) successHeight += 85;
+
+      return { width: 402, height: successHeight };
 
     case 'error':
       return { width: 402, height: 141 };
@@ -2799,7 +2842,11 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     micUrl: extra.micUrl || null,
     reconstructedTranscript: extra.reconstructedTranscript || null,
     transcriptWithSpeakers: extra.transcriptWithSpeakers || null,
-    recognizedSpeakers: extra.recognizedSpeakers || []
+    recognizedSpeakers: extra.recognizedSpeakers || [],
+    // Agent V2.1: Befund-Daten
+    detection: extra.detection || null,
+    status01: extra.status01 || null,
+    statusPA: extra.statusPA || null
   };
 
   // Store the data to send
@@ -2862,7 +2909,10 @@ function showLastResult() {
       shortenings: lastShortenings,
       reconstructedTranscript: lastReconstructedTranscript,
       transcriptWithSpeakers: lastTranscriptWithSpeakers,
-      recognizedSpeakers: lastRecognizedSpeakers
+      recognizedSpeakers: lastRecognizedSpeakers,
+      detection: lastDetection,
+      status01: lastStatus01,
+      statusPA: lastStatusPA
     }
   );
 }
@@ -2875,6 +2925,13 @@ ipcMain.on('close-status-overlay', () => {
 // IPC handler removed - main already sets size in updateStatusOverlay()
 // The renderer notification is no longer needed
 
+// IPC handler for playing Windows error sound
+ipcMain.on('play-error-sound', () => {
+  const { shell } = require('electron');
+  // Play Windows system error sound
+  shell.beep();
+});
+
 // IPC handler for opening microphone settings from error overlay
 ipcMain.on('open-microphone-settings', () => {
   hideStatusOverlay();
@@ -2884,6 +2941,29 @@ ipcMain.on('open-microphone-settings', () => {
       dashboardWindow.webContents.send('switch-view', 'settings');
     }
   }, 500);
+});
+
+// IPC handler for opening tooth chart modal from status overlay
+ipcMain.on('open-tooth-chart', (event, data) => {
+  console.log('[Tooth Chart] Opening tooth chart with data:', !!data?.status01);
+
+  // Open dashboard if not already open
+  openLocalDashboard();
+
+  // Wait for dashboard to be ready, then send the event
+  const sendToothChartEvent = () => {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      console.log('[Tooth Chart] Sending open-tooth-chart to dashboard');
+      dashboardWindow.webContents.send('open-tooth-chart', data);
+      dashboardWindow.focus();
+    } else {
+      console.log('[Tooth Chart] Dashboard not ready, retrying...');
+      setTimeout(sendToothChartEvent, 200);
+    }
+  };
+
+  // Give dashboard time to load if it was just opened
+  setTimeout(sendToothChartEvent, 500);
 });
 
 // IPC handler for cancelling recording (X button during recording or waiting-iphone)
@@ -3668,7 +3748,7 @@ ipcMain.handle('get-settings', async () => {
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', true),
-    docMode: store.get('docMode', 'single'),
+    docMode: store.get('docMode', 'agent-v2'),
     theme: store.get('theme', 'dark'),
     vadEnabled: store.get('vadEnabled', true)
   };
@@ -5513,6 +5593,9 @@ const { autoUpdater } = require('electron-updater');
 
 // Allow update checks in dev mode
 autoUpdater.forceDevUpdateConfig = true;
+
+// Disable code signature verification (we don't have a code signing certificate)
+autoUpdater.verifyUpdateCodeSignature = false;
 
 // Track which version we already notified about (to avoid spam)
 let notifiedUpdateVersion = null;

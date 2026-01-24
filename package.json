@@ -58,9 +58,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "assets/icon.ico",
-      "publisherName": "DentDoc",
-      "legalTrademarks": "DentDoc"
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,

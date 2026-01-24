@@ -1,20 +1,5 @@
 # DentDoc Desktop - TODO
 
-## Feature Requests
-
-### Dashboard Transkript-Übersicht mit klickbaren Audio-Links (GEPLANT)
-**Übersicht:** Neue Dashboard-Sektion "Transkripte" mit Liste aller Transkripte, Suche nach Datum/Zeit/Sprecher, und klickbare Hyperlinks für zahnmedizinische Begriffe die zur Audio-Stelle springen.
-
-**Implementierung:**
-1. JSON-Metadaten pro Transkript speichern (utterances mit timestamps, keywords)
-2. KI-Keyword-Extraktion (Befunde, Zahnfarben, Materialien, etc.)
-3. Dashboard UI - "Transkripte" Tab mit Suche nach Datum/Uhrzeit/Sprecher
-4. Detail-Modal mit Audio-Player + klickbare Keywords → audio.currentTime Navigation
-
-**Dateien:** main.js, src/apiClient.js, src/dashboard.html, src/scripts/dashboard.js
-
-**Detaillierter Plan:** C:\Users\Richa\.claude\plans\curried-seeking-avalanche.md
----
 
 
 
@@ -42,8 +27,6 @@ hmm oder auch cniht ....
 ----
 
 ---
-bei aufnahhme X drücken bricht nicht mehr ab !?!??!
----
 -confidence score mit in die rolle ? --
 
 ---
@@ -64,3 +47,158 @@ cleanup tsten für audio
 sprecherprofile
 kann man nicht unbennenn
 -----
+
+
+
+
+Hier ist meine empfohlene “Audit-feste” Zielarchitektur (1:1 das, was du jetzt bauen willst), inkl. Logik + Hinweise, was du kommunizieren musst.
+
+✅ Ziel: Audio/Transkript + Replay, aber DSGVO-sauber
+1) Zweck & Datenarten klar trennen
+
+Akte (Pflicht, 10 Jahre)
+
+gespeicherte Aktennotiz / Behandlungseintrag
+
+fällt unter Dokumentationspflicht (§630f BGB)
+
+Arbeitsdaten (optional, Komfort)
+
+Audio + Volltranskript + “Click-to-play”
+
+nicht zwingend Teil der Akte → daher Retention & Minimierung
+
+Wichtig für Audit: Du erklärst: „Audio/Transkript sind Komfort/Qualität – nicht die rechtliche Akte.“
+
+2) Speicherlogik: Retention + Auto-Delete (Pflichtbaustein)
+
+In der App einstellbar pro Praxis:
+
+Audio speichern: AN/AUS
+
+Transkript speichern: AN/AUS
+
+Aufbewahrung: 7 / 30 / 180 Tage
+
+Technik:
+
+jedes Objekt hat expiresAt
+
+Server job löscht täglich alles Abgelaufene
+
+Das erfüllt Speicherbegrenzung (DSGVO Art. 5)
+
+3) “Crypto-Delete”: Backup-unabhängig löschen können (Gamechanger)
+
+Weil du die Backup-Rotation der Praxis nicht kontrollierst:
+
+✅ Envelope Encryption
+
+pro Recording eigener dataKey
+
+Datei = AES-GCM(dataKey)
+
+dataKey liegt nur serverseitig verschlüsselt (Key-Store)
+
+✅ Wenn Retention abläuft:
+
+Datei löschen und/oder
+
+Schlüsselmaterial entfernen → danach nicht mehr entschlüsselbar (“crypto delete”)
+
+Damit bist du “audit-sicher”, auch wenn Backups länger leben.
+
+4) Verschlüsselung “at rest” + Key nur auf Server
+
+Ganz wichtig: Die Clients haben keinen Key.
+
+Im Netzwerkordner liegen nur .enc → ohne App wertlos
+
+Entschlüsselung passiert serverseitig nach Login
+
+Das ist direkt DSGVO Art. 32 “Verschlüsselung” / Sicherheit der Verarbeitung
+Und weil es Gesundheitsdaten sind (Art. 9), ist genau das die richtige Härte
+
+5) Zugriff nur via Login + Rollen
+
+Minimum-Rollen:
+
+Doctor: sehen/abspielen/arbeiten
+
+Admin: zusätzlich export + retention settings
+
+Staff: ggf. nur Aktennotiz (kein Audio)
+
+Regel: Replay/Export nur, wenn Rolle passt.
+
+6) Audit Log (musst du haben, wenn du Audio speicherst)
+
+Logge mindestens:
+
+PLAY_AUDIO
+
+EXPORT_AUDIO
+
+DELETE_RECORDING
+
+CHANGE_RETENTION
+
+Damit kannst du bei “Wer hat was angehört/rausgezogen?” sauber antworten.
+
+7) Export-Regel (sonst ist alles für die Katz)
+
+Default:
+
+Export nur Admin/Doctor
+
+Export wird immer geloggt
+
+Optional: Export nur als Clip statt Full Recording
+
+✅ Was du in der App / Doku klar kommunizieren musst
+
+Damit Ärzte/DSB “sofort ja” sagen:
+
+Audio/Transkript sind optional (Privacy Mode verfügbar)
+
+Automatische Löschung nach X Tagen (einstellbar)
+
+Backups egal, weil nach Ablauf nicht mehr entschlüsselbar (crypto delete)
+
+Im Ordner liegen nur verschlüsselte Dateien
+
+Zugriff nur via Login + Rollen + Protokollierung
+
+✅ Reicht das für Audits?
+
+Ja. Das deckt die typischen Prüfpunkte ab:
+
+Datenminimierung & Speicherbegrenzung (Art. 5)
+
+Gesundheitsdaten-Schutz (Art. 9)
+
+Sicherheitsmaßnahmen / Verschlüsselung (Art. 32)
+
+Akte bleibt 10 Jahre (§630f BGB)
+
+Löschlogik ist begründbar (Art. 17 – wenn Zweck endet / Ausnahmen für Pflichtdaten)
+
+✅ Meine “Minimal-Umsetzung”, die du wirklich bauen solltest
+
+Wenn du nur 6 Dinge baust, dann genau diese:
+
+Retention Settings (7/30/180 + AUS)
+
+Auto-Delete Job (serverseitig)
+
+.enc Speicherung (AES-GCM Envelope)
+
+Keys nur auf Server (kein Client Key)
+
+Replay = Server streamt decrypted range
+
+Audit Log (Play/Export/Delete/Retention)
+
+Das ist schon “seriös wie Praxissoftware”.
+
+Wenn du willst, schreibe ich dir als nächstes die perfekte “Datenschutz-/Security-Kurzbeschreibung” (1 Seite) für Onboarding + DSB, in deinem Ton, inkl. genau den Punkten oben.

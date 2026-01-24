@@ -507,7 +507,23 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
         recordingState = 'idle';
         const errorMsg = result?.error || 'Unknown error';
         console.error('[Recorder] All recording methods failed:', errorMsg);
-        throw new Error('Aufnahme konnte nicht gestartet werden. Bitte Mikrofon in Windows-Einstellungen überprüfen.');
+
+        // Check if any microphones are available at all
+        const availableDevices = await listAudioDevices();
+
+        let specificError;
+        if (availableDevices.length === 0) {
+          // No microphones found on system
+          specificError = 'Kein Mikrofon gefunden';
+        } else if (deviceName) {
+          // A specific mic was selected but couldn't be used
+          specificError = 'Mikrofon nicht verbunden';
+        } else {
+          // Generic fallback
+          specificError = 'Mikrofon nicht verfügbar';
+        }
+
+        throw new Error(specificError);
       }
 
       // Recording started successfully

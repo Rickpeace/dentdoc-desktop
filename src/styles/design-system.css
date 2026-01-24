@@ -449,6 +449,8 @@ select {
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 36px;
+  /* Override 'transition: all' to prevent arrow from animating across the field */
+  transition: border-color var(--transition-normal), background-color var(--transition-normal), box-shadow var(--transition-normal);
 }
 
 select option {

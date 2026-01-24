@@ -809,6 +809,226 @@ catch (error) {
 
 ---
 
+## Mikrofon-Auswahl & Verwaltung
+
+Die Mikrofon-Verwaltung ist ein zentrales System das Browser-APIs (WebRTC) für die UI und FFmpeg (DirectShow/WASAPI) für die Aufnahme kombiniert.
+
+### Architektur-Übersicht
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MIKROFON-SYSTEM                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        │                           │                           │
+        ▼                           ▼                           ▼
+┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
+│  Browser/WebRTC   │   │   Electron-Store  │   │  FFmpeg Recording │
+│  (UI Enumeration) │   │   (Persistenz)    │   │  (Actual Capture) │
+├───────────────────┤   ├───────────────────┤   ├───────────────────┤
+│ audio-utils.js    │   │ main.js           │   │ audioRecorderFFmpeg│
+│ loadMicrophones() │   │ get-settings      │   │ startRecording()  │
+│ AudioMonitor      │   │ save-settings     │   │ listAudioDevices()│
+│ MicTester         │   │                   │   │                   │
+└───────────────────┘   └───────────────────┘   └───────────────────┘
+        │                           │                           │
+        │  deviceId (Browser)       │  microphoneId            │  deviceName (Windows)
+        │  deviceName (Display)     │  microphoneName          │
+        └───────────────────────────┴───────────────────────────┘
+```
+
+### Duale Device-Identifikatoren
+
+Das System speichert **zwei** Identifikatoren pro Mikrofon:
+
+| Identifikator | Quelle | Stabilität | Verwendung |
+|---------------|--------|------------|------------|
+| `microphoneId` | WebRTC `navigator.mediaDevices` | Volatil (ändert sich bei Reconnect) | UI-Dropdown, AudioMonitor |
+| `microphoneName` | Windows Device Name | Stabil | FFmpeg Recording |
+
+**Warum zwei IDs?**
+- WebRTC Device-IDs ändern sich wenn USB-Geräte neu angeschlossen werden
+- Windows Device-Namen bleiben konstant ("Logitech USB Microphone")
+- FFmpeg benötigt den Windows-Namen, nicht die Browser-ID
+
+### Mikrofon-Enumeration (audio-utils.js)
+
+#### Browser-seitige Enumeration für UI
+
+```javascript
+// src/scripts/audio-utils.js - loadMicrophones()
+const devices = await navigator.mediaDevices.enumerateDevices();
+const mics = devices.filter(d => d.kind === 'audioinput');
+```
+
+**Spezielle Windows-Filterung:**
+- Entfernt `'default'` und `'communications'` virtuelle Einträge
+- Entfernt Duplikate wie "2- Logitech USB Microphone"
+- Extrahiert Vendor:Product ID für Fuzzy-Matching (z.B. `046d:0aba`)
+
+#### FFmpeg-seitige Enumeration für Recording
+
+```javascript
+// src/audioRecorderFFmpeg.js - listAudioDevices()
+// Priorität: WASAPI → DirectShow Fallback
+const wasapiDevices = await listDevicesWithBackend('wasapi');
+if (wasapiDevices.length > 0) return wasapiDevices;
+return listDevicesWithBackend('dshow');
+```
+
+**Backend-Auswahl:**
+| Backend | Unterstützung | Verwendung |
+|---------|---------------|------------|
+| WASAPI | Wireless Headsets, moderne USB | Bevorzugt |
+| DirectShow | Breitere Kompatibilität | Fallback |
+
+### Mikrofon-Typ-Erkennung
+
+```javascript
+// src/audioRecorderFFmpeg.js - detectMicType()
+function detectMicType(microphoneName) {
+  const name = (microphoneName || '').toLowerCase();
+
+  // USB/External: 'usb', 'logitech', 'blue', 'rode', 'shure', 'focusrite'...
+  // Laptop/Internal: 'microphone array', 'internal', 'realtek', 'amd audio'...
+
+  return 'usb' | 'laptop' | 'unknown';
+}
+```
+
+**Warum wichtig?** Beeinflusst Recording-Strategie:
+- **Laptop-Mics** → WASAPI default (stabilste für interne Mics)
+- **USB-Mics** → DirectShow explicit name (funktioniert besser für externe)
+
+### Recording-Strategie mit Fallback-Kaskade
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  startRecording(deleteAudio, deviceName)                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+              ┌───────────────────────────────┐
+              │  detectMicType(deviceName)     │
+              └───────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+          ▼                   ▼                   ▼
+    ┌──────────┐        ┌──────────┐        ┌──────────┐
+    │  Laptop  │        │   USB    │        │ No Name  │
+    └──────────┘        └──────────┘        └──────────┘
+          │                   │                   │
+          ▼                   ▼                   ▼
+    1. WASAPI default   1. DShow explicit   1. WASAPI default
+    2. DShow explicit   2. WASAPI default   2. DShow enumeration
+    3. DShow enum       3. DShow enum
+```
+
+### Fuzzy-Matching bei Device-Reconnect
+
+Wenn ein USB-Mikrofon getrennt und wieder angeschlossen wird, ändert Windows die Device-ID. Das System findet das Gerät trotzdem:
+
+```javascript
+// audio-utils.js - loadMicrophones()
+// 1. Erst exakte ID-Suche
+if (mic.deviceId === selectedId) { /* gefunden */ }
+
+// 2. Fallback: Vendor:Product ID Matching
+const savedVendorId = selectedName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1];
+const currentVendorId = micName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1];
+
+if (currentVendorId === savedVendorId) { /* per USB-ID gefunden */ }
+```
+
+### Device-Change Detection
+
+```javascript
+// dashboard.js
+navigator.mediaDevices?.addEventListener('devicechange', () => {
+  // Debounce 500ms um mehrfache Events zu vermeiden
+  // Refresht Mikrofon-Liste wenn Settings-View aktiv
+  // Nicht während Mic-Test refreshen
+});
+```
+
+### Fehlerbehandlung bei Recording-Start
+
+Bei fehlgeschlagenem Recording-Start werden spezifische Fehlermeldungen generiert:
+
+```javascript
+// audioRecorderFFmpeg.js
+const availableDevices = await listAudioDevices();
+
+if (availableDevices.length === 0) {
+  throw new Error('Kein Mikrofon gefunden');
+} else if (deviceName) {
+  throw new Error('Mikrofon nicht verbunden');
+} else {
+  throw new Error('Mikrofon nicht verfügbar');
+}
+```
+
+**UI-Verhalten bei Fehler:**
+- Tray-Icon bleibt normal (kein Recording-Icon)
+- Status-Overlay zeigt Fehler mit rotem Rand
+- Windows Error-Sound wird abgespielt
+- Link zu Einstellungen wird angezeigt
+
+### Gespeicherte Einstellungen (electron-store)
+
+| Key | Typ | Beschreibung |
+|-----|-----|--------------|
+| `microphoneId` | string \| null | Browser Device-ID (WebRTC) |
+| `microphoneName` | string \| null | Windows Device-Name (FFmpeg) |
+| `microphoneSource` | 'desktop' \| 'iphone' | Aktive Quelle |
+| `iphoneDeviceId` | string \| null | iPhone Device-ID |
+| `iphoneDeviceName` | string \| null | iPhone Device-Name |
+
+### AudioMonitor Klasse (Echtzeit-Pegel)
+
+```javascript
+// audio-utils.js - Für UI Level-Anzeige
+class AudioMonitor {
+  async start(deviceId, onLevel, options = {}) {
+    const constraints = {
+      audio: {
+        deviceId: { ideal: deviceId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    };
+
+    this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    this.analyser = audioContext.createAnalyser();
+    // requestAnimationFrame für Level-Updates
+  }
+}
+```
+
+**Verwendet in:**
+- Settings Mic-Level Anzeige
+- Setup-Wizard Audio-Monitoring
+- Status-Overlay Recording-Animation
+
+### Key Files & Funktionen
+
+| Datei | Funktion | Beschreibung |
+|-------|----------|--------------|
+| `src/scripts/audio-utils.js` | `loadMicrophones()` | UI-Dropdown befüllen |
+| `src/scripts/audio-utils.js` | `AudioMonitor` | Echtzeit-Pegel für UI |
+| `src/scripts/audio-utils.js` | `MicTester` | 5-Sek Test-Aufnahme |
+| `src/audioRecorderFFmpeg.js` | `listAudioDevices()` | FFmpeg Device-Liste |
+| `src/audioRecorderFFmpeg.js` | `detectMicType()` | USB vs Laptop Erkennung |
+| `src/audioRecorderFFmpeg.js` | `startRecording()` | Recording mit Fallback |
+| `src/scripts/dashboard.js` | Settings UI | Dropdown, Test, Level-Bar |
+| `src/scripts/setup-wizard.js` | Wizard Flow | Interaktive Mic-Auswahl |
+| `main.js` | IPC Handlers | get-settings, save-settings |
+
+---
+
 ## Audio-Konvertierung (src/audio-converter.js)
 
 FFmpeg-Wrapper für Format-Konvertierung mit zwei unterschiedlichen Profilen.
