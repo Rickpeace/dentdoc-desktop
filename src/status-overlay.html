@@ -336,8 +336,7 @@
       gap: var(--space-3);
       position: relative;
       z-index: 10;
-      max-height: 320px;
-      overflow-y: auto;
+      /* max-height entfernt - Auto-Resize passt Window an Content an */
       -webkit-app-region: no-drag;
     }
 
@@ -526,6 +525,85 @@
     [data-theme="light"] .optimization-section .action-btn.optimize:hover {
       background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.15));
       border-color: rgba(99, 102, 241, 0.4);
+    }
+
+    /* KZV Documentation Section */
+    .kzv-section {
+      display: none;
+      margin-top: var(--space-4);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--glass-border);
+      position: relative;
+      z-index: 1;
+    }
+
+    .kzv-section.visible {
+      display: block;
+    }
+
+    .kzv-label {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-2);
+    }
+
+    .kzv-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+
+    .kzv-btn {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      color: var(--text-secondary);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-md);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      -webkit-app-region: no-drag;
+    }
+
+    .kzv-btn:hover {
+      background: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
+      color: var(--text-primary);
+    }
+
+    .kzv-btn.copied {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: var(--success-500);
+    }
+
+    .kzv-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .kzv-btn .kzv-icon {
+      font-size: 0.875rem;
+    }
+
+    [data-theme="light"] .kzv-btn {
+      background: #ffffff;
+      border-color: #e5e7eb;
+    }
+
+    [data-theme="light"] .kzv-btn:hover {
+      background: #f9fafb;
+      border-color: #60a5fa;
+    }
+
+    [data-theme="light"] .kzv-btn.copied {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
     }
 
     /* Befund Section (01/PA Status) */
@@ -849,6 +927,17 @@
         </div>
       </div>
 
+      <!-- KZV Documentation Section -->
+      <div id="kzvSection" class="kzv-section">
+        <div class="kzv-label">KZV-Dokumentation</div>
+        <div class="kzv-buttons">
+          <button id="copyKzvBtn" class="kzv-btn" title="KZV-taugliche Dokumentation kopieren" disabled>
+            <span class="kzv-icon">📑</span>
+            <span>KZV-Doku kopieren</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Befund Section (01/PA Status) -->
       <div id="befundSection" class="befund-section">
         <div class="befund-label">Strukturierte Befunde</div>
@@ -1046,6 +1135,7 @@
     }
 
     let currentDocumentation = null;
+    let currentKzvDocumentation = null;
     let currentTranscript = null;
     let currentShortenings = null;
     let currentReconstructedTranscript = null;
@@ -1254,6 +1344,7 @@
           progressContainer.classList.remove('visible');
           if (data.documentation) {
             currentDocumentation = data.documentation;
+            currentKzvDocumentation = data.kzvDocumentation || null;
             currentTranscript = data.transcript;
             currentShortenings = data.shortenings || null;
             currentReconstructedTranscript = data.reconstructedTranscript || null;
@@ -1273,6 +1364,18 @@
               document.querySelectorAll('.shortening-btn').forEach(btn => btn.classList.remove('copied'));
             } else {
               shorteningSection.classList.remove('visible');
+            }
+
+            // Show KZV section if kzvDocumentation available
+            const kzvSection = document.getElementById('kzvSection');
+            const copyKzvBtn = document.getElementById('copyKzvBtn');
+            if (currentKzvDocumentation) {
+              kzvSection.classList.add('visible');
+              copyKzvBtn.disabled = false;
+              copyKzvBtn.classList.remove('copied');
+            } else {
+              kzvSection.classList.remove('visible');
+              copyKzvBtn.disabled = true;
             }
 
             // Show befund section if 01 or PA status available
@@ -1378,12 +1481,17 @@
         fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
       }
 
-      // 2. Normalisiertes Transkript (wenn vorhanden - Agent V2)
+      // 2. KZV-Dokumentation (wenn vorhanden - Agent V2.1)
+      if (currentKzvDocumentation) {
+        fullText += '--- KZV-Dokumentation ---\n\n' + currentKzvDocumentation + '\n\n';
+      }
+
+      // 3. Normalisiertes Transkript (wenn vorhanden - Agent V2)
       if (currentReconstructedTranscript) {
         fullText += '--- Normalisiertes Transkript ---\n\n' + currentReconstructedTranscript + '\n\n';
       }
 
-      // 3. Transkript mit Sprechern
+      // 4. Transkript mit Sprechern
       if (currentTranscriptWithSpeakers) {
         fullText += '--- Transkript mit Sprechern ---\n\n' + currentTranscriptWithSpeakers;
       } else if (currentTranscript) {
@@ -1481,6 +1589,16 @@
       }
     });
 
+    // Copy KZV Documentation button
+    document.getElementById('copyKzvBtn').addEventListener('click', () => {
+      if (currentKzvDocumentation) {
+        ipcRenderer.invoke('copy-to-clipboard', currentKzvDocumentation);
+        showCopied(document.getElementById('copyKzvBtn'));
+        lastClickedDoc = 'kzv';
+        saveLastClickedDoc();
+      }
+    });
+
     function showCopied(btn) {
       btn.classList.add('copied');
       setTimeout(() => {
@@ -1540,9 +1658,11 @@
           }
           // 1. Zusammenfassung
           if (currentDocumentation) fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
-          // 2. Normalisiertes Transkript (wenn vorhanden - Agent V2)
+          // 2. KZV-Dokumentation (wenn vorhanden - Agent V2.1)
+          if (currentKzvDocumentation) fullText += '--- KZV-Dokumentation ---\n\n' + currentKzvDocumentation + '\n\n';
+          // 3. Normalisiertes Transkript (wenn vorhanden - Agent V2)
           if (currentReconstructedTranscript) fullText += '--- Normalisiertes Transkript ---\n\n' + currentReconstructedTranscript + '\n\n';
-          // 3. Transkript mit Sprechern
+          // 4. Transkript mit Sprechern
           if (currentTranscriptWithSpeakers) {
             fullText += '--- Transkript mit Sprechern ---\n\n' + currentTranscriptWithSpeakers;
           } else if (currentTranscript) {
@@ -1574,6 +1694,10 @@
         case 'normalized':
           textToCopy = currentShortenings?.normalized;
           btnToHighlight = document.getElementById('copyNormalized');
+          break;
+        case 'kzv':
+          textToCopy = currentKzvDocumentation;
+          btnToHighlight = document.getElementById('copyKzvBtn');
           break;
       }
 
@@ -1633,6 +1757,67 @@
         console.error('Error starting optimization:', e);
       }
     });
+
+    // =============================================
+    // AUTO-RESIZE: Window passt sich Content an
+    // =============================================
+    const containerEl = document.querySelector('.container');
+    let lastSentWidth = 0;
+    let lastSentHeight = 0;
+    let resizeThrottleTimeout = null;
+
+    function sendSizeToMain() {
+      if (!containerEl) return;
+
+      const rect = containerEl.getBoundingClientRect();
+      // Add small padding for shadow/border safety
+      const width = Math.ceil(rect.width) + 4;
+      const height = Math.ceil(rect.height) + 4;
+
+      // Only send if size actually changed (avoid spam)
+      if (width === lastSentWidth && height === lastSentHeight) return;
+
+      lastSentWidth = width;
+      lastSentHeight = height;
+
+      ipcRenderer.send('overlay:resize', { width, height });
+    }
+
+    // Throttled version to avoid excessive IPC calls
+    function sendSizeThrottled() {
+      if (resizeThrottleTimeout) return;
+      resizeThrottleTimeout = setTimeout(() => {
+        resizeThrottleTimeout = null;
+        sendSizeToMain();
+      }, 50);
+    }
+
+    // Initial size after load
+    window.addEventListener('load', () => {
+      // Wait for fonts to load (can affect height)
+      if (document.fonts?.ready) {
+        document.fonts.ready.then(() => {
+          setTimeout(sendSizeToMain, 50);
+        });
+      } else {
+        setTimeout(sendSizeToMain, 100);
+      }
+    });
+
+    // Watch for DOM changes (sections becoming visible/hidden)
+    const resizeObserver = new ResizeObserver(() => {
+      sendSizeThrottled();
+    });
+    resizeObserver.observe(containerEl);
+
+    // Also send size when status changes (sections appear/disappear)
+    ipcRenderer.on('update-status', () => {
+      // Give DOM time to update visibility classes
+      setTimeout(sendSizeToMain, 100);
+      setTimeout(sendSizeToMain, 300); // Second check for animations
+    });
+
+    // Click-Through nicht nötig - Auto-Resize macht das Window exakt so groß wie die Card
   </script>
 </body>
 </html>

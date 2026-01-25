@@ -94,6 +94,7 @@ let lastRecognizedSpeakers = [];
 let lastDetection = null;
 let lastStatus01 = null;
 let lastStatusPA = null;
+let lastKzvDocumentation = null;
 let heartbeatInterval = null;
 
 // Single instance lock
@@ -417,7 +418,7 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {Object} options.shortenings - Shortenings from v1.2 hybrid mode
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, kzvDocumentation = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -492,6 +493,19 @@ ${shorteningParts.join('\n\n')}
     }
   }
 
+  // Build KZV documentation section if available (Agent V2.1)
+  let kzvSection = '';
+  if (kzvDocumentation) {
+    kzvSection = `
+
+────────────────────────────────────────────────────────────────────
+  KZV-DOKUMENTATION
+────────────────────────────────────────────────────────────────────
+
+${kzvDocumentation}
+`;
+  }
+
   // Build normalized transcript section if available (Agent V2)
   let normalizedSection = '';
   if (reconstructedTranscript) {
@@ -526,7 +540,7 @@ ${recognizedSpeakersLine}
 ────────────────────────────────────────────────────────────────────
 
 ${summary}
-${shorteningsSection}${normalizedSection}
+${kzvSection}${shorteningsSection}${normalizedSection}
 
 ────────────────────────────────────────────────────────────────────
   TRANSKRIPT MIT SPRECHERN
@@ -1164,6 +1178,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     const detection = result.detection || null;
     const status01 = result.status01 || null;
     const statusPA = result.statusPA || null;
+    const kzvDocumentation = result.kzvDocumentation || null;
 
     // Store for "show last result"
     lastDocumentation = documentation;
@@ -1175,6 +1190,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     lastDetection = detection;
     lastStatus01 = status01;
     lastStatusPA = statusPA;
+    lastKzvDocumentation = kzvDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
@@ -1186,7 +1202,7 @@ async function processAudioFile(audioFilePath, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, kzvDocumentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Reset processing state immediately so user knows it's done
@@ -1265,7 +1281,8 @@ async function processAudioFile(audioFilePath, options = {}) {
             transcriptWithSpeakers: transcriptWithSpeakers,
             recognizedSpeakers: recognizedSpeakers,
             status01: status01,
-            statusPA: statusPA
+            statusPA: statusPA,
+            kzvDocumentation: kzvDocumentation
           });
           debugLog('[Background] Files saved successfully');
         } catch (error) {
@@ -1549,6 +1566,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const detection = docResponse.detection || null;
     const status01 = docResponse.status01 || null;
     const statusPA = docResponse.statusPA || null;
+    const kzvDocumentation = docResponse.kzvDocumentation || null;
 
     // Store for potential retry/copy
     lastDocumentation = documentation;
@@ -1560,6 +1578,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     lastDetection = detection;
     lastStatus01 = status01;
     lastStatusPA = statusPA;
+    lastKzvDocumentation = kzvDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard
@@ -1579,7 +1598,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, kzvDocumentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Increment today's recording count
@@ -1665,7 +1684,8 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
             transcriptWithSpeakers: transcriptWithSpeakers,
             recognizedSpeakers: recognizedSpeakers,
             status01: status01,
-            statusPA: statusPA
+            statusPA: statusPA,
+            kzvDocumentation: kzvDocumentation
           });
           console.log('  [Background] Dateien gespeichert!');
         } catch (error) {
@@ -2636,12 +2656,15 @@ function getOverlaySizeForState(type, extra = {}) {
     case 'success':
       // Calculate height based on which sections are visible
       const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
+      const hasKzv = !!extra.kzvDocumentation;
       const hasBefund = extra.status01 || extra.statusPA;
 
       // Base height: 300 (header + 2 main buttons)
+      // + 70 for KZV section
       // + 117 for shortenings section
       // + 85 for befund section
       let successHeight = 300;
+      if (hasKzv) successHeight += 70;
       if (hasShorts) successHeight += 117;
       if (hasBefund) successHeight += 85;
 
@@ -2837,6 +2860,7 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     step: extra.step || null,
     uploadProgress: extra.uploadProgress,
     documentation: extra.documentation || null,
+    kzvDocumentation: extra.kzvDocumentation || null,
     transcript: extra.transcript || null,
     shortenings: extra.shortenings || null,
     micUrl: extra.micUrl || null,
@@ -2905,6 +2929,7 @@ function showLastResult() {
     'success',
     {
       documentation: lastDocumentation,
+      kzvDocumentation: lastKzvDocumentation,
       transcript: lastTranscript,
       shortenings: lastShortenings,
       reconstructedTranscript: lastReconstructedTranscript,
@@ -2922,8 +2947,33 @@ ipcMain.on('close-status-overlay', () => {
   hideStatusOverlay();
 });
 
-// IPC handler removed - main already sets size in updateStatusOverlay()
-// The renderer notification is no longer needed
+// IPC handler for dynamic overlay resize (renderer measures content, main resizes window)
+ipcMain.on('overlay:resize', (event, { width, height }) => {
+  if (!statusOverlay || statusOverlay.isDestroyed()) return;
+
+  // Get current position to maintain it during resize
+  const [currentX, currentY] = statusOverlay.getPosition();
+
+  // Set new bounds with animation
+  statusOverlay.setBounds({
+    x: currentX,
+    y: currentY,
+    width: Math.max(100, width),   // Minimum width
+    height: Math.max(50, height)   // Minimum height
+  }, true); // animate = true for smooth transition
+
+  // Validate position after resize to ensure window stays on screen
+  setTimeout(validateOverlayPosition, 50);
+});
+
+// IPC handler for click-through toggle (transparent areas become clickable-through)
+ipcMain.on('overlay:set-ignore-mouse', (event, ignore) => {
+  if (!statusOverlay || statusOverlay.isDestroyed()) return;
+
+  // setIgnoreMouseEvents with forward: true allows click-through
+  // but still receives mouse events for hit-testing
+  statusOverlay.setIgnoreMouseEvents(ignore, { forward: true });
+});
 
 // IPC handler for playing Windows error sound
 ipcMain.on('play-error-sound', () => {
@@ -3522,9 +3572,9 @@ ipcMain.on('minimize-to-tray', () => {
     if (!store.get('hasSeenTrayHint') && tray) {
       store.set('hasSeenTrayHint', true);
       tray.displayBalloon({
-        iconType: 'info',
+        icon: path.join(__dirname, 'assets', 'icon.ico'),
         title: 'DentDoc läuft im Hintergrund',
-        content: 'Klicken Sie auf dieses Symbol ^, um DentDoc wieder zu öffnen.',
+        content: 'Zum Öffnen auf das DentDoc-Symbol in der Taskleiste klicken (evtl. im ^-Menü versteckt).',
         noSound: true
       });
     }
@@ -5839,7 +5889,20 @@ app.on('will-quit', () => {
   cleanupMicTestFile();
 });
 
-// Handle second instance
+// Handle second instance - open dashboard window when user clicks shortcut while app is running
 app.on('second-instance', () => {
-  showNotification('DentDoc läuft bereits', 'Die App ist bereits im System Tray aktiv');
+  // Check if user is logged in
+  const token = store.get('authToken');
+  if (token) {
+    // User is logged in - show dashboard
+    openLocalDashboard();
+  } else {
+    // User is not logged in - show login window
+    if (loginWindow && !loginWindow.isDestroyed()) {
+      loginWindow.show();
+      loginWindow.focus();
+    } else {
+      createLoginWindow();
+    }
+  }
 });
