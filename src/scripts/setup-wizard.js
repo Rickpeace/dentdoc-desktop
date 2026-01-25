@@ -12,7 +12,7 @@ const wizardAudioUtils = require('./scripts/audio-utils');
 class SetupWizard {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 8; // 0-7 (removed separate audio step)
+    this.totalSteps = 9; // 0-8 (added DSGVO step)
     this.settings = {
       microphoneId: null, // Windows device name for FFmpeg
       microphoneSource: 'desktop', // 'desktop' or 'iphone'
@@ -1196,7 +1196,7 @@ class SetupWizard {
     }
 
     // Update shortcut display on final step
-    if (index === 8) {
+    if (index === 9) {
       const shortcutEl = document.getElementById('wizardFinalShortcut');
       if (shortcutEl) {
         shortcutEl.textContent = this.settings.shortcut || 'F9';

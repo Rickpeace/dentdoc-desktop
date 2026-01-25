@@ -838,6 +838,7 @@ async function getDocumentationAgentV2_1(transcriptionId, token) {
 
     return {
       documentation: response.data.documentation,
+      kzvDocumentation: response.data.kzvDocumentation || null,
       transcript: response.data.transcript || null,
       reconstructedTranscript: response.data.reconstructedTranscript || null,
       transcriptWithSpeakers: response.data.transcriptWithSpeakers || null,
