@@ -145,6 +145,51 @@ app.setLoginItemSettings({
   path: app.getPath('exe')
 });
 
+/**
+ * Automatically upload debug logs to backend (fire-and-forget)
+ * Called on app startup and when errors occur
+ * @param {string} context - Context info (e.g., 'startup', 'processAudioFile', 'processUploadedAudioFile')
+ */
+function autoUploadDebugLogs(context = 'unknown') {
+  // Don't await - fire and forget
+  (async () => {
+    try {
+      const token = store.get('authToken');
+      if (!token) {
+        debugLog(`[AutoUpload] Skipped - not logged in (context: ${context})`);
+        return;
+      }
+
+      // Read the debug log file
+      let logs = '';
+      if (fs.existsSync(DEBUG_LOG)) {
+        logs = fs.readFileSync(DEBUG_LOG, 'utf8');
+        // Limit to last 500KB
+        const maxSize = 500 * 1024;
+        if (logs.length > maxSize) {
+          logs = logs.slice(-maxSize);
+        }
+      }
+
+      if (!logs || logs.trim().length === 0) {
+        debugLog(`[AutoUpload] Skipped - log is empty (context: ${context})`);
+        return;
+      }
+
+      // Add context marker to help identify what triggered the upload
+      const contextMarker = `\n[AUTO-UPLOAD] Context: ${context} at ${new Date().toISOString()}\n`;
+      logs = logs + contextMarker;
+
+      const appVersion = app.getVersion();
+      await apiClient.uploadDebugLogs(token, store, logs, appVersion);
+      debugLog(`[AutoUpload] Success - uploaded logs (context: ${context})`);
+    } catch (error) {
+      // Silent fail - don't let upload errors affect the app
+      debugLog(`[AutoUpload] Failed: ${error.message} (context: ${context})`);
+    }
+  })();
+}
+
 function openWebDashboard(path = '') {
   const baseUrl = apiClient.getBaseUrl().replace(/\/$/, '');
   shell.openExternal(baseUrl + '/dashboard' + path);
@@ -1149,6 +1194,18 @@ async function processAudioFile(audioFilePath, options = {}) {
       errorMessage = 'Bitte prüfen Sie Ihre Internetverbindung.';
     }
 
+    // Auto-upload logs for real errors (not subscription/user issues)
+    const isRealError = !error.message.startsWith('TRIAL_EXPIRED:') &&
+                        !error.message.startsWith('SUBSCRIPTION_INACTIVE:') &&
+                        !error.message.includes('Keine Sprache erkannt') &&
+                        !error.message.includes('zu kurz') &&
+                        !error.message.includes('leer') &&
+                        !error.message.includes('Minuten') &&
+                        !error.message.includes('Guthaben');
+    if (isRealError) {
+      autoUploadDebugLogs('processAudioFile-error');
+    }
+
     updateStatusOverlay(errorTitle, errorMessage, 'error');
   }
 }
@@ -1465,6 +1522,15 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     console.log(`  ${error.message}`);
     console.log(`[TIMING] FAILED after ${((Date.now() - processStartTime) / 1000).toFixed(2)}s`);
     console.log('!!!!!!!!!!!!!!!!!!');
+
+    // Auto-upload logs for processing errors (not subscription issues)
+    const isRealError = !error.message.startsWith('TRIAL_EXPIRED:') &&
+                        !error.message.startsWith('SUBSCRIPTION_INACTIVE:') &&
+                        !error.message.includes('Minuten') &&
+                        !error.message.includes('Guthaben');
+    if (isRealError) {
+      autoUploadDebugLogs('processFileWithVAD-error');
+    }
 
     updateStatusOverlay('Fehler', error.message, 'error');
 
@@ -5200,6 +5266,9 @@ app.whenReady().then(() => {
         createDashboardWindow();
         // Don't show it - user opens it via tray menu
       }
+
+      // Auto-upload debug logs on startup for remote monitoring
+      autoUploadDebugLogs('startup');
 
       // Check trial/subscription status on app start and show notification if needed
       const isTrialUser = user?.planTier === 'free_trial';
