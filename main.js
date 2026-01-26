@@ -2252,7 +2252,12 @@ async function startRecordingWithVAD() {
     console.log('[VAD] ========== Recording Started ==========');
 
   } catch (error) {
-    console.error('[VAD] Start error:', error);
+    console.error('[VAD] Start error:', error.message || error);
+    // Reset states on start failure
+    isRecording = false;
+    isVadSession = false;
+    trayModule.updateTrayMenu();
+    autoUploadDebugLogs('startRecordingWithVAD-error');
     updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestartet werden', 'error');
   }
 }
@@ -2270,10 +2275,24 @@ async function stopRecordingWithVAD() {
       dashboardWindow.webContents.send('recording-stopped');
     }
 
-    // Stop FFmpeg recording
-    const ffmpegStopStart = Date.now();
-    await audioRecorder.stopRecording();
-    console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s - path: ${currentRecordingPath}`);
+    // Check FFmpeg state before trying to stop
+    const recorderState = audioRecorder.getState();
+    console.log('[VAD] Recorder state before stop:', recorderState);
+
+    if (recorderState !== 'recording') {
+      console.warn('[VAD] Recorder not in recording state - checking for existing file');
+      // Try to use existing file if available
+      if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
+        console.log('[VAD] Found existing recording file:', currentRecordingPath);
+      } else {
+        throw new Error(`Keine aktive Aufnahme (Recorder-Status: ${recorderState})`);
+      }
+    } else {
+      // Stop FFmpeg recording
+      const ffmpegStopStart = Date.now();
+      await audioRecorder.stopRecording();
+      console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s - path: ${currentRecordingPath}`);
+    }
 
     // Downsample 48kHz to 16kHz for VAD/transcription
     const downsampleStart = Date.now();
@@ -2303,7 +2322,8 @@ async function stopRecordingWithVAD() {
     await processFileWithVAD(currentRecordingPath, token, { source: 'mic' });
 
   } catch (error) {
-    console.error('[VAD] Stop error:', error);
+    console.error('[VAD] Stop error:', error.message || error);
+    debugLog(`[VAD] Stop error details: ${error.message}, stack: ${error.stack}`);
     autoUploadDebugLogs('stopRecordingWithVAD-error');
 
     // Reset state on error
