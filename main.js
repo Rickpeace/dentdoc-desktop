@@ -991,6 +991,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     } catch (speakerError) {
       console.error('Speaker recognition failed:', speakerError);
       debugLog('Speaker recognition error: ' + speakerError.message);
+      autoUploadDebugLogs('speakerRecognition-error');
       // Continue anyway - speaker identification is optional
     }
 
@@ -1373,6 +1374,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     } catch (speakerError) {
       console.log(`[TIMING] Speaker recognition failed after ${((Date.now() - speakerStart) / 1000).toFixed(2)}s`);
       console.log('  [!] Fehler bei Sprechererkennung');
+      autoUploadDebugLogs('speakerRecognition-error');
     }
 
     // Generate documentation - Agent V2.1 only
@@ -1589,6 +1591,7 @@ async function startRecording() {
     console.log('[Recording] iPhone mode - starting iPhone recording');
     startRecordingWithIphone().catch(err => {
       console.error('[Recording] iPhone start failed:', err);
+      autoUploadDebugLogs('startRecordingWithIphone-error');
       updateStatusOverlay('Smartphone Fehler', err.message, 'error');
     });
     return;
@@ -1600,6 +1603,7 @@ async function startRecording() {
     console.log('[Recording] VAD mode enabled - starting VAD session');
     startRecordingWithVAD().catch(err => {
       console.error('[Recording] VAD start failed:', err);
+      autoUploadDebugLogs('startRecordingWithVAD-error');
       updateStatusOverlay('VAD Fehler', err.message, 'error');
     });
     return;
@@ -1645,6 +1649,7 @@ async function startRecording() {
     }
   } catch (error) {
     console.error('Recording error:', error);
+    autoUploadDebugLogs('startRecording-error');
     updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestartet werden', 'error');
   }
 }
@@ -2299,6 +2304,7 @@ async function stopRecordingWithVAD() {
 
   } catch (error) {
     console.error('[VAD] Stop error:', error);
+    autoUploadDebugLogs('stopRecordingWithVAD-error');
 
     // Reset state on error
     isRecording = false;
@@ -2330,6 +2336,7 @@ async function stopRecording() {
       await processAudioFile(recordingPath, { source: 'iphone' });
     } catch (error) {
       console.error('[iPhone] Stop error:', error);
+      autoUploadDebugLogs('stopRecordingWithIphone-error');
       updateStatusOverlay('Smartphone Fehler', error.message, 'error');
     }
     return;
@@ -2379,6 +2386,7 @@ async function stopRecording() {
 
   } catch (error) {
     console.error('Stop recording error:', error);
+    autoUploadDebugLogs('stopRecording-error');
 
     // Reset state on error
     isRecording = false;
