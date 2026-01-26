@@ -583,9 +583,43 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
       recordingState = 'recording';
       console.log('[Recorder] Recording started:', currentFilePath);
 
-      // Setup close handler for cleanup
-      ffmpegProcess.once('close', () => {
+      // Capture stderr for crash diagnostics
+      let stderrOutput = '';
+      if (ffmpegProcess.stderr) {
+        ffmpegProcess.stderr.on('data', (data) => {
+          stderrOutput += data.toString();
+          // Keep only last 2KB to avoid memory issues
+          if (stderrOutput.length > 2048) {
+            stderrOutput = stderrOutput.slice(-2048);
+          }
+        });
+      }
+
+      // Setup close handler for cleanup AND crash detection
+      ffmpegProcess.once('close', (code, signal) => {
+        const wasRecording = recordingState === 'recording';
         ffmpegProcess = null;
+
+        if (wasRecording) {
+          // FFmpeg exited while we thought we were still recording!
+          console.error('[Recorder] ⚠️ FFmpeg CRASHED during recording!');
+          console.error('[Recorder] Exit code:', code, '| Signal:', signal);
+          console.error('[Recorder] File path:', currentFilePath);
+          console.error('[Recorder] Last stderr:', stderrOutput.slice(-500));
+
+          // Check if file was created and has content
+          try {
+            if (fs.existsSync(currentFilePath)) {
+              const stats = fs.statSync(currentFilePath);
+              console.error('[Recorder] File exists, size:', stats.size, 'bytes');
+            } else {
+              console.error('[Recorder] File does NOT exist!');
+            }
+          } catch (e) {
+            console.error('[Recorder] Could not check file:', e.message);
+          }
+        }
+
         if (recordingState !== 'idle') {
           recordingState = 'idle';
         }
