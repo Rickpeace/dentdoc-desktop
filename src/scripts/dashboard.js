@@ -31,8 +31,12 @@ async function switchView(viewName) {
     settingsStopMicTest();
   }
   // Also force stop any lingering FFmpeg recording and clean up file
-  await ipcRenderer.invoke('stop-mic-test').catch(() => {});
-  ipcRenderer.invoke('cleanup-mic-test');
+  // BUT ONLY if no real recording (VAD/iPhone) is in progress!
+  const recordingState = await ipcRenderer.invoke('get-recording-state').catch(() => ({}));
+  if (!recordingState.isRecording && !recordingState.isProcessing) {
+    await ipcRenderer.invoke('stop-mic-test').catch(() => {});
+    ipcRenderer.invoke('cleanup-mic-test');
+  }
   document.getElementById('settingsMicPlayback').style.display = 'none';
 
   // Cancel any running iPhone audio test when leaving settings
