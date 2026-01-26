@@ -1,7 +1,7 @@
 /**
  * DentDoc Dashboard
  * Main JavaScript for the integrated dashboard interface
- * Includes: Home, Settings, Voice Profiles, and Bausteine views
+ * Includes: Home, Settings, and Voice Profiles views
  */
 
 const { ipcRenderer } = require('electron');
@@ -111,15 +111,6 @@ async function loadViewContent(viewName) {
       break;
     case 'profiles':
       loadProfilesView();
-      break;
-    case 'bausteine':
-      loadBausteineView();
-      break;
-    case 'textbausteine':
-      loadTextbausteineView();
-      break;
-    case 'themen':
-      loadThemenView();
       break;
   }
 }
@@ -353,10 +344,6 @@ ipcRenderer.on('recording-started', async (event, options) => {
 });
 
 ipcRenderer.on('recording-stopped', () => {
-  console.log('!!!!!!! recording-stopped EVENT RECEIVED !!!!!!!');
-  console.log('vadIsActive:', vadIsActive, 'vadIsStarting:', vadIsStarting);
-  console.log('Stack trace:', new Error().stack);
-
   // Only stop F9 audio monitoring if VAD is not active/starting
   // VAD manages its own audio capture
   if (!vadIsActive && !vadIsStarting) {
@@ -865,7 +852,7 @@ async function startDashboardTour() {
         element: '.sidebar',
         popover: {
           title: 'Navigation',
-          description: 'Über die Seitenleiste erreichen Sie alle Bereiche: Übersicht, Einstellungen, Stimmprofile und Bausteine.',
+          description: 'Über die Seitenleiste erreichen Sie alle Bereiche: Übersicht, Einstellungen und Stimmprofile.',
           side: 'right',
           align: 'start'
         }
@@ -884,15 +871,6 @@ async function startDashboardTour() {
         popover: {
           title: 'Stimmprofile',
           description: 'DentDoc erkennt verschiedene Sprecher automatisch. Hier sehen Sie alle erkannten Profile.',
-          side: 'right',
-          align: 'center'
-        }
-      },
-      {
-        element: '#nav-bausteine',
-        popover: {
-          title: 'Bausteine',
-          description: 'Textvorlagen, die automatisch in Ihre Dokumentation eingefügt werden können.',
           side: 'right',
           align: 'center'
         }
@@ -965,7 +943,6 @@ async function loadSettingsView() {
   document.getElementById('settingsAutoCloseCheckbox').checked = settings.autoClose || false;
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
   document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
-  document.getElementById('settingsDocModeSelect').value = settings.docMode || 'agent-v2';
   document.getElementById('settingsVadEnabled').checked = settings.vadEnabled !== false;
 
   // iPhone microphone settings
@@ -975,11 +952,11 @@ async function loadSettingsView() {
   await loadIphonePairingStatus(settings);
   updateMicSourceUI(microphoneSource);
 
-  const bausteinePathValue = await ipcRenderer.invoke('get-bausteine-path');
-  document.getElementById('settingsBausteinePath').value = bausteinePathValue || '';
-
   const theme = settings.theme || 'dark';
   document.getElementById('settingsThemeSelect').value = theme;
+
+  const docMode = settings.docMode || 'agent-v2.1';
+  document.getElementById('settingsDocModeSelect').value = docMode;
 
   await loadSettingsMicrophones();
 
@@ -989,11 +966,10 @@ async function loadSettingsView() {
     microphoneSource: settings.microphoneSource || 'desktop',
     transcriptPath: settings.transcriptPath || '',
     profilesPath: settings.profilesPath || '',
-    bausteinePath: bausteinePathValue || '',
     autoClose: settings.autoClose || false,
     autoExport: settings.autoExport || false,
     keepAudio: settings.keepAudio || false,
-    docMode: settings.docMode || 'single',
+    docMode: docMode,
     theme: settings.theme || 'dark',
     vadEnabled: settings.vadEnabled !== false
   };
@@ -1037,26 +1013,92 @@ async function loadSettingsMicrophones() {
 
 // Listen for device changes (mic plugged in/out) and refresh the list
 let deviceChangeDebounce = null;
+let selectedMicWasAvailable = null; // Track if SELECTED mic was available
+
+/**
+ * Check if a microphone matches by vendor:product ID (e.g., "046d:0aba")
+ * This handles USB port changes where Windows renumbers devices like "2- Logitech" -> "3- Logitech"
+ */
+function isMicrophoneMatch(savedName, currentLabel) {
+  // Try exact match first
+  if (currentLabel === savedName) return true;
+
+  // Extract vendor:product ID from both names
+  const savedVendorId = savedName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+  const currentVendorId = currentLabel.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+
+  // Match by vendor:product ID if both have one
+  if (savedVendorId && currentVendorId && savedVendorId === currentVendorId) {
+    return true;
+  }
+
+  return false;
+}
+
 navigator.mediaDevices?.addEventListener('devicechange', () => {
   // Debounce to avoid multiple rapid refreshes
   clearTimeout(deviceChangeDebounce);
-  deviceChangeDebounce = setTimeout(() => {
-    // Only refresh if settings view is active
+  deviceChangeDebounce = setTimeout(async () => {
+    // Check if the SELECTED microphone is still available
+    try {
+      const settings = await ipcRenderer.invoke('get-settings');
+      const selectedMicName = settings?.microphoneName;
+
+      // Only check if a specific mic is selected (not default)
+      if (selectedMicName) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+
+        // Check if selected mic is in the list (by vendor:product ID)
+        const selectedMicAvailable = mics.some(m => isMicrophoneMatch(selectedMicName, m.label));
+
+        console.log(`[DeviceChange] Selected mic "${selectedMicName}" available: ${selectedMicAvailable} (was: ${selectedMicWasAvailable})`);
+
+        // Notify only when selected mic status changes
+        if (selectedMicWasAvailable !== null && selectedMicWasAvailable !== selectedMicAvailable) {
+          if (selectedMicAvailable) {
+            console.log('[DeviceChange] Selected microphone reconnected!');
+            ipcRenderer.invoke('show-notification', 'Mikrofon verbunden', selectedMicName);
+          } else {
+            console.log('[DeviceChange] Selected microphone disconnected!');
+            ipcRenderer.invoke('show-notification', 'Mikrofon getrennt', selectedMicName);
+          }
+        }
+        selectedMicWasAvailable = selectedMicAvailable;
+      }
+    } catch (e) {
+      console.warn('[DeviceChange] Could not check selected mic:', e.message);
+    }
+
+    // Refresh settings UI if active
     const settingsView = document.getElementById('view-settings');
-    if (!settingsView || !settingsView.classList.contains('active')) {
-      return;
+    if (settingsView && settingsView.classList.contains('active')) {
+      // Don't refresh during mic test
+      if (settingsMicTester && settingsMicTester.isRunning) {
+        console.log('Device change detected, but mic test running - skipping refresh');
+        return;
+      }
+      console.log('Device change detected, refreshing microphone list...');
+      loadSettingsMicrophones();
     }
-
-    // Don't refresh during mic test
-    if (settingsMicTester && settingsMicTester.isRunning) {
-      console.log('Device change detected, but mic test running - skipping refresh');
-      return;
-    }
-
-    console.log('Device change detected, refreshing microphone list...');
-    loadSettingsMicrophones();
   }, 500);
 });
+
+// Initialize selected mic status on load
+(async () => {
+  try {
+    const settings = await ipcRenderer.invoke('get-settings');
+    const selectedMicName = settings?.microphoneName;
+    if (selectedMicName) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+      selectedMicWasAvailable = mics.some(m => isMicrophoneMatch(selectedMicName, m.label));
+      console.log(`[DeviceChange] Initial selected mic "${selectedMicName}" available: ${selectedMicWasAvailable}`);
+    }
+  } catch (e) {
+    console.warn('[DeviceChange] Could not get initial mic status:', e.message);
+  }
+})();
 
 function settingsCheckForChanges() {
   const currentSettings = {
@@ -1065,7 +1107,6 @@ function settingsCheckForChanges() {
     microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
     profilesPath: document.getElementById('settingsProfilesPath').value,
-    bausteinePath: document.getElementById('settingsBausteinePath').value,
     autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
@@ -1773,35 +1814,6 @@ document.getElementById('settingsOpenProfilesFolderBtn').addEventListener('click
   }
 });
 
-document.getElementById('settingsBrowseBausteineBtn').addEventListener('click', async () => {
-  const result = await ipcRenderer.invoke('select-folder');
-  if (!result) return;
-
-  const newPath = result + '\\bausteine.json';
-  const dialogResult = await ipcRenderer.invoke('show-bausteine-path-dialog', newPath);
-
-  if (dialogResult.action === 'cancel') return;
-
-  if (dialogResult.action === 'copy_current') {
-    await ipcRenderer.invoke('copy-bausteine-to-path', newPath);
-  } else if (dialogResult.action === 'use_existing') {
-    await ipcRenderer.invoke('set-bausteine-path', newPath);
-  } else if (dialogResult.action === 'use_defaults') {
-    await ipcRenderer.invoke('set-bausteine-path', newPath);
-  }
-
-  document.getElementById('settingsBausteinePath').value = newPath;
-  settingsCheckForChanges();
-});
-
-document.getElementById('settingsOpenBausteineFolderBtn').addEventListener('click', async () => {
-  const path = document.getElementById('settingsBausteinePath').value;
-  if (path) {
-    const folderPath = path.substring(0, path.lastIndexOf('\\'));
-    await ipcRenderer.invoke('open-folder', folderPath);
-  }
-});
-
 // Settings Theme
 document.getElementById('settingsThemeSelect').addEventListener('change', () => {
   document.documentElement.setAttribute('data-theme', document.getElementById('settingsThemeSelect').value);
@@ -1834,6 +1846,31 @@ document.getElementById('settingsCopyLogPathBtn').addEventListener('click', asyn
     setTimeout(() => settingsHideStatus(document.getElementById('settingsLogStatus')), 3000);
   } catch (error) {
     settingsShowStatus(document.getElementById('settingsLogStatus'), 'Fehler: ' + error.message, 'error');
+  }
+});
+
+document.getElementById('settingsUploadLogBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('settingsUploadLogBtn');
+  const statusEl = document.getElementById('settingsLogStatus');
+
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Wird gesendet...';
+    settingsShowStatus(statusEl, 'Debug-Log wird hochgeladen...', 'info');
+
+    const result = await ipcRenderer.invoke('upload-debug-logs');
+
+    if (result.success) {
+      settingsShowStatus(statusEl, `Debug-Log gesendet (ID: ${result.debugLogId})`, 'success');
+    } else {
+      settingsShowStatus(statusEl, 'Fehler: ' + result.error, 'error');
+    }
+  } catch (error) {
+    settingsShowStatus(statusEl, 'Fehler: ' + error.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'An Support senden';
+    setTimeout(() => settingsHideStatus(statusEl), 5000);
   }
 });
 
@@ -2237,595 +2274,6 @@ ipcRenderer.on('enrollment-complete', (event, success, message) => {
 });
 
 
-// =============================================================================
-// BAUSTEINE VIEW
-// =============================================================================
-
-let bausteineData = null;
-let bausteineDefaultsData = null;
-let bausteineHasUnsavedChanges = false;
-let bausteineOpenBausteinId = null;
-let bausteineCategoryForNewBaustein = null;
-
-async function loadBausteineView() {
-  try {
-    const result = await ipcRenderer.invoke('get-bausteine-with-categories');
-    bausteineData = JSON.parse(JSON.stringify(result.data));
-    bausteineDefaultsData = JSON.parse(JSON.stringify(result.defaults));
-    document.getElementById('bausteinePathDisplay').textContent = result.path;
-    renderBausteineCategories();
-  } catch (error) {
-    bausteineShowStatus('Fehler beim Laden: ' + error.message, 'error');
-  }
-}
-
-function renderBausteineCategories() {
-  const container = document.getElementById('bausteineCategoriesContainer');
-  container.innerHTML = '';
-
-  if (!bausteineData || !bausteineData.categories) return;
-
-  for (const category of bausteineData.categories) {
-    const categoryEl = document.createElement('div');
-    categoryEl.className = 'category';
-    categoryEl.dataset.id = category.id;
-
-    categoryEl.innerHTML = `
-      <div class="category-header" data-category-id="${category.id}">
-        <div class="category-title">
-          <svg class="category-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-          <span class="category-name">${category.name}</span>
-          <span class="category-count">${category.bausteine.length} Bausteine</span>
-        </div>
-        <div class="category-actions">
-          <button class="btn btn-ghost btn-sm" data-action="rename" data-category-id="${category.id}">Umbenennen</button>
-          <button class="btn btn-ghost btn-sm" data-action="delete" data-category-id="${category.id}">Löschen</button>
-          <button class="btn btn-secondary btn-sm" data-action="add-baustein" data-category-id="${category.id}">+ Baustein</button>
-        </div>
-      </div>
-      <div class="category-content">
-        <div class="bausteine-list" id="bausteine-${category.id}">
-          ${category.bausteine.length === 0 ? `
-            <div class="empty-category">
-              Keine Bausteine in dieser Kategorie
-              <br>
-              <button class="btn btn-secondary btn-sm" data-action="add-baustein" data-category-id="${category.id}">Baustein hinzufügen</button>
-            </div>
-          ` : category.bausteine.map(b => renderBausteinItem(b, category.id)).join('')}
-        </div>
-      </div>
-    `;
-
-    container.appendChild(categoryEl);
-  }
-
-  // Add event listeners
-  container.querySelectorAll('.category-header').forEach(header => {
-    header.addEventListener('click', (e) => {
-      if (e.target.closest('.category-actions')) return;
-      const categoryId = header.dataset.categoryId;
-      const categoryEl = document.querySelector(`.category[data-id="${categoryId}"]`);
-      if (categoryEl) categoryEl.classList.toggle('collapsed');
-    });
-  });
-
-  container.querySelectorAll('[data-action="rename"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      bausteinRenameCategory(btn.dataset.categoryId);
-    });
-  });
-
-  container.querySelectorAll('[data-action="delete"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      bausteinDeleteCategory(btn.dataset.categoryId);
-    });
-  });
-
-  container.querySelectorAll('[data-action="add-baustein"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      bausteinAddBaustein(btn.dataset.categoryId);
-    });
-  });
-
-  container.querySelectorAll('.baustein-item-header').forEach(header => {
-    header.addEventListener('click', () => {
-      const bausteinId = header.dataset.bausteinId;
-      bausteinToggleBaustein(bausteinId);
-    });
-  });
-
-  // Move baustein buttons
-  container.querySelectorAll('[data-action="move-baustein"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      showMoveDropdown(btn, btn.dataset.bausteinId, btn.dataset.categoryId);
-    });
-  });
-}
-
-// Move dropdown functionality
-let activeMoveDropdown = null;
-
-function showMoveDropdown(button, bausteinId, currentCategoryId) {
-  // Remove any existing dropdown
-  hideMoveDropdown();
-
-  // Create dropdown
-  const dropdown = document.createElement('div');
-  dropdown.className = 'move-dropdown active';
-  dropdown.innerHTML = bausteineData.categories
-    .map(cat => `
-      <div class="move-dropdown-item ${cat.id === currentCategoryId ? 'disabled' : ''}"
-           data-target-category="${cat.id}"
-           data-baustein-id="${bausteinId}"
-           data-source-category="${currentCategoryId}">
-        ${cat.name}${cat.id === currentCategoryId ? ' (aktuell)' : ''}
-      </div>
-    `).join('');
-
-  // Position dropdown
-  const rect = button.getBoundingClientRect();
-  dropdown.style.top = `${rect.bottom + 4}px`;
-  dropdown.style.left = `${rect.left}px`;
-
-  document.body.appendChild(dropdown);
-  activeMoveDropdown = dropdown;
-
-  // Add click handlers
-  dropdown.querySelectorAll('.move-dropdown-item:not(.disabled)').forEach(item => {
-    item.addEventListener('click', () => {
-      moveBausteinToCategory(
-        item.dataset.bausteinId,
-        item.dataset.sourceCategory,
-        item.dataset.targetCategory
-      );
-      hideMoveDropdown();
-    });
-  });
-
-  // Close on outside click
-  setTimeout(() => {
-    document.addEventListener('click', hideMoveDropdownOnOutsideClick);
-  }, 0);
-}
-
-function hideMoveDropdown() {
-  if (activeMoveDropdown) {
-    activeMoveDropdown.remove();
-    activeMoveDropdown = null;
-  }
-  document.removeEventListener('click', hideMoveDropdownOnOutsideClick);
-}
-
-function hideMoveDropdownOnOutsideClick(e) {
-  if (activeMoveDropdown && !activeMoveDropdown.contains(e.target)) {
-    hideMoveDropdown();
-  }
-}
-
-async function moveBausteinToCategory(bausteinId, sourceCategoryId, targetCategoryId) {
-  // Find and remove baustein from source category
-  const sourceCategory = bausteineData.categories.find(c => c.id === sourceCategoryId);
-  const targetCategory = bausteineData.categories.find(c => c.id === targetCategoryId);
-
-  if (!sourceCategory || !targetCategory) return;
-
-  const bausteinIndex = sourceCategory.bausteine.findIndex(b => b.id === bausteinId);
-  if (bausteinIndex === -1) return;
-
-  const [baustein] = sourceCategory.bausteine.splice(bausteinIndex, 1);
-  targetCategory.bausteine.push(baustein);
-
-  bausteineHasUnsavedChanges = true;
-  document.getElementById('bausteineSaveBtn').disabled = false;
-  bausteineShowStatus(`"${baustein.name}" verschoben nach "${targetCategory.name}"`, 'success');
-  renderBausteineCategories();
-}
-
-function renderBausteinItem(baustein, categoryId) {
-  const isOpen = bausteineOpenBausteinId === baustein.id;
-  const isCustom = bausteinIsCustom(baustein.id);
-
-  return `
-    <div class="baustein-item ${isOpen ? 'open' : ''}" data-id="${baustein.id}" data-category="${categoryId}">
-      <div class="baustein-item-header" data-baustein-id="${baustein.id}">
-        <div class="baustein-title-row">
-          <svg class="baustein-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
-          <span class="baustein-name">${baustein.name}</span>
-          <span class="baustein-id">${baustein.id}</span>
-        </div>
-        <div class="baustein-meta">
-          <span class="badge ${isCustom ? 'badge-custom' : 'badge-default'}">
-            ${isCustom ? 'Angepasst' : 'Standard'}
-          </span>
-        </div>
-      </div>
-      <div class="baustein-content">
-        <div class="baustein-content-inner">
-          <div class="baustein-field">
-            <label>Name</label>
-            <input type="text" value="${baustein.name}" data-baustein-id="${baustein.id}" data-field="name">
-          </div>
-          <div class="baustein-field">
-            <label>Aufklärungstext</label>
-            <textarea data-baustein-id="${baustein.id}" data-field="standardText">${baustein.standardText}</textarea>
-          </div>
-          <div class="baustein-field">
-            <label>Erkennungshinweise (kommagetrennt)</label>
-            <input type="text" value="${(baustein.keywords || []).join(', ')}" data-baustein-id="${baustein.id}" data-field="keywords">
-          </div>
-          <div class="baustein-actions">
-            <div class="baustein-actions-left">
-              <button class="btn-icon" title="Verschieben" data-action="move-baustein" data-baustein-id="${baustein.id}" data-category-id="${categoryId}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M5 9l-3 3 3 3"/>
-                  <path d="M9 5l3-3 3 3"/>
-                  <path d="M15 19l3 3 3-3"/>
-                  <path d="M19 9l3 3-3 3"/>
-                  <line x1="2" y1="12" x2="22" y2="12"/>
-                  <line x1="12" y1="2" x2="12" y2="22"/>
-                </svg>
-              </button>
-              <button class="btn-icon danger" title="Löschen" data-action="delete-baustein" data-baustein-id="${baustein.id}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="3 6 5 6 21 6"/>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                </svg>
-              </button>
-            </div>
-            <button class="btn-reset" data-action="reset-baustein" data-baustein-id="${baustein.id}" ${!isCustom ? 'disabled' : ''}>
-              Auf Standard zurücksetzen
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function bausteinToggleBaustein(bausteinId) {
-  const wasOpen = bausteineOpenBausteinId === bausteinId;
-  bausteineOpenBausteinId = wasOpen ? null : bausteinId;
-
-  document.querySelectorAll('.baustein-item').forEach(item => {
-    if (item.dataset.id === bausteinId && !wasOpen) {
-      item.classList.add('open');
-    } else {
-      item.classList.remove('open');
-    }
-  });
-}
-
-function bausteinIsCustom(bausteinId) {
-  if (!bausteineDefaultsData || !bausteineDefaultsData.categories) return true;
-
-  let defaultBaustein = null;
-  for (const cat of bausteineDefaultsData.categories) {
-    const found = cat.bausteine.find(b => b.id === bausteinId);
-    if (found) {
-      defaultBaustein = found;
-      break;
-    }
-  }
-
-  if (!defaultBaustein) return true;
-
-  let currentBaustein = null;
-  for (const cat of bausteineData.categories) {
-    const found = cat.bausteine.find(b => b.id === bausteinId);
-    if (found) {
-      currentBaustein = found;
-      break;
-    }
-  }
-
-  if (!currentBaustein) return true;
-
-  return currentBaustein.standardText !== defaultBaustein.standardText ||
-         currentBaustein.name !== defaultBaustein.name ||
-         JSON.stringify(currentBaustein.keywords) !== JSON.stringify(defaultBaustein.keywords);
-}
-
-function bausteineShowStatus(message, type = '') {
-  const el = document.getElementById('bausteineStatusMessage');
-  el.textContent = message;
-  el.className = 'status-message ' + type;
-}
-
-// Bausteine Event Delegation for dynamic content
-document.getElementById('bausteineCategoriesContainer').addEventListener('input', (e) => {
-  const bausteinId = e.target.dataset.bausteinId;
-  const field = e.target.dataset.field;
-  if (!bausteinId || !field) return;
-
-  for (const cat of bausteineData.categories) {
-    const baustein = cat.bausteine.find(b => b.id === bausteinId);
-    if (baustein) {
-      if (field === 'keywords') {
-        baustein.keywords = e.target.value.split(',').map(k => k.trim().toLowerCase()).filter(k => k);
-      } else {
-        baustein[field] = e.target.value;
-      }
-      break;
-    }
-  }
-
-  bausteineHasUnsavedChanges = true;
-  bausteineShowStatus('Ungespeicherte Änderungen', 'warning');
-  document.getElementById('bausteineSaveBtn').disabled = false;
-});
-
-document.getElementById('bausteineCategoriesContainer').addEventListener('click', async (e) => {
-  const action = e.target.closest('[data-action]')?.dataset.action;
-  const bausteinId = e.target.closest('[data-baustein-id]')?.dataset.bausteinId;
-
-  if (action === 'delete-baustein' && bausteinId) {
-    await bausteinDeleteBaustein(bausteinId);
-  } else if (action === 'reset-baustein' && bausteinId) {
-    await bausteinResetBaustein(bausteinId);
-  }
-});
-
-async function bausteinRenameCategory(categoryId) {
-  const cat = bausteineData.categories.find(c => c.id === categoryId);
-  if (!cat) return;
-
-  const newName = prompt('Neuer Name für die Kategorie:', cat.name);
-  if (!newName || newName === cat.name) return;
-
-  try {
-    await ipcRenderer.invoke('rename-category', categoryId, newName);
-    await loadBausteineView();
-    bausteineShowStatus(`Kategorie umbenannt zu "${newName}"`, 'success');
-  } catch (error) {
-    bausteineShowStatus('Fehler: ' + error.message, 'error');
-  }
-}
-
-async function bausteinDeleteCategory(categoryId) {
-  const cat = bausteineData.categories.find(c => c.id === categoryId);
-  if (!cat) return;
-
-  const confirmed = await ipcRenderer.invoke('confirm-delete-category', cat.name);
-  if (!confirmed) return;
-
-  try {
-    await ipcRenderer.invoke('delete-category', categoryId);
-    await loadBausteineView();
-    bausteineShowStatus(`Kategorie "${cat.name}" gelöscht`, 'success');
-  } catch (error) {
-    bausteineShowStatus('Fehler: ' + error.message, 'error');
-  }
-}
-
-function bausteinAddBaustein(categoryId) {
-  bausteineCategoryForNewBaustein = categoryId;
-  document.getElementById('bausteineNewBausteinName').value = '';
-  document.getElementById('bausteineNewBausteinModal').classList.add('active');
-  document.getElementById('bausteineNewBausteinName').focus();
-}
-
-async function bausteinDeleteBaustein(bausteinId) {
-  let baustein = null;
-  for (const cat of bausteineData.categories) {
-    baustein = cat.bausteine.find(b => b.id === bausteinId);
-    if (baustein) break;
-  }
-  if (!baustein) return;
-
-  const confirmed = await ipcRenderer.invoke('confirm-delete-baustein', baustein.name);
-  if (!confirmed) return;
-
-  try {
-    await ipcRenderer.invoke('delete-baustein', bausteinId);
-    await loadBausteineView();
-    bausteineShowStatus(`Baustein "${baustein.name}" gelöscht`, 'success');
-  } catch (error) {
-    bausteineShowStatus('Fehler: ' + error.message, 'error');
-  }
-}
-
-async function bausteinResetBaustein(bausteinId) {
-  let baustein = null;
-  for (const cat of bausteineData.categories) {
-    baustein = cat.bausteine.find(b => b.id === bausteinId);
-    if (baustein) break;
-  }
-  if (!baustein) return;
-
-  const confirmed = await ipcRenderer.invoke('confirm-reset-baustein', baustein.name);
-  if (!confirmed) return;
-
-  try {
-    await ipcRenderer.invoke('reset-baustein', bausteinId);
-    await loadBausteineView();
-    bausteineShowStatus(`"${baustein.name}" zurückgesetzt`, 'success');
-  } catch (error) {
-    bausteineShowStatus('Fehler: ' + error.message, 'error');
-  }
-}
-
-// Bausteine Toolbar Buttons
-document.getElementById('bausteineAddCategoryBtn').addEventListener('click', () => {
-  document.getElementById('bausteineNewCategoryName').value = '';
-  document.getElementById('bausteineNewCategoryModal').classList.add('active');
-  document.getElementById('bausteineNewCategoryName').focus();
-});
-
-document.getElementById('bausteineExportBtn').addEventListener('click', async () => {
-  const data = await ipcRenderer.invoke('export-bausteine');
-  document.getElementById('bausteineExportData').value = data;
-  document.getElementById('bausteineExportModal').classList.add('active');
-});
-
-document.getElementById('bausteineImportBtn').addEventListener('click', () => {
-  document.getElementById('bausteineImportData').value = '';
-  document.getElementById('bausteineImportModal').classList.add('active');
-});
-
-document.getElementById('bausteineResetAllBtn').addEventListener('click', async () => {
-  const confirmed = await ipcRenderer.invoke('confirm-reset-all-bausteine');
-  if (!confirmed) return;
-
-  try {
-    await ipcRenderer.invoke('reset-all-bausteine');
-    await loadBausteineView();
-    bausteineHasUnsavedChanges = false;
-    document.getElementById('bausteineSaveBtn').disabled = true;
-    bausteineShowStatus('Alle Bausteine zurückgesetzt', 'success');
-  } catch (error) {
-    bausteineShowStatus('Fehler: ' + error.message, 'error');
-  }
-});
-
-document.getElementById('bausteineChangePathBtn').addEventListener('click', async () => {
-  const result = await ipcRenderer.invoke('select-folder');
-  if (!result) return;
-
-  const newPath = result + '\\bausteine.json';
-  const dialogResult = await ipcRenderer.invoke('show-bausteine-path-dialog', newPath);
-
-  if (dialogResult.action === 'cancel') return;
-
-  if (dialogResult.action === 'copy_current') {
-    await ipcRenderer.invoke('copy-bausteine-to-path', newPath);
-  } else {
-    await ipcRenderer.invoke('set-bausteine-path', newPath);
-  }
-
-  document.getElementById('bausteinePathDisplay').textContent = newPath;
-  await loadBausteineView();
-  bausteineHasUnsavedChanges = false;
-  document.getElementById('bausteineSaveBtn').disabled = true;
-  bausteineShowStatus('Speicherort geändert', 'success');
-});
-
-document.getElementById('bausteineOpenFolderBtn').addEventListener('click', async () => {
-  const path = document.getElementById('bausteinePathDisplay').textContent;
-  const folderPath = path.substring(0, path.lastIndexOf('\\'));
-  await ipcRenderer.invoke('open-folder', folderPath);
-});
-
-document.getElementById('bausteineSaveBtn').addEventListener('click', async () => {
-  try {
-    await ipcRenderer.invoke('save-bausteine-with-categories', bausteineData);
-    bausteineHasUnsavedChanges = false;
-    bausteineShowStatus('Gespeichert!', 'success');
-    document.getElementById('bausteineSaveBtn').disabled = true;
-    await loadBausteineView();
-  } catch (error) {
-    bausteineShowStatus('Fehler beim Speichern: ' + error.message, 'error');
-  }
-});
-
-// Bausteine Modal handlers
-document.getElementById('bausteineCloseExportModal').addEventListener('click', () => {
-  document.getElementById('bausteineExportModal').classList.remove('active');
-});
-
-document.getElementById('bausteineCopyExportBtn').addEventListener('click', () => {
-  const data = document.getElementById('bausteineExportData').value;
-  navigator.clipboard.writeText(data);
-  bausteineShowStatus('In Zwischenablage kopiert!', 'success');
-});
-
-document.getElementById('bausteineCloseImportModal').addEventListener('click', () => {
-  document.getElementById('bausteineImportModal').classList.remove('active');
-});
-
-document.getElementById('bausteineDoImportBtn').addEventListener('click', async () => {
-  const data = document.getElementById('bausteineImportData').value;
-  try {
-    await ipcRenderer.invoke('import-bausteine', data);
-    await loadBausteineView();
-    document.getElementById('bausteineImportModal').classList.remove('active');
-    bausteineShowStatus('Bausteine importiert!', 'success');
-  } catch (error) {
-    bausteineShowStatus('Import fehlgeschlagen: ' + error.message, 'error');
-  }
-});
-
-document.getElementById('bausteineCloseCategoryModal').addEventListener('click', () => {
-  document.getElementById('bausteineNewCategoryModal').classList.remove('active');
-});
-
-document.getElementById('bausteineCreateCategoryBtn').addEventListener('click', async () => {
-  const name = document.getElementById('bausteineNewCategoryName').value.trim();
-  if (!name) return;
-
-  try {
-    await ipcRenderer.invoke('create-category', name);
-    await loadBausteineView();
-    document.getElementById('bausteineNewCategoryModal').classList.remove('active');
-    bausteineShowStatus(`Kategorie "${name}" erstellt`, 'success');
-  } catch (error) {
-    bausteineShowStatus('Fehler: ' + error.message, 'error');
-  }
-});
-
-document.getElementById('bausteineCloseBausteinModal').addEventListener('click', () => {
-  document.getElementById('bausteineNewBausteinModal').classList.remove('active');
-});
-
-document.getElementById('bausteineCreateBausteinBtn').addEventListener('click', async () => {
-  const name = document.getElementById('bausteineNewBausteinName').value.trim();
-  if (!name || !bausteineCategoryForNewBaustein) return;
-
-  try {
-    const result = await ipcRenderer.invoke('create-baustein', bausteineCategoryForNewBaustein, {
-      name,
-      standardText: 'Aufklärungstext hier eingeben...',
-      keywords: []
-    });
-    await loadBausteineView();
-    document.getElementById('bausteineNewBausteinModal').classList.remove('active');
-    bausteineShowStatus(`Baustein "${name}" erstellt`, 'success');
-
-    bausteineOpenBausteinId = result.baustein.id;
-    renderBausteineCategories();
-  } catch (error) {
-    bausteineShowStatus('Fehler: ' + error.message, 'error');
-  }
-});
-
-// Modal Enter key handlers
-document.getElementById('bausteineNewCategoryName').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') document.getElementById('bausteineCreateCategoryBtn').click();
-});
-
-document.getElementById('bausteineNewBausteinName').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') document.getElementById('bausteineCreateBausteinBtn').click();
-});
-
-// Bausteine Unsaved Changes Modal handlers
-document.getElementById('bausteineSaveAndContinue').addEventListener('click', async () => {
-  try {
-    await ipcRenderer.invoke('save-bausteine-with-categories', bausteineData);
-    bausteineHasUnsavedChanges = false;
-    document.getElementById('bausteineSaveBtn').disabled = true;
-    document.getElementById('bausteineUnsavedModal').classList.remove('active');
-  } catch (error) {
-    bausteineShowStatus('Fehler beim Speichern: ' + error.message, 'error');
-  }
-});
-
-document.getElementById('bausteineDiscardChanges').addEventListener('click', async () => {
-  bausteineHasUnsavedChanges = false;
-  await loadBausteineView();
-  document.getElementById('bausteineUnsavedModal').classList.remove('active');
-});
-
-document.getElementById('bausteineCloseUnsavedModal').addEventListener('click', () => {
-  document.getElementById('bausteineUnsavedModal').classList.remove('active');
-});
-
 // ===========================================
 // Settings Tour Button
 // ===========================================
@@ -2905,24 +2353,6 @@ function createSettingsTour() {
         popover: {
           title: 'Stimmprofile',
           description: 'Mit Stimmprofilen erkennt DentDoc verschiedene Sprecher automatisch. So wird klar, wer was gesagt hat.',
-          side: 'top',
-          align: 'start'
-        }
-      },
-      {
-        element: '#settings-section-bausteine-path',
-        popover: {
-          title: 'Bausteine',
-          description: 'Bausteine sind vordefinierte Textvorlagen, die automatisch in Ihre Dokumentation eingefügt werden können.',
-          side: 'top',
-          align: 'start'
-        }
-      },
-      {
-        element: '#settings-section-docmode',
-        popover: {
-          title: 'Dokumentations-Modus',
-          description: 'Single Prompt: Schnelle Dokumentation. Agent-Kette: Erkennt Behandlungstypen und fügt passende Bausteine automatisch ein.',
           side: 'top',
           align: 'start'
         }
@@ -3143,591 +2573,11 @@ async function loadViewContent(viewName) {
     case 'profiles':
       loadProfilesView();
       break;
-    case 'bausteine':
-      loadBausteineView();
-      break;
-    case 'textbausteine':
-      loadTextbausteineView();
-      break;
-    case 'themen':
-      loadThemenView();
-      break;
     case 'subscription':
       loadSubscriptionView();
       break;
   }
 }
-
-// =============================================================================
-// TEXTBAUSTEINE V1.2 VIEW
-// =============================================================================
-
-let textbausteineData = {};
-let textbausteineEditingKey = null;
-
-async function loadTextbausteineView() {
-  const statusEl = document.getElementById('textbausteineStatus');
-  const listEl = document.getElementById('textbausteineList');
-  const emptyEl = document.getElementById('textbausteineEmpty');
-
-  // Show loading
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lade Einstellungen vom Server...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-    if (!token) {
-      statusEl.innerHTML = '<span class="status-indicator error"></span><span>Nicht angemeldet</span>';
-      return;
-    }
-
-    const response = await ipcRenderer.invoke('api-get-praxis-einstellungen', token);
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    textbausteineData = response.einstellungen?.textbausteine || {};
-
-    const isDefault = response.isDefault;
-    const count = Object.keys(textbausteineData).length;
-
-    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Textbausteine geladen${isDefault ? ' (Standard)' : ''}</span>`;
-
-    renderTextbausteine();
-  } catch (error) {
-    console.error('Error loading Textbausteine:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler beim Laden: ${error.message}</span>`;
-  }
-}
-
-function renderTextbausteine() {
-  const listEl = document.getElementById('textbausteineList');
-  const emptyEl = document.getElementById('textbausteineEmpty');
-
-  const keys = Object.keys(textbausteineData);
-
-  if (keys.length === 0) {
-    emptyEl.style.display = 'flex';
-    // Clear any existing items
-    listEl.querySelectorAll('.textbausteine-item').forEach(el => el.remove());
-    return;
-  }
-
-  emptyEl.style.display = 'none';
-
-  // Clear existing items
-  listEl.querySelectorAll('.textbausteine-item').forEach(el => el.remove());
-
-  // Add items
-  keys.sort().forEach(key => {
-    const text = textbausteineData[key];
-    const item = document.createElement('div');
-    item.className = 'textbausteine-item';
-    item.innerHTML = `
-      <div class="textbausteine-item-header">
-        <span class="textbausteine-item-key">${escapeHtml(key)}</span>
-        <div class="textbausteine-item-actions">
-          <button class="edit" data-key="${escapeHtml(key)}">Bearbeiten</button>
-          <button class="delete" data-key="${escapeHtml(key)}">Löschen</button>
-        </div>
-      </div>
-      <div class="textbausteine-item-content">${escapeHtml(text)}</div>
-    `;
-    listEl.appendChild(item);
-  });
-
-  // Add event listeners
-  listEl.querySelectorAll('.textbausteine-item-actions .edit').forEach(btn => {
-    btn.addEventListener('click', () => openTextbausteineModal(btn.dataset.key));
-  });
-
-  listEl.querySelectorAll('.textbausteine-item-actions .delete').forEach(btn => {
-    btn.addEventListener('click', () => deleteTextbaustein(btn.dataset.key));
-  });
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function openTextbausteineModal(key = null) {
-  const modal = document.getElementById('textbausteineModal');
-  const titleEl = document.getElementById('textbausteineModalTitle');
-  const keyInput = document.getElementById('textbausteineKey');
-  const textInput = document.getElementById('textbausteineText');
-
-  textbausteineEditingKey = key;
-
-  if (key) {
-    titleEl.textContent = 'Textbaustein bearbeiten';
-    keyInput.value = key;
-    keyInput.disabled = true;
-    textInput.value = textbausteineData[key] || '';
-  } else {
-    titleEl.textContent = 'Neuer Textbaustein';
-    keyInput.value = '';
-    keyInput.disabled = false;
-    textInput.value = '';
-  }
-
-  modal.classList.add('active');
-  if (!key) {
-    keyInput.focus();
-  } else {
-    textInput.focus();
-  }
-}
-
-function closeTextbausteineModal() {
-  const modal = document.getElementById('textbausteineModal');
-  modal.classList.remove('active');
-  textbausteineEditingKey = null;
-}
-
-async function saveTextbaustein() {
-  const keyInput = document.getElementById('textbausteineKey');
-  const textInput = document.getElementById('textbausteineText');
-  const statusEl = document.getElementById('textbausteineStatus');
-
-  const key = keyInput.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
-  const text = textInput.value.trim();
-
-  if (!key) {
-    alert('Bitte geben Sie einen Schlüssel ein.');
-    return;
-  }
-
-  if (!text) {
-    alert('Bitte geben Sie einen Text ein.');
-    return;
-  }
-
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Speichere...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-    const response = await ipcRenderer.invoke('api-add-textbaustein', token, key, text);
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    textbausteineData = response.einstellungen?.textbausteine || {};
-    renderTextbausteine();
-    closeTextbausteineModal();
-
-    const count = Object.keys(textbausteineData).length;
-    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Textbausteine - Gespeichert!</span>`;
-  } catch (error) {
-    console.error('Error saving Textbaustein:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
-  }
-}
-
-async function deleteTextbaustein(key) {
-  const confirmed = await ipcRenderer.invoke('confirm-delete-textbaustein', key);
-  if (!confirmed) {
-    return;
-  }
-
-  const statusEl = document.getElementById('textbausteineStatus');
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lösche...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-    const response = await ipcRenderer.invoke('api-remove-textbaustein', token, key);
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    textbausteineData = response.einstellungen?.textbausteine || {};
-    renderTextbausteine();
-
-    const count = Object.keys(textbausteineData).length;
-    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Textbausteine - Gelöscht!</span>`;
-  } catch (error) {
-    console.error('Error deleting Textbaustein:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
-  }
-}
-
-async function resetTextbausteine() {
-  const confirmed = await ipcRenderer.invoke('confirm-reset-textbausteine');
-  if (!confirmed) {
-    return;
-  }
-
-  const statusEl = document.getElementById('textbausteineStatus');
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Setze zurück...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-    const response = await ipcRenderer.invoke('api-reset-praxis-einstellungen', token);
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    textbausteineData = response.einstellungen?.textbausteine || {};
-    renderTextbausteine();
-
-    statusEl.innerHTML = '<span class="status-indicator"></span><span>Auf Standard zurückgesetzt</span>';
-  } catch (error) {
-    console.error('Error resetting:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
-  }
-}
-
-// Textbausteine Event Listeners
-document.getElementById('textbausteineAddBtn')?.addEventListener('click', () => openTextbausteineModal());
-document.getElementById('textbausteineAddFirstBtn')?.addEventListener('click', () => openTextbausteineModal());
-document.getElementById('textbausteineRefreshBtn')?.addEventListener('click', loadTextbausteineView);
-document.getElementById('textbausteineResetBtn')?.addEventListener('click', resetTextbausteine);
-document.getElementById('textbausteineSaveBtn')?.addEventListener('click', saveTextbaustein);
-document.getElementById('textbausteineCloseModal')?.addEventListener('click', closeTextbausteineModal);
-
-// Close modal on overlay click
-document.getElementById('textbausteineModal')?.addEventListener('click', (e) => {
-  if (e.target.classList.contains('modal-overlay')) {
-    closeTextbausteineModal();
-  }
-});
-
-// Close modal on Escape
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    const modal = document.getElementById('textbausteineModal');
-    if (modal?.classList.contains('active')) {
-      closeTextbausteineModal();
-    }
-    const themenModal = document.getElementById('themenModal');
-    if (themenModal?.classList.contains('active')) {
-      closeThemenModal();
-    }
-  }
-});
-
-// =============================================================================
-// THEMEN-ANPASSUNGEN V1.2
-// =============================================================================
-
-// =============================================================================
-// THEMEN VIEW V2 (Vollständig dynamisch)
-// =============================================================================
-
-// Themen-Daten (neues Format mit themen-Array)
-let themenData = [];
-let defaultThemen = [];
-let editingThemaName = null; // Name des aktuell bearbeiteten Themas (null = neues Thema)
-
-async function loadThemenView() {
-  const statusEl = document.getElementById('themenStatus');
-  const listEl = document.getElementById('themenList');
-  const emptyEl = document.getElementById('themenEmpty');
-  const countEl = document.getElementById('themenCount');
-
-  // Show loading
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lade Einstellungen vom Server...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-    if (!token) {
-      statusEl.innerHTML = '<span class="status-indicator error"></span><span>Nicht angemeldet</span>';
-      return;
-    }
-
-    const response = await ipcRenderer.invoke('api-get-praxis-einstellungen', token);
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    // Neues Format: themen-Array
-    themenData = response.einstellungen?.themen || [];
-    defaultThemen = response.defaultThemen || [];
-
-    const isDefault = response.isDefault;
-    const count = themenData.length;
-
-    statusEl.innerHTML = `<span class="status-indicator"></span><span>${count} Themen aktiv${isDefault ? ' (Standard)' : ''}</span>`;
-    countEl.textContent = `${count} Themen`;
-
-    renderThemen();
-  } catch (error) {
-    console.error('Error loading Themen:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler beim Laden: ${error.message}</span>`;
-  }
-}
-
-function renderThemen() {
-  const listEl = document.getElementById('themenList');
-  const emptyEl = document.getElementById('themenEmpty');
-
-  // Clear existing items
-  listEl.querySelectorAll('.themen-item').forEach(el => el.remove());
-
-  if (themenData.length === 0) {
-    emptyEl.style.display = 'block';
-    return;
-  }
-
-  emptyEl.style.display = 'none';
-
-  // Render all themen
-  themenData.forEach(thema => {
-    const hasPflichtfelder = thema.pflichtfelder && thema.pflichtfelder.length > 0;
-    const hasHinweis = !!thema.hinweistext;
-    const hasAntiSplit = thema.antiSplit && thema.antiSplit.length > 0;
-
-    const item = document.createElement('div');
-    item.className = 'themen-item' + (hasPflichtfelder ? ' has-anpassung' : '');
-
-    let contentHtml = '';
-
-    // Pflichtfelder
-    if (hasPflichtfelder) {
-      const pflichtfelderHtml = thema.pflichtfelder
-        .map(pf => `<span class="pflichtfeld">${escapeHtml(pf)}</span>`)
-        .join('');
-      contentHtml += `<div class="themen-item-pflichtfelder">${pflichtfelderHtml}</div>`;
-    }
-
-    // Hinweistext
-    if (hasHinweis) {
-      contentHtml += `<div class="themen-item-hinweis">${escapeHtml(thema.hinweistext)}</div>`;
-    }
-
-    // Anti-Split
-    if (hasAntiSplit) {
-      contentHtml += `<div class="themen-item-antisplit">Anti-Split: ${thema.antiSplit.map(s => escapeHtml(s)).join(', ')}</div>`;
-    }
-
-    if (!contentHtml) {
-      contentHtml = '<div class="themen-item-no-config">Keine Pflichtfelder konfiguriert</div>';
-    }
-
-    item.innerHTML = `
-      <div class="themen-item-header">
-        <span class="themen-item-name">
-          ${escapeHtml(thema.name)}
-          ${hasPflichtfelder ? '<span class="badge">Konfiguriert</span>' : ''}
-        </span>
-        <div class="themen-item-actions">
-          <button class="edit" data-thema="${escapeHtml(thema.name)}">Bearbeiten</button>
-          <button class="delete" data-thema="${escapeHtml(thema.name)}">Löschen</button>
-        </div>
-      </div>
-      <div class="themen-item-content">${contentHtml}</div>
-    `;
-    listEl.appendChild(item);
-  });
-
-  // Add event listeners
-  listEl.querySelectorAll('.themen-item-actions .edit').forEach(btn => {
-    btn.addEventListener('click', () => openThemenModal(btn.dataset.thema));
-  });
-
-  listEl.querySelectorAll('.themen-item-actions .delete').forEach(btn => {
-    btn.addEventListener('click', () => deleteThema(btn.dataset.thema));
-  });
-}
-
-function openThemenModal(themaName = null) {
-  const modal = document.getElementById('themenModal');
-  const titleEl = document.getElementById('themenModalTitle');
-  const themaNameInput = document.getElementById('themenModalThemaName');
-  const pflichtfelderInput = document.getElementById('themenPflichtfelder');
-  const hinweistextInput = document.getElementById('themenHinweistext');
-  const antiSplitInput = document.getElementById('themenAntiSplit');
-
-  editingThemaName = themaName;
-
-  if (themaName) {
-    // Bearbeiten
-    const thema = themenData.find(t => t.name === themaName);
-    titleEl.textContent = 'Thema bearbeiten';
-    themaNameInput.value = thema?.name || '';
-    themaNameInput.disabled = true; // Name kann nicht geändert werden beim Bearbeiten
-    pflichtfelderInput.value = (thema?.pflichtfelder || []).join(', ');
-    hinweistextInput.value = thema?.hinweistext || '';
-    antiSplitInput.value = (thema?.antiSplit || []).join(', ');
-  } else {
-    // Neues Thema
-    titleEl.textContent = 'Neues Thema hinzufügen';
-    themaNameInput.value = '';
-    themaNameInput.disabled = false;
-    pflichtfelderInput.value = '';
-    hinweistextInput.value = '';
-    antiSplitInput.value = '';
-  }
-
-  modal.classList.add('active');
-  if (themaName) {
-    pflichtfelderInput.focus();
-  } else {
-    themaNameInput.focus();
-  }
-}
-
-function closeThemenModal() {
-  const modal = document.getElementById('themenModal');
-  modal.classList.remove('active');
-  editingThemaName = null;
-}
-
-async function saveThema() {
-  const themaNameInput = document.getElementById('themenModalThemaName');
-  const pflichtfelderInput = document.getElementById('themenPflichtfelder');
-  const hinweistextInput = document.getElementById('themenHinweistext');
-  const antiSplitInput = document.getElementById('themenAntiSplit');
-  const statusEl = document.getElementById('themenStatus');
-
-  const name = themaNameInput.value.trim();
-  const pflichtfelderRaw = pflichtfelderInput.value.trim();
-  const hinweistext = hinweistextInput.value.trim();
-  const antiSplitRaw = antiSplitInput.value.trim();
-
-  if (!name) {
-    alert('Bitte geben Sie einen Namen für das Thema ein.');
-    return;
-  }
-
-  // Check for duplicate name when creating new
-  if (!editingThemaName && themenData.some(t => t.name === name)) {
-    alert('Ein Thema mit diesem Namen existiert bereits.');
-    return;
-  }
-
-  // Parse arrays
-  const pflichtfelder = pflichtfelderRaw
-    .split(',')
-    .map(f => f.trim())
-    .filter(f => f.length > 0);
-
-  const antiSplit = antiSplitRaw
-    .split(',')
-    .map(f => f.trim())
-    .filter(f => f.length > 0);
-
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Speichere...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-
-    // Build thema object
-    const thema = {
-      name,
-      pflichtfelder,
-      hinweistext: hinweistext || undefined,
-      antiSplit: antiSplit.length > 0 ? antiSplit : undefined
-    };
-
-    const response = await ipcRenderer.invoke('api-update-praxis-einstellungen', token, {
-      addThema: thema
-    });
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    themenData = response.einstellungen?.themen || [];
-    renderThemen();
-    closeThemenModal();
-
-    const count = themenData.length;
-    document.getElementById('themenCount').textContent = `${count} Themen`;
-    statusEl.innerHTML = `<span class="status-indicator"></span><span>Gespeichert!</span>`;
-  } catch (error) {
-    console.error('Error saving Thema:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
-  }
-}
-
-async function deleteThema(themaName) {
-  const confirmed = await ipcRenderer.invoke('confirm-delete-thema', themaName);
-  if (!confirmed) {
-    return;
-  }
-
-  const statusEl = document.getElementById('themenStatus');
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Lösche...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-    const response = await ipcRenderer.invoke('api-update-praxis-einstellungen', token, {
-      removeThema: themaName
-    });
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    themenData = response.einstellungen?.themen || [];
-    renderThemen();
-
-    const count = themenData.length;
-    document.getElementById('themenCount').textContent = `${count} Themen`;
-    statusEl.innerHTML = `<span class="status-indicator"></span><span>Gelöscht!</span>`;
-  } catch (error) {
-    console.error('Error deleting Thema:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
-  }
-}
-
-async function resetThemen() {
-  const confirmed = await ipcRenderer.invoke('confirm-reset-themen');
-  if (!confirmed) {
-    return;
-  }
-
-  const statusEl = document.getElementById('themenStatus');
-  statusEl.innerHTML = '<span class="status-indicator loading"></span><span>Setze zurück...</span>';
-
-  try {
-    const token = await ipcRenderer.invoke('get-token');
-    const response = await ipcRenderer.invoke('api-reset-praxis-einstellungen', token);
-
-    if (response.error) {
-      statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${response.error}</span>`;
-      return;
-    }
-
-    themenData = response.einstellungen?.themen || [];
-    renderThemen();
-
-    const count = themenData.length;
-    document.getElementById('themenCount').textContent = `${count} Themen`;
-    statusEl.innerHTML = '<span class="status-indicator"></span><span>Auf Standard zurückgesetzt</span>';
-  } catch (error) {
-    console.error('Error resetting:', error);
-    statusEl.innerHTML = `<span class="status-indicator error"></span><span>Fehler: ${error.message}</span>`;
-  }
-}
-
-// Themen Event Listeners
-document.getElementById('themenRefreshBtn')?.addEventListener('click', loadThemenView);
-document.getElementById('themenResetBtn')?.addEventListener('click', resetThemen);
-document.getElementById('themenAddBtn')?.addEventListener('click', () => openThemenModal(null));
-document.getElementById('themenSaveBtn')?.addEventListener('click', saveThema);
-document.getElementById('themenCloseModal')?.addEventListener('click', closeThemenModal);
-
-// Close modal on overlay click
-document.getElementById('themenModal')?.addEventListener('click', (e) => {
-  if (e.target.classList.contains('modal-overlay')) {
-    closeThemenModal();
-  }
-});
-
 
 // =============================================================================
 // SPEAKER OPTIMIZATION

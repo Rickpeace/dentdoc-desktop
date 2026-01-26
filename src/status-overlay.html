@@ -420,80 +420,6 @@
       box-shadow: none;
     }
 
-    /* Shortening buttons - smaller compact style */
-    .shortening-section {
-      display: none;
-      margin-top: var(--space-4);
-      padding-top: var(--space-4);
-      border-top: 1px solid var(--glass-border);
-      position: relative;
-      z-index: 1;
-    }
-
-    .shortening-section.visible {
-      display: block;
-    }
-
-    .shortening-label {
-      font-size: 0.6875rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: var(--space-2);
-    }
-
-    .shortening-buttons {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--space-2);
-    }
-
-    .shortening-btn {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      color: var(--text-secondary);
-      padding: var(--space-2) var(--space-3);
-      border-radius: var(--radius-md);
-      font-size: 0.75rem;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-      -webkit-app-region: no-drag;
-    }
-
-    .shortening-btn:hover {
-      background: var(--glass-bg-hover);
-      border-color: var(--glass-border-hover);
-      color: var(--text-primary);
-    }
-
-    .shortening-btn.copied {
-      background: rgba(34, 197, 94, 0.15);
-      border-color: rgba(34, 197, 94, 0.4);
-      color: var(--success-500);
-    }
-
-    .shortening-btn .short-icon {
-      font-size: 0.875rem;
-    }
-
-    [data-theme="light"] .shortening-btn {
-      background: #ffffff;
-      border-color: #e5e7eb;
-    }
-
-    [data-theme="light"] .shortening-btn:hover {
-      background: #f9fafb;
-      border-color: #fdba74;
-    }
-
-    [data-theme="light"] .shortening-btn.copied {
-      background: #f0fdf4;
-      border-color: #bbf7d0;
-    }
-
     /* Speaker Optimization Section */
     .optimization-section {
       margin-top: var(--space-3);
@@ -896,37 +822,6 @@
         <div class="btn-status">✓</div>
       </button>
 
-      <!-- Shortening buttons section -->
-      <div id="shorteningSection" class="shortening-section">
-        <div class="shortening-label">Kürzungen kopieren</div>
-        <div class="shortening-buttons">
-          <button id="copyKeywords90" class="shortening-btn" title="~90% kürzer - Nur Stichworte">
-            <span class="short-icon">⚡</span>
-            <span>Stichworte</span>
-          </button>
-          <button id="copyChef70" class="shortening-btn" title="~70% kürzer - Chef ultra">
-            <span class="short-icon">👨‍⚕️</span>
-            <span>Chef Ultra</span>
-          </button>
-          <button id="copyChef50" class="shortening-btn" title="~50% kürzer - Chef">
-            <span class="short-icon">📊</span>
-            <span>Chef</span>
-          </button>
-          <button id="copyPvs40" class="shortening-btn" title="~40% kürzer - PVS Standard">
-            <span class="short-icon">🏥</span>
-            <span>PVS</span>
-          </button>
-          <button id="copyZfa30" class="shortening-btn" title="~30% kürzer - ZFA Alltag">
-            <span class="short-icon">📝</span>
-            <span>ZFA</span>
-          </button>
-          <button id="copyNormalized" class="shortening-btn" title="Sprachlich normalisiert - Gleicher Inhalt">
-            <span class="short-icon">✨</span>
-            <span>Normalisiert</span>
-          </button>
-        </div>
-      </div>
-
       <!-- KZV Documentation Section -->
       <div id="kzvSection" class="kzv-section">
         <div class="kzv-label">KZV-Dokumentation</div>
@@ -1137,7 +1032,6 @@
     let currentDocumentation = null;
     let currentKzvDocumentation = null;
     let currentTranscript = null;
-    let currentShortenings = null;
     let currentReconstructedTranscript = null;
     let currentTranscriptWithSpeakers = null;
     let currentRecognizedSpeakers = [];
@@ -1147,7 +1041,7 @@
     let currentState = null;
     let timerInterval = null;
     let recordingStartTime = null;
-    let lastClickedDoc = null; // Tracks which documentation was last clicked ('summary', 'full', 'keywords90', 'chef70', 'chef50', 'pvs40', 'zfa30', 'normalized')
+    let lastClickedDoc = null; // Tracks which documentation was last clicked ('summary', 'full')
 
     function formatTime(seconds) {
       const mins = Math.floor(seconds / 60);
@@ -1346,7 +1240,6 @@
             currentDocumentation = data.documentation;
             currentKzvDocumentation = data.kzvDocumentation || null;
             currentTranscript = data.transcript;
-            currentShortenings = data.shortenings || null;
             currentReconstructedTranscript = data.reconstructedTranscript || null;
             currentTranscriptWithSpeakers = data.transcriptWithSpeakers || null;
             currentRecognizedSpeakers = data.recognizedSpeakers || [];
@@ -1356,15 +1249,6 @@
             actions.classList.add('visible');
             copySummaryBtn.classList.remove('copied');
             copyFullBtn.classList.remove('copied');
-            // Show shortening buttons if shortenings available
-            const shorteningSection = document.getElementById('shorteningSection');
-            if (currentShortenings) {
-              shorteningSection.classList.add('visible');
-              // Reset all shortening buttons
-              document.querySelectorAll('.shortening-btn').forEach(btn => btn.classList.remove('copied'));
-            } else {
-              shorteningSection.classList.remove('visible');
-            }
 
             // Show KZV section if kzvDocumentation available
             const kzvSection = document.getElementById('kzvSection');
@@ -1507,61 +1391,6 @@
       }
     });
 
-    // Shortening buttons click handlers
-    document.getElementById('copyKeywords90').addEventListener('click', () => {
-      if (currentShortenings?.keywords90) {
-        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.keywords90);
-        showCopied(document.getElementById('copyKeywords90'));
-        lastClickedDoc = 'keywords90';
-        saveLastClickedDoc();
-      }
-    });
-
-    document.getElementById('copyChef70').addEventListener('click', () => {
-      if (currentShortenings?.chef70) {
-        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.chef70);
-        showCopied(document.getElementById('copyChef70'));
-        lastClickedDoc = 'chef70';
-        saveLastClickedDoc();
-      }
-    });
-
-    document.getElementById('copyChef50').addEventListener('click', () => {
-      if (currentShortenings?.chef50) {
-        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.chef50);
-        showCopied(document.getElementById('copyChef50'));
-        lastClickedDoc = 'chef50';
-        saveLastClickedDoc();
-      }
-    });
-
-    document.getElementById('copyPvs40').addEventListener('click', () => {
-      if (currentShortenings?.pvs40) {
-        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.pvs40);
-        showCopied(document.getElementById('copyPvs40'));
-        lastClickedDoc = 'pvs40';
-        saveLastClickedDoc();
-      }
-    });
-
-    document.getElementById('copyZfa30').addEventListener('click', () => {
-      if (currentShortenings?.zfa30) {
-        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.zfa30);
-        showCopied(document.getElementById('copyZfa30'));
-        lastClickedDoc = 'zfa30';
-        saveLastClickedDoc();
-      }
-    });
-
-    document.getElementById('copyNormalized').addEventListener('click', () => {
-      if (currentShortenings?.normalized) {
-        ipcRenderer.invoke('copy-to-clipboard', currentShortenings.normalized);
-        showCopied(document.getElementById('copyNormalized'));
-        lastClickedDoc = 'normalized';
-        saveLastClickedDoc();
-      }
-    });
-
     // Befund buttons (01-Status / PA-Status)
     // Show tooth chart button - opens visual chart in dashboard
     document.getElementById('show01Status').addEventListener('click', () => {
@@ -1670,30 +1499,6 @@
           }
           textToCopy = fullText.trim();
           btnToHighlight = copyFullBtn;
-          break;
-        case 'keywords90':
-          textToCopy = currentShortenings?.keywords90;
-          btnToHighlight = document.getElementById('copyKeywords90');
-          break;
-        case 'chef70':
-          textToCopy = currentShortenings?.chef70;
-          btnToHighlight = document.getElementById('copyChef70');
-          break;
-        case 'chef50':
-          textToCopy = currentShortenings?.chef50;
-          btnToHighlight = document.getElementById('copyChef50');
-          break;
-        case 'pvs40':
-          textToCopy = currentShortenings?.pvs40;
-          btnToHighlight = document.getElementById('copyPvs40');
-          break;
-        case 'zfa30':
-          textToCopy = currentShortenings?.zfa30;
-          btnToHighlight = document.getElementById('copyZfa30');
-          break;
-        case 'normalized':
-          textToCopy = currentShortenings?.normalized;
-          btnToHighlight = document.getElementById('copyNormalized');
           break;
         case 'kzv':
           textToCopy = currentKzvDocumentation;

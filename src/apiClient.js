@@ -430,381 +430,6 @@ async function getDocumentation(transcriptionId, token) {
 }
 
 /**
- * Generate documentation using V1.1 (experimental)
- * @param {number} transcriptionId - Transcription ID
- * @param {string} token - Auth token
- * @returns {Promise<{documentation: string, transcript: string|null}>}
- */
-async function getDocumentationV1_1(transcriptionId, token) {
-  try {
-    const response = await axios.post(
-      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-v1.1`,
-      {},
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      }
-    );
-
-    if (!response.data.documentation) {
-      throw new Error('NO_DOCUMENTATION');
-    }
-
-    return {
-      documentation: response.data.documentation,
-      transcript: response.data.transcript || null
-    };
-  } catch (error) {
-    console.error('Documentation V1.1 error:', error.response?.data || error.message);
-
-    const serverError = error.response?.data?.error;
-
-    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
-      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
-    }
-
-    if (serverError?.includes('processing') || serverError?.includes('pending')) {
-      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
-    }
-
-    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
-      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
-    }
-
-    if (serverError) {
-      throw new Error(`Fehler: ${serverError}`);
-    }
-
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
-    }
-
-    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
-  }
-}
-
-/**
- * Generate documentation using Agent-Chain (V2) with Bausteine
- * @param {number} transcriptionId - Transcription ID
- * @param {string} token - Auth token
- * @param {Object} bausteine - Bausteine object from settings
- * @returns {Promise<{documentation: string, transcript: string|null}>}
- */
-async function getDocumentationV2(transcriptionId, token, bausteine) {
-  try {
-    const response = await axios.post(
-      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-v2`,
-      { bausteine },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 180000 // 3 minutes timeout for multi-agent processing
-      }
-    );
-
-    if (!response.data.documentation) {
-      throw new Error('NO_DOCUMENTATION');
-    }
-
-    return {
-      documentation: response.data.documentation,
-      transcript: response.data.transcript || null
-    };
-  } catch (error) {
-    console.error('Documentation V2 error:', error.response?.data || error.message);
-
-    const serverError = error.response?.data?.error;
-
-    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
-      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
-    }
-
-    if (serverError?.includes('processing') || serverError?.includes('pending')) {
-      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
-    }
-
-    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
-      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
-    }
-
-    if (serverError) {
-      throw new Error(`Fehler: ${serverError}`);
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
-    }
-
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
-    }
-
-    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
-  }
-}
-
-/**
- * Generate documentation using V1.2 Hybrid (1 API call, 60% cost savings)
- * Now includes 5 shortened versions (parallel generation)
- * @param {number} transcriptionId - Transcription ID
- * @param {string} token - Auth token
- * @param {boolean} runVerifier - Optional: Force verifier check
- * @returns {Promise<{documentation: string, transcript: string|null, meta: object|null, shortenings: object|null}>}
- */
-async function getDocumentationV1_2(transcriptionId, token, runVerifier = false) {
-  try {
-    const response = await axios.post(
-      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-v1.2`,
-      { runVerifier },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 180000 // 3 minutes (now includes 5 shortenings)
-      }
-    );
-
-    if (!response.data.documentation) {
-      throw new Error('NO_DOCUMENTATION');
-    }
-
-    return {
-      documentation: response.data.documentation,
-      transcript: response.data.transcript || null,
-      meta: response.data.meta || null,
-      shortenings: response.data.shortenings || null
-    };
-  } catch (error) {
-    console.error('Documentation V1.2 error:', error.response?.data || error.message);
-
-    const serverError = error.response?.data?.error;
-
-    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
-      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
-    }
-
-    if (serverError?.includes('processing') || serverError?.includes('pending')) {
-      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
-    }
-
-    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
-      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
-    }
-
-    if (serverError) {
-      throw new Error(`Fehler: ${serverError}`);
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
-    }
-
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
-    }
-
-    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
-  }
-}
-
-/**
- * Generate documentation using Megaprompt Pipeline (7-Step, parallel extraction)
- * @param {number} transcriptionId - Transcription ID
- * @param {string} token - Auth token
- * @returns {Promise<{documentation: string, transcript: string|null, meta: object|null}>}
- */
-async function getDocumentationMegaprompt(transcriptionId, token) {
-  try {
-    const response = await axios.post(
-      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-megaprompt`,
-      {},
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 180000 // 3 minutes (more steps, but parallel)
-      }
-    );
-
-    if (!response.data.documentation) {
-      throw new Error('NO_DOCUMENTATION');
-    }
-
-    return {
-      documentation: response.data.documentation,
-      transcript: response.data.transcript || null,
-      meta: response.data.meta || null
-    };
-  } catch (error) {
-    console.error('Documentation Megaprompt error:', error.response?.data || error.message);
-
-    const serverError = error.response?.data?.error;
-
-    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
-      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
-    }
-
-    if (serverError?.includes('processing') || serverError?.includes('pending')) {
-      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
-    }
-
-    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
-      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
-    }
-
-    if (serverError) {
-      throw new Error(`Fehler: ${serverError}`);
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
-    }
-
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
-    }
-
-    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
-  }
-}
-
-/**
- * Generate documentation using Agent-Chain (V2.1) with Bausteine
- * Copy of V2 for development - allows iterating on V2.1 without breaking V2
- * @param {number} transcriptionId - Transcription ID
- * @param {string} token - Auth token
- * @param {Object} bausteine - Bausteine object from settings
- * @returns {Promise<{documentation: string, transcript: string|null}>}
- */
-async function getDocumentationV2_1(transcriptionId, token, bausteine) {
-  try {
-    const response = await axios.post(
-      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-v2.1`,
-      { bausteine },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 180000 // 3 minutes timeout for multi-agent processing
-      }
-    );
-
-    if (!response.data.documentation) {
-      throw new Error('NO_DOCUMENTATION');
-    }
-
-    return {
-      documentation: response.data.documentation,
-      transcript: response.data.transcript || null
-    };
-  } catch (error) {
-    console.error('Documentation V2.1 error:', error.response?.data || error.message);
-
-    const serverError = error.response?.data?.error;
-
-    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
-      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
-    }
-
-    if (serverError?.includes('processing') || serverError?.includes('pending')) {
-      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
-    }
-
-    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
-      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
-    }
-
-    if (serverError) {
-      throw new Error(`Fehler: ${serverError}`);
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
-    }
-
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
-    }
-
-    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
-  }
-}
-
-/**
- * Generate documentation using Agent V2 (2-stage pipeline with GPT-4.1 thinking)
- * Stage 1: Reconstruction - Clean raw transcript to factual work text
- * Stage 2: Documentation - Create final medical record note
- *
- * @param {number} transcriptionId - Transcription ID
- * @param {string} token - Auth token
- * @returns {Promise<{documentation: string, transcript: string|null, reconstructedTranscript: string|null, transcriptWithSpeakers: string|null}>}
- */
-async function getDocumentationAgentV2(transcriptionId, token) {
-  try {
-    const response = await axios.post(
-      `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-agent-v2`,
-      {},
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 180000 // 3 minutes (2 API calls with thinking model)
-      }
-    );
-
-    if (!response.data.documentation) {
-      throw new Error('NO_DOCUMENTATION');
-    }
-
-    return {
-      documentation: response.data.documentation,
-      transcript: response.data.transcript || null,
-      reconstructedTranscript: response.data.reconstructedTranscript || null,
-      transcriptWithSpeakers: response.data.transcriptWithSpeakers || null,
-      recognizedSpeakers: response.data.recognizedSpeakers || [],
-      stages: response.data.stages || null
-    };
-  } catch (error) {
-    console.error('Documentation Agent V2 error:', error.response?.data || error.message);
-
-    const serverError = error.response?.data?.error;
-
-    if (serverError === 'No transcript text available' || error.message === 'NO_DOCUMENTATION') {
-      throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
-    }
-
-    if (serverError?.includes('processing') || serverError?.includes('pending')) {
-      throw new Error('Die Transkription wird noch verarbeitet. Bitte warten Sie einen Moment.');
-    }
-
-    if (serverError?.includes('minutes') || serverError?.includes('Minuten')) {
-      throw new Error('Nicht genügend Minuten übrig. Bitte laden Sie Ihr Guthaben auf.');
-    }
-
-    if (serverError) {
-      throw new Error(`Fehler: ${serverError}`);
-    }
-
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      throw new Error('Die Verarbeitung dauert zu lange. Bitte versuchen Sie es erneut.');
-    }
-
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
-    }
-
-    throw new Error('Dokumentation konnte nicht erstellt werden. Bitte versuchen Sie es erneut.');
-  }
-}
-
-/**
  * Generate documentation using Agent V2.1 (Multi-Agent Pipeline)
  *
  * Pipeline:
@@ -975,123 +600,6 @@ async function submitFeedback(token, category, message) {
   }
 }
 
-// =============================================================================
-// PRAXIS-EINSTELLUNGEN API (V1.2 Hybrid)
-// =============================================================================
-
-/**
- * Get Praxis-Einstellungen (Textbausteine, Themen-Anpassungen, etc.)
- * @param {string} token - Auth token
- * @returns {Promise<{einstellungen: object, isDefault: boolean, availableThemen: string[]}>}
- */
-async function getPraxisEinstellungen(token) {
-  try {
-    const response = await axios.get(
-      `${API_BASE_URL}api/praxis/einstellungen`,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      }
-    );
-    return response.data;
-  } catch (error) {
-    console.error('Get Praxis-Einstellungen error:', error.response?.data || error.message);
-    throw new Error('Einstellungen konnten nicht geladen werden');
-  }
-}
-
-/**
- * Update Praxis-Einstellungen (PATCH - partial update)
- * @param {string} token - Auth token
- * @param {object} updates - Fields to update
- * @returns {Promise<{einstellungen: object, updatedAt: string}>}
- */
-async function updatePraxisEinstellungen(token, updates) {
-  try {
-    const response = await axios.patch(
-      `${API_BASE_URL}api/praxis/einstellungen`,
-      updates,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    return response.data;
-  } catch (error) {
-    console.error('Update Praxis-Einstellungen error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.error || 'Einstellungen konnten nicht gespeichert werden');
-  }
-}
-
-/**
- * Add a Textbaustein
- * @param {string} token - Auth token
- * @param {string} key - Baustein key (e.g. "aufklaerung_standard")
- * @param {string} text - Baustein text
- */
-async function addTextbaustein(token, key, text) {
-  return updatePraxisEinstellungen(token, {
-    addTextbaustein: { key, text }
-  });
-}
-
-/**
- * Remove a Textbaustein
- * @param {string} token - Auth token
- * @param {string} key - Baustein key to remove
- */
-async function removeTextbaustein(token, key) {
-  return updatePraxisEinstellungen(token, {
-    removeTextbaustein: key
-  });
-}
-
-/**
- * Add/Update a Themen-Anpassung
- * @param {string} token - Auth token
- * @param {object} themenAnpassung - { thema, pflichtfelder, hinweistext }
- */
-async function addThemenAnpassung(token, themenAnpassung) {
-  return updatePraxisEinstellungen(token, {
-    addThemenAnpassung: themenAnpassung
-  });
-}
-
-/**
- * Remove a Themen-Anpassung
- * @param {string} token - Auth token
- * @param {string} thema - Thema to remove
- */
-async function removeThemenAnpassung(token, thema) {
-  return updatePraxisEinstellungen(token, {
-    removeThema: thema
-  });
-}
-
-/**
- * Reset Praxis-Einstellungen to defaults
- * @param {string} token - Auth token
- */
-async function resetPraxisEinstellungen(token) {
-  try {
-    const response = await axios.delete(
-      `${API_BASE_URL}api/praxis/einstellungen`,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      }
-    );
-    return response.data;
-  } catch (error) {
-    console.error('Reset Praxis-Einstellungen error:', error.response?.data || error.message);
-    throw new Error('Einstellungen konnten nicht zurückgesetzt werden');
-  }
-}
-
 // ===========================================
 // iPhone Microphone Pairing API
 // ===========================================
@@ -1242,49 +750,6 @@ async function segmentPassages(token, transcriptText, words) {
 
 /**
  * Match documentation sections to audio passages using AI
- * This creates clickable links from documentation text to audio clips.
- *
- * NEUER PASSAGEN-BASIERTER ANSATZ:
- * - Statt einzelne Wörter zu matchen (fehleranfällig wegen Transkriptions-Typos)
- * - Verknüpfen wir Dokumentations-Abschnitte mit semantischen Audio-Passagen
- *
- * @param {string} token - Auth token
- * @param {string} documentation - Generated documentation text
- * @param {Array} passages - Semantic passages from segmentPassages()
- * @returns {Promise<Object>} { links: DocLink[], passages: Passage[] }
- */
-async function matchDocToAudio(token, documentation, passages) {
-  try {
-    console.log('[apiClient] Matching documentation to audio passages...');
-    console.log('[apiClient] Documentation length:', documentation?.length || 0);
-    console.log('[apiClient] Passages count:', passages?.length || 0);
-
-    if (!passages || passages.length === 0) {
-      console.log('[apiClient] No passages provided, skipping match');
-      return { links: [], passages: [] };
-    }
-
-    const response = await axios.post(
-      `${API_BASE_URL}api/match-doc-to-audio`,
-      { documentation, passages },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 60000 // 60s timeout for AI processing
-      }
-    );
-
-    console.log('[apiClient] Doc links found:', response.data.links?.length || 0);
-    return response.data;
-  } catch (error) {
-    console.error('[apiClient] Match doc to audio error:', error.response?.data || error.message);
-    // Return empty links on error - don't fail the whole process
-    return { links: [], passages: passages || [] };
-  }
-}
-
 /**
  * Extract topic segments from transcript using AI
  * @param {string} token - Auth token
@@ -1319,6 +784,43 @@ async function extractTopicSegments(token, transcriptText, words) {
   }
 }
 
+/**
+ * Upload debug logs to backend for remote troubleshooting
+ * @param {string} token - Auth token
+ * @param {Object} store - electron-store instance
+ * @param {string} logs - The log content to upload
+ * @param {string} appVersion - App version
+ * @returns {Promise<Object>} { success: boolean, debugLogId: number }
+ */
+async function uploadDebugLogs(token, store, logs, appVersion) {
+  try {
+    const deviceId = getDeviceId(store);
+    const deviceInfo = getDeviceInfo();
+
+    const response = await axios.post(
+      `${API_BASE_URL}api/debug-logs`,
+      {
+        deviceId,
+        hostname: deviceInfo.hostname,
+        appVersion,
+        logs,
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Upload debug logs error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Debug-Log Upload fehlgeschlagen');
+  }
+}
+
 module.exports = {
   login,
   logout,
@@ -1326,12 +828,6 @@ module.exports = {
   getUser,
   uploadAudio,
   getDocumentation,
-  getDocumentationV1_1,
-  getDocumentationV1_2,
-  getDocumentationV2,
-  getDocumentationV2_1,
-  getDocumentationMegaprompt,
-  getDocumentationAgentV2,
   getDocumentationAgentV2_1,
   updateSpeakerMapping,
   getTranscription,
@@ -1340,14 +836,6 @@ module.exports = {
   submitFeedback,
   getDeviceId,
   getDeviceInfo,
-  // Praxis-Einstellungen (V1.2)
-  getPraxisEinstellungen,
-  updatePraxisEinstellungen,
-  addTextbaustein,
-  removeTextbaustein,
-  addThemenAnpassung,
-  removeThemenAnpassung,
-  resetPraxisEinstellungen,
   // iPhone Pairing
   iphonePairStart,
   iphonePairStatus,
@@ -1355,7 +843,8 @@ module.exports = {
   iphoneUnpair,
   // Topic Extraction
   extractTopicSegments,
-  // Passage Segmentation & Doc-Audio Matching
+  // Passage Segmentation
   segmentPassages,
-  matchDocToAudio,
+  // Debug Logs
+  uploadDebugLogs,
 };

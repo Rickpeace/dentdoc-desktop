@@ -17,7 +17,7 @@ class SetupWizard {
       microphoneId: null, // Windows device name for FFmpeg
       microphoneSource: 'desktop', // 'desktop' or 'iphone'
       shortcut: 'F9',
-      docMode: 'agent-v2',
+      docMode: 'agent-v2.1',
       autoExport: true,
       transcriptPath: '',
       keepAudio: true, // Enabled by default for full functionality
@@ -60,7 +60,7 @@ class SetupWizard {
       this.settings.transcriptPath = settings.transcriptPath || '';
       this.settings.profilesPath = settings.profilesPath || '';
       this.settings.microphoneId = settings.microphoneId || null; // Windows device name
-      this.settings.docMode = settings.docMode || 'agent-v2';
+      this.settings.docMode = settings.docMode || 'agent-v2.1';
       this.settings.autoExport = settings.autoExport !== false;
       this.settings.keepAudio = settings.keepAudio !== false; // Default true
 
@@ -150,15 +150,7 @@ class SetupWizard {
     document.getElementById('wizardChangeShortcutBtn')?.addEventListener('click', () => this.startShortcutRecording());
     document.addEventListener('keydown', (e) => this.handleShortcutKeydown(e));
 
-    // AI Mode
-    document.querySelectorAll('.wizard-option[data-mode]').forEach(option => {
-      option.addEventListener('click', () => {
-        document.querySelectorAll('.wizard-option[data-mode]').forEach(o => o.classList.remove('selected'));
-        option.classList.add('selected');
-        this.settings.docMode = option.dataset.mode;
-        console.log('[Wizard] AI Mode selected:', this.settings.docMode);
-      });
-    });
+    // AI Mode - always agent-v2.1, no selection needed
 
     // Toggles
     document.getElementById('wizardTranscriptToggle')?.addEventListener('click', () => {
@@ -1275,21 +1267,10 @@ class SetupWizard {
     // Update summary on final step
     if (this.currentStep !== this.totalSteps - 1) return;
 
-    const modeNames = {
-      'single': 'Single Prompt',
-      'single-v1.1': 'Single Prompt V1.1',
-      'hybrid-v1.2': 'Hybrid V1.2',
-      'megaprompt': 'Megaprompt',
-      'agent-chain': 'Agent-Kette',
-      'agent-v2': 'Agent V2 (Empfohlen)',
-      'agent-v2.1': 'Agent V2.1 (Experimental)'
-    };
-
-    console.log('[Wizard Summary] Current docMode:', this.settings.docMode);
     const items = {
       'summaryMic': this.getMicrophoneName(),
       'summaryShortcut': this.settings.shortcut,
-      'summaryMode': modeNames[this.settings.docMode] || this.settings.docMode,
+      'summaryMode': 'Agent V2.1',  // Only mode available
       'summaryTranscripts': this.settings.autoExport ? 'Aktiviert' : 'Deaktiviert',
       'summaryAudio': this.settings.keepAudio ? 'Aktiviert' : 'Deaktiviert'
     };
@@ -1425,7 +1406,7 @@ async function restartSetupWizard() {
       window.setupWizard.settings = {
         microphoneId: null,
         shortcut: 'F9',
-        docMode: 'agent-v2',
+        docMode: 'agent-v2.1',
         autoExport: true,
         transcriptPath: '',
         keepAudio: true,
@@ -1438,7 +1419,7 @@ async function restartSetupWizard() {
       window.setupWizard.settings.transcriptPath = settings.transcriptPath || '';
       window.setupWizard.settings.profilesPath = settings.profilesPath || '';
       window.setupWizard.settings.microphoneId = settings.microphoneId || null;
-      window.setupWizard.settings.docMode = settings.docMode || 'agent-v2';
+      window.setupWizard.settings.docMode = settings.docMode || 'agent-v2.1';
       window.setupWizard.settings.autoExport = settings.autoExport !== false;
       window.setupWizard.settings.keepAudio = settings.keepAudio !== false;
 
@@ -1449,10 +1430,7 @@ async function restartSetupWizard() {
       // Update path displays
       window.setupWizard.updatePathDisplays();
 
-      // Reset AI mode selection
-      document.querySelectorAll('.wizard-option[data-mode]').forEach(o => o.classList.remove('selected'));
-      const selectedMode = document.querySelector(`.wizard-option[data-mode="${window.setupWizard.settings.docMode}"]`);
-      if (selectedMode) selectedMode.classList.add('selected');
+      // AI mode is always agent-v2.1, no selection UI needed
 
       // Reset toggles
       const transcriptToggle = document.getElementById('wizardTranscriptToggle');

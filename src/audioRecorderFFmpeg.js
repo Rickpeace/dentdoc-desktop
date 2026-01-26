@@ -104,6 +104,51 @@ function detectMicType(microphoneName) {
 }
 
 /**
+ * Warm up microphone before recording
+ * Some USB/Bluetooth devices (like Jabra Speak) start in muted state
+ * and need to be "woken up" by briefly opening the audio stream
+ * @param {string} deviceName - Device name to warm up
+ * @param {number} durationMs - Duration to keep mic open (default 400ms)
+ * @returns {Promise<void>}
+ */
+async function warmupMicrophone(deviceName, durationMs = 400) {
+  return new Promise((resolve) => {
+    const ffmpegPathLocal = getFFmpegPath();
+
+    // Use WASAPI for warmup (most compatible)
+    const args = [
+      '-f', 'wasapi',
+      '-i', 'default',
+      '-t', (durationMs / 1000).toString(),
+      '-f', 'null',
+      '-'
+    ];
+
+    console.log(`[Recorder] Warming up microphone for ${durationMs}ms...`);
+
+    const warmupProcess = spawn(ffmpegPathLocal, args);
+
+    warmupProcess.on('close', () => {
+      console.log('[Recorder] Microphone warmup complete');
+      resolve();
+    });
+
+    warmupProcess.on('error', (err) => {
+      console.warn('[Recorder] Microphone warmup error (non-fatal):', err.message);
+      resolve(); // Continue anyway
+    });
+
+    // Safety timeout in case FFmpeg hangs
+    setTimeout(() => {
+      try {
+        warmupProcess.kill('SIGTERM');
+      } catch (e) {}
+      resolve();
+    }, durationMs + 500);
+  });
+}
+
+/**
  * Downsample WAV file to 16kHz for VAD/transcription
  * Recording is done at 48kHz for stability, then downsampled
  * @param {string} inputPath - Path to 48kHz WAV file
@@ -438,6 +483,13 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
       }
 
       let result;
+
+      // ========================================================================
+      // MICROPHONE WARMUP - Wake up USB/Bluetooth devices that start muted
+      // ========================================================================
+      // Some devices (like Jabra Speak) start in muted state and need to be
+      // "woken up" by briefly opening the audio stream before actual recording
+      await warmupMicrophone(deviceName, 400);
 
       // ========================================================================
       // RECORDING STRATEGY WITH AUTOMATIC FALLBACK

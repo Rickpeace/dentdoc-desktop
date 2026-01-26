@@ -77,31 +77,6 @@
           </svg>
           <span>Stimmprofile</span>
         </a>
-        <a href="#" class="nav-item" data-view="bausteine" id="nav-bausteine">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="7" height="7"/>
-            <rect x="14" y="3" width="7" height="7"/>
-            <rect x="14" y="14" width="7" height="7"/>
-            <rect x="3" y="14" width="7" height="7"/>
-          </svg>
-          <span>Bausteine</span>
-        </a>
-        <a href="#" class="nav-item" data-view="textbausteine" id="nav-textbausteine">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-          </svg>
-          <span>Textbausteine</span>
-        </a>
-        <a href="#" class="nav-item" data-view="themen" id="nav-themen">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 6h16M4 12h16M4 18h12"/>
-            <circle cx="20" cy="18" r="2"/>
-          </svg>
-          <span>Themen</span>
-        </a>
         <a href="#" class="nav-item" data-view="subscription" id="nav-subscription">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
@@ -833,26 +808,6 @@
             <p class="helper-text warning">Für mehrere Arbeitsplätze: Wählen Sie einen Netzwerkordner</p>
           </div>
 
-          <!-- Bausteine Path Section -->
-          <div class="settings-section" id="settings-section-bausteine-path">
-            <div class="settings-section-header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="7" height="7"/>
-                <rect x="14" y="3" width="7" height="7"/>
-                <rect x="14" y="14" width="7" height="7"/>
-                <rect x="3" y="14" width="7" height="7"/>
-              </svg>
-              <h3>Bausteine Speicherort</h3>
-            </div>
-            <label for="settingsBausteinePath">Speicherort für Bausteine-Datei</label>
-            <div class="path-input-row">
-              <input type="text" id="settingsBausteinePath" readonly>
-              <button id="settingsBrowseBausteineBtn" class="btn btn-secondary">Ändern</button>
-              <button id="settingsOpenBausteineFolderBtn" class="btn btn-ghost">Öffnen</button>
-            </div>
-            <p class="helper-text warning">Für mehrere Arbeitsplätze: Wählen Sie einen Netzwerkordner</p>
-          </div>
-
           <!-- Documentation Mode Section -->
           <div class="settings-section" id="settings-section-docmode">
             <div class="settings-section-header">
@@ -860,26 +815,13 @@
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
               </svg>
-              <h3>Dokumentations-Modus</h3>
+              <h3>KI-Dokumentation</h3>
             </div>
-            <label for="settingsDocModeSelect">Modus auswählen</label>
+            <label for="settingsDocModeSelect">Dokumentations-Modus</label>
             <select id="settingsDocModeSelect">
-              <option value="single">Single Prompt (Standard)</option>
-              <option value="single-v1.1">Single Prompt V1.1 (Experimental)</option>
-              <option value="hybrid-v1.2">Hybrid V1.2</option>
-              <option value="megaprompt">Megaprompt (7-Step Pipeline)</option>
-              <option value="agent-chain">Agent-Kette mit Bausteinen</option>
-              <option value="agent-v2">Agent V2 (Empfohlen)</option>
               <option value="agent-v2.1">Agent V2.1 (Multi-Agent Pipeline)</option>
             </select>
-            <p class="helper-text">
-              <strong>Single Prompt:</strong> Ein KI-Aufruf für die gesamte Dokumentation.<br>
-              <strong>Hybrid V1.2:</strong> Optimiert - 60% schneller, erkennt automatisch Themen.<br>
-              <strong>Megaprompt:</strong> 7-Schritt-Pipeline mit 10 parallelen Extraktoren.<br>
-              <strong>Agent-Kette:</strong> Erkennt Behandlungskategorien und fügt Standard-Aufklärungstexte hinzu.<br>
-              <strong>Agent V2:</strong> 2-stufig: Erst Rekonstruktion, dann Dokumentation. Nutzt GPT-4.1 Thinking.<br>
-              <strong>Agent V2.1:</strong> 5-Agent-Pipeline mit 01-Befund und PA-Status Extraktion (Experimental).
-            </p>
+            <p class="helper-text">5-Agent-Pipeline: Rekonstruktion → Befund → 01-Status → PA-Status → Dokumentation</p>
           </div>
 
           <!-- Appearance Section -->
@@ -928,6 +870,7 @@
             <div class="debug-buttons">
               <button id="settingsOpenLogBtn" class="btn btn-secondary">Protokoll öffnen</button>
               <button id="settingsCopyLogPathBtn" class="btn btn-secondary">Pfad kopieren</button>
+              <button id="settingsUploadLogBtn" class="btn btn-primary">An Support senden</button>
             </div>
             <div id="settingsLogStatus" class="status-message"></div>
           </div>
@@ -1060,66 +1003,6 @@
         </div>
       </div>
 
-      <!-- Bausteine View -->
-      <div class="view" id="view-bausteine">
-        <div class="view-header bausteine-header">
-          <h1>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="3" width="7" height="7"/>
-              <rect x="14" y="3" width="7" height="7"/>
-              <rect x="14" y="14" width="7" height="7"/>
-              <rect x="3" y="14" width="7" height="7"/>
-            </svg>
-            Dokumentations-Bausteine
-          </h1>
-          <p>Standard-Aufklärungstexte für die Agent-Kette Dokumentation</p>
-        </div>
-
-        <div class="bausteine-content">
-          <div class="path-info">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            </svg>
-            <span id="bausteinePathDisplay">Wird geladen...</span>
-            <button class="btn btn-ghost btn-sm" id="bausteineChangePathBtn">Ändern</button>
-            <button class="btn btn-ghost btn-sm" id="bausteineOpenFolderBtn">Öffnen</button>
-          </div>
-
-          <div class="info-box" style="margin-bottom: var(--space-5);">
-            <strong>So funktionieren Bausteine:</strong> Wenn die Agent-Kette eine Behandlungskategorie erkennt, wird der entsprechende Aufklärungstext automatisch eingefügt. Die Erkennungshinweise helfen der KI, Ihre praxiseigenen Begriffe den richtigen Kategorien zuzuordnen.
-            <br><br>
-            <strong>Netzwerk-Tipp:</strong> Speichern Sie die Datei auf einem Netzlaufwerk, damit alle Arbeitsplätze dieselben Bausteine verwenden.
-          </div>
-
-          <div class="bausteine-toolbar">
-            <button class="btn btn-primary" id="bausteineAddCategoryBtn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                <line x1="12" y1="11" x2="12" y2="17"/>
-                <line x1="9" y1="14" x2="15" y2="14"/>
-              </svg>
-              Neue Kategorie
-            </button>
-            <div class="bausteine-toolbar-right">
-              <button class="btn btn-secondary" id="bausteineExportBtn">Exportieren</button>
-              <button class="btn btn-secondary" id="bausteineImportBtn">Importieren</button>
-              <button class="btn btn-danger" id="bausteineResetAllBtn">Alle zurücksetzen</button>
-            </div>
-          </div>
-
-          <div class="categories-container" id="bausteineCategoriesContainer">
-            <!-- Wird dynamisch gefüllt -->
-          </div>
-
-          </div>
-
-        <div class="bausteine-buttons">
-          <span class="status-message" id="bausteineStatusMessage"></span>
-          <button class="btn btn-secondary" id="bausteineCancelBtn">Abbrechen</button>
-          <button class="btn btn-primary" id="bausteineSaveBtn" disabled>Speichern</button>
-        </div>
-      </div>
-
       <!-- Warning Modal -->
       <div class="modal-overlay" id="warningModal" style="display: none;">
         <div class="modal warning-modal">
@@ -1135,267 +1018,6 @@
           <div class="modal-actions">
             <button class="btn btn-primary" id="warningModalConfirm">Fortfahren</button>
             <button class="btn btn-secondary" id="warningModalCancel">Abbrechen</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bausteine Modals -->
-      <div class="modal-overlay" id="bausteineExportModal">
-        <div class="modal">
-          <h2>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            Bausteine exportieren
-          </h2>
-          <textarea id="bausteineExportData" readonly></textarea>
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="bausteineCopyExportBtn">In Zwischenablage</button>
-            <button class="btn btn-secondary" id="bausteineCloseExportModal">Schließen</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-overlay" id="bausteineImportModal">
-        <div class="modal">
-          <h2>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            Bausteine importieren
-          </h2>
-          <textarea id="bausteineImportData" placeholder="JSON hier einfügen..."></textarea>
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="bausteineDoImportBtn">Importieren</button>
-            <button class="btn btn-secondary" id="bausteineCloseImportModal">Abbrechen</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-overlay" id="bausteineNewCategoryModal">
-        <div class="modal">
-          <h2>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            </svg>
-            Neue Kategorie
-          </h2>
-          <input type="text" id="bausteineNewCategoryName" placeholder="Name der Kategorie...">
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="bausteineCreateCategoryBtn">Erstellen</button>
-            <button class="btn btn-secondary" id="bausteineCloseCategoryModal">Abbrechen</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-overlay" id="bausteineNewBausteinModal">
-        <div class="modal">
-          <h2>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="3" width="18" height="18" rx="2"/>
-              <line x1="12" y1="8" x2="12" y2="16"/>
-              <line x1="8" y1="12" x2="16" y2="12"/>
-            </svg>
-            Neuer Baustein
-          </h2>
-          <input type="text" id="bausteineNewBausteinName" placeholder="Name des Bausteins...">
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="bausteineCreateBausteinBtn">Erstellen</button>
-            <button class="btn btn-secondary" id="bausteineCloseBausteinModal">Abbrechen</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Unsaved Changes Modal -->
-      <div class="modal-overlay" id="bausteineUnsavedModal">
-        <div class="modal">
-          <h2>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--primary-500)" stroke-width="2">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-              <line x1="12" y1="9" x2="12" y2="13"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            Ungespeicherte Änderungen
-          </h2>
-          <p style="color: var(--text-secondary); margin-bottom: var(--space-5);">
-            Sie haben ungespeicherte Änderungen. Möchten Sie diese vor dem Verlassen speichern?
-          </p>
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="bausteineSaveAndContinue">Speichern</button>
-            <button class="btn btn-danger" id="bausteineDiscardChanges">Verwerfen</button>
-            <button class="btn btn-secondary" id="bausteineCloseUnsavedModal">Abbrechen</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Textbausteine V1.2 View -->
-      <div class="view" id="view-textbausteine">
-        <div class="view-header">
-          <h1>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-            </svg>
-            Textbausteine (Hybrid V1.2)
-          </h1>
-          <p>Vordefinierte Formulierungen für die KI-Dokumentation - werden serverseitig gespeichert</p>
-        </div>
-
-        <div class="textbausteine-content">
-          <div class="info-box" style="margin-bottom: var(--space-5);">
-            <strong>So funktionieren Textbausteine:</strong> Die KI kennt Ihre Textbausteine und verwendet passende Formulierungen automatisch in der Dokumentation.
-            Beispiel: Wenn eine Aufklärung stattfand, nutzt die KI Ihren "aufklaerung" Textbaustein.
-            <br><br>
-            <strong>Tipp:</strong> Verwenden Sie aussagekräftige Schlüssel wie "aufklaerung_fuellung" oder "einverstaendnis_standard".
-          </div>
-
-          <div class="textbausteine-status" id="textbausteineStatus">
-            <span class="status-indicator loading"></span>
-            <span>Lade Einstellungen...</span>
-          </div>
-
-          <div class="textbausteine-toolbar">
-            <button class="btn btn-primary" id="textbausteineAddBtn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="12" y1="5" x2="12" y2="19"/>
-                <line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-              Neuer Textbaustein
-            </button>
-            <div class="textbausteine-toolbar-right">
-              <button class="btn btn-secondary" id="textbausteineRefreshBtn">Aktualisieren</button>
-              <button class="btn btn-danger" id="textbausteineResetBtn">Auf Standard zurücksetzen</button>
-            </div>
-          </div>
-
-          <div class="textbausteine-list" id="textbausteineList">
-            <!-- Wird dynamisch gefüllt -->
-            <div class="textbausteine-empty" id="textbausteineEmpty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-              </svg>
-              <p>Noch keine Textbausteine vorhanden</p>
-              <button class="btn btn-primary btn-sm" id="textbausteineAddFirstBtn">Ersten Textbaustein anlegen</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Textbausteine V1.2 Modal: Neuer Textbaustein -->
-      <div class="modal-overlay" id="textbausteineModal">
-        <div class="modal textbausteine-modal">
-          <h2>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-            </svg>
-            <span id="textbausteineModalTitle">Neuer Textbaustein</span>
-          </h2>
-          <div class="form-group">
-            <label for="textbausteineKey">Schlüssel (z.B. "aufklaerung_fuellung")</label>
-            <input type="text" id="textbausteineKey" placeholder="schluessel_name" pattern="[a-z0-9_]+" />
-            <span class="helper-text">Nur Kleinbuchstaben, Zahlen und Unterstriche</span>
-          </div>
-          <div class="form-group">
-            <label for="textbausteineText">Text</label>
-            <textarea id="textbausteineText" rows="5" placeholder="Der Text, den die KI verwenden soll..."></textarea>
-          </div>
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="textbausteineSaveBtn">Speichern</button>
-            <button class="btn btn-secondary" id="textbausteineCloseModal">Abbrechen</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Themen-Anpassungen View (V1.2) -->
-      <div class="view" id="view-themen">
-        <div class="view-header">
-          <h1>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 6h16M4 12h16M4 18h12"/>
-              <circle cx="20" cy="18" r="2"/>
-            </svg>
-            Themen-Anpassungen (Hybrid V1.2)
-          </h1>
-          <p>Pflichtfelder und Hinweise pro Behandlungsthema konfigurieren</p>
-        </div>
-
-        <div class="themen-content">
-          <div class="info-box" style="margin-bottom: var(--space-5);">
-            <strong>So funktionieren Themen-Anpassungen:</strong> Die KI erkennt automatisch das Behandlungsthema und prüft, ob die hier definierten Pflichtfelder im Transkript erwähnt wurden.
-            <br><br>
-            <strong>Beispiel:</strong> Bei "Füllung/Restauration" achtet die KI besonders auf Material, Zahn und Aufklärung.
-          </div>
-
-          <div class="themen-status" id="themenStatus">
-            <span class="status-indicator loading"></span>
-            <span>Lade Einstellungen...</span>
-          </div>
-
-          <div class="themen-toolbar">
-            <div class="themen-toolbar-left">
-              <span class="themen-count" id="themenCount">0 Themen</span>
-            </div>
-            <div class="themen-toolbar-right">
-              <button class="btn btn-primary" id="themenAddBtn">+ Neues Thema</button>
-              <button class="btn btn-secondary" id="themenRefreshBtn">Aktualisieren</button>
-              <button class="btn btn-danger" id="themenResetBtn">Auf Standard zurücksetzen</button>
-            </div>
-          </div>
-
-          <div class="themen-list" id="themenList">
-            <!-- Wird dynamisch gefüllt -->
-            <div class="themen-empty" id="themenEmpty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M4 6h16M4 12h16M4 18h12"/>
-                <circle cx="20" cy="18" r="2"/>
-              </svg>
-              <p>Keine Themen vorhanden. Klicken Sie auf "Neues Thema" oder "Auf Standard zurücksetzen".</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Themen Modal (V2 - Vollständig dynamisch) -->
-      <div class="modal-overlay" id="themenModal">
-        <div class="modal themen-modal">
-          <h2>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 6h16M4 12h16M4 18h12"/>
-              <circle cx="20" cy="18" r="2"/>
-            </svg>
-            <span id="themenModalTitle">Thema bearbeiten</span>
-          </h2>
-          <div class="form-group">
-            <label for="themenModalThemaName">Thema-Name</label>
-            <input type="text" id="themenModalThemaName" placeholder="z.B. Implantologie, Kieferchirurgie" />
-            <span class="helper-text">Name des Themas wie er in der Dokumentation erscheint</span>
-          </div>
-          <div class="form-group">
-            <label for="themenPflichtfelder">Pflichtfelder (kommagetrennt)</label>
-            <input type="text" id="themenPflichtfelder" placeholder="z.B. Material, Zahn, Aufklärung erfolgt" />
-            <span class="helper-text">Diese Felder prüft die KI besonders bei diesem Thema</span>
-          </div>
-          <div class="form-group">
-            <label for="themenHinweistext">Hinweistext für die KI (optional)</label>
-            <textarea id="themenHinweistext" rows="3" placeholder="z.B. Bei Füllung immer Material und Zahn dokumentieren"></textarea>
-            <span class="helper-text">Zusätzliche Anweisung für die KI bei diesem Thema</span>
-          </div>
-          <div class="form-group">
-            <label for="themenAntiSplit">Anti-Split Begriffe (optional, kommagetrennt)</label>
-            <input type="text" id="themenAntiSplit" placeholder="z.B. Brücke, Krone, Implantat" />
-            <span class="helper-text">Diese Begriffe werden automatisch diesem Thema zugeordnet</span>
-          </div>
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="themenSaveBtn">Speichern</button>
-            <button class="btn btn-secondary" id="themenCloseModal">Abbrechen</button>
           </div>
         </div>
       </div>
@@ -2253,7 +1875,7 @@
         </div>
       </div>
 
-      <!-- Step 3: AI Mode -->
+      <!-- Step 3: AI Mode (Info only - Agent V2.1 is the only mode) -->
       <div class="wizard-step" data-step="3">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
@@ -2262,60 +1884,19 @@
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
             </svg>
           </div>
-          <h2>KI-Modus wählen</h2>
-          <p>DentDoc bietet zwei verschiedene Modi für die Dokumentationserstellung. Wählen Sie den Modus, der am besten zu Ihrer Arbeitsweise passt.</p>
+          <h2>KI-Dokumentation</h2>
+          <p>DentDoc verwendet eine intelligente Multi-Agent-Pipeline für die automatische Dokumentationserstellung.</p>
         </div>
 
         <div class="wizard-options">
-          <div class="wizard-option selected" data-mode="agent-v2">
-            <div class="wizard-option-radio"></div>
-            <div class="wizard-option-content">
-              <div class="wizard-option-header">
-                <span class="wizard-option-title">Agent V2</span>
-                <span class="wizard-option-badge">Empfohlen</span>
-              </div>
-              <p class="wizard-option-desc">2-stufige KI-Pipeline: Erst Rekonstruktion des Transkripts (sachlich, ohne Erklärungen), dann strukturierte Akte-Dokumentation. Nutzt GPT-4.1 Thinking für maximale Qualität.</p>
-            </div>
-          </div>
-
-          <div class="wizard-option" data-mode="hybrid-v1.2">
-            <div class="wizard-option-radio"></div>
-            <div class="wizard-option-content">
-              <div class="wizard-option-header">
-                <span class="wizard-option-title">Hybrid V1.2</span>
-              </div>
-              <p class="wizard-option-desc">Optimierte KI-Dokumentation: 60% schneller, erkennt automatisch relevante Themen (Füllung, Extraktion, etc.) und strukturiert die Dokumentation entsprechend.</p>
-            </div>
-          </div>
-
-          <div class="wizard-option" data-mode="single">
-            <div class="wizard-option-radio"></div>
-            <div class="wizard-option-content">
-              <div class="wizard-option-header">
-                <span class="wizard-option-title">Single Prompt (Standard)</span>
-              </div>
-              <p class="wizard-option-desc">Die KI erstellt Ihre Dokumentation in einem Schritt. Bewährte Methode, funktioniert sofort ohne weitere Konfiguration.</p>
-            </div>
-          </div>
-
-          <div class="wizard-option" data-mode="agent-chain">
-            <div class="wizard-option-radio"></div>
-            <div class="wizard-option-content">
-              <div class="wizard-option-header">
-                <span class="wizard-option-title">Agent-Kette mit Bausteinen</span>
-              </div>
-              <p class="wizard-option-desc">Erweiterte Kontrolle: Die KI erkennt Behandlungskategorien und fügt automatisch vordefinierte Aufklärungstexte (Bausteine) hinzu. Für erfahrene Nutzer, die standardisierte Textbausteine verwenden möchten.</p>
-            </div>
-          </div>
-
-          <div class="wizard-option" data-mode="agent-v2.1">
+          <div class="wizard-option selected" style="cursor: default;">
             <div class="wizard-option-radio"></div>
             <div class="wizard-option-content">
               <div class="wizard-option-header">
                 <span class="wizard-option-title">Agent V2.1</span>
-                <span class="wizard-option-badge" style="background: #f59e0b;">Experimental</span>
+                <span class="wizard-option-badge">Aktiv</span>
               </div>
-              <p class="wizard-option-desc">5-Agent-Pipeline: Rekonstruktion → Befund-Detektor → 01-Extractor → PA-Extractor → Dokumentation. Extrahiert strukturierte Zahnstatus- und PA-Daten als JSON.</p>
+              <p class="wizard-option-desc">5-Agent-Pipeline: Rekonstruktion → Befund-Detektor → 01-Extractor → PA-Extractor → Dokumentation. Extrahiert automatisch strukturierte Zahnstatus- und PA-Daten.</p>
             </div>
           </div>
         </div>
@@ -2325,7 +1906,7 @@
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 16v-4M12 8h.01"/>
           </svg>
-          <p><strong>Was sind Bausteine?</strong> Bausteine sind vordefinierte Textvorlagen für häufige Behandlungen (z.B. Aufklärungstexte für Extraktionen, Füllungen, etc.). Sie können diese später unter "Bausteine" anpassen.</p>
+          <p><strong>So funktioniert's:</strong> Sprechen Sie während der Behandlung, und DentDoc wandelt Ihre Diktate automatisch in strukturierte, professionelle Dokumentation um.</p>
         </div>
       </div>
 

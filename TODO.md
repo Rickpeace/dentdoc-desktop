@@ -47,9 +47,15 @@ cleanup tsten für audio
 sprecherprofile
 kann man nicht unbennenn
 -----
+app läuft -- nochmal die verknüpgung drücken was passiert ? 
+-----
 
-
-
+------------------------
+DSGVO
+ALLES LÖSCHEN AUTOMATISCH ...
+GESPEICHERTE DATEIN VERSCHLÜSSELN FALLS SIE IM BACKUP LANDEN - UNBRAUCHBAR
+SCHLÜSSEL PRO DATEI IN DATENBANK !? DATEN BANK LÖSCHT SCHLÜSSEL UZUSÄTZLICH ZUR AUTOMATISCHEN LÖSCHUNG
+PIN CODE UM TRANSCRIPTE AUFZURUFEN UND ANZUHÖREN (ZUGANSGBERECHTIUGUNG)
 
 Hier ist meine empfohlene “Audit-feste” Zielarchitektur (1:1 das, was du jetzt bauen willst), inkl. Logik + Hinweise, was du kommunizieren musst.
 

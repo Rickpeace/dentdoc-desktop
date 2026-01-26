@@ -2,7 +2,7 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env.local'), override: true });
 require('dotenv').config({ path: path.join(__dirname, '.env') });
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, globalShortcut, ipcMain, clipboard, dialog, shell } = require('electron');
 
 // Set app user model ID for Windows notifications (must be before app ready)
 if (process.platform === 'win32') {
@@ -37,6 +37,9 @@ const Store = require('electron-store');
 const audioRecorder = require('./src/audioRecorderFFmpeg');
 const apiClient = require('./src/apiClient');
 const vadController = require('./src/vad-controller');
+const { showNotification, showCustomNotification, initNotificationIPC } = require('./src/notifications');
+const session = require('./src/session');
+const trayModule = require('./src/tray');
 
 // Early debug logging
 const DEBUG_LOG = path.join(os.tmpdir(), 'dentdoc-main-debug.log');
@@ -46,8 +49,43 @@ function debugLog(message) {
   try {
     fs.appendFileSync(DEBUG_LOG, logMessage);
   } catch (e) {
-    console.error('Failed to write debug log:', e);
+    // Can't use console.error here - would cause infinite loop
   }
+}
+
+// Override console methods to also write to debug log
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+const originalConsoleError = console.error;
+
+console.log = (...args) => {
+  originalConsoleLog.apply(console, args);
+  debugLog('[LOG] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+};
+
+console.warn = (...args) => {
+  originalConsoleWarn.apply(console, args);
+  debugLog('[WARN] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+};
+
+console.error = (...args) => {
+  originalConsoleError.apply(console, args);
+  debugLog('[ERROR] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+};
+
+// Rotate log if too large (> 5MB) - keep last session's logs
+try {
+  if (fs.existsSync(DEBUG_LOG)) {
+    const stats = fs.statSync(DEBUG_LOG);
+    if (stats.size > 5 * 1024 * 1024) {
+      // Rename old log, start fresh
+      const backupPath = DEBUG_LOG.replace('.log', '-previous.log');
+      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+      fs.renameSync(DEBUG_LOG, backupPath);
+    }
+  }
+} catch (e) {
+  // Ignore rotation errors
 }
 
 debugLog('=== DentDoc Starting ===');
@@ -69,7 +107,7 @@ try {
 
 const store = new Store();
 
-let tray = null;
+let tray = null;  // Will be set after trayModule.createTray()
 let loginWindow = null;
 let dashboardWindow = null;
 let statusOverlay = null;
@@ -87,7 +125,6 @@ let currentShortcut = null;
 let autoHideTimeout = null;
 let lastDocumentation = null;
 let lastTranscript = null;
-let lastShortenings = null;
 let lastReconstructedTranscript = null;
 let lastTranscriptWithSpeakers = null;
 let lastRecognizedSpeakers = [];
@@ -95,7 +132,6 @@ let lastDetection = null;
 let lastStatus01 = null;
 let lastStatusPA = null;
 let lastKzvDocumentation = null;
-let heartbeatInterval = null;
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -236,7 +272,7 @@ function createDashboardWindow() {
 
     if (token && (now - lastDashboardRefreshTime) > DASHBOARD_REFRESH_COOLDOWN) {
       lastDashboardRefreshTime = now;
-      await refreshUserData();
+      await session.refreshUserData();
       if (dashboardWindow && !dashboardWindow.isDestroyed()) {
         dashboardWindow.webContents.send('refresh-subscription-status');
       }
@@ -278,7 +314,7 @@ function registerShortcut(shortcut) {
   if (registered) {
     currentShortcut = shortcut;
     store.set('shortcut', shortcut);
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
     return true;
   } else {
     console.error(`Shortcut ${shortcut} registration failed`);
@@ -351,7 +387,8 @@ function sanitizeFilename(name) {
 function saveAudioImmediately(tempAudioPath) {
   // Always save backup to "Fehlgeschlagen" folder, regardless of settings
   // This ensures audio is preserved if transcription fails
-  console.log('saveAudioImmediately called - tempAudioPath:', tempAudioPath);
+  const saveStartTime = Date.now();
+  console.log('[TIMING] saveAudioImmediately START - tempAudioPath:', tempAudioPath);
 
   if (!tempAudioPath) {
     console.log('Audio save skipped - tempAudioPath is null/undefined');
@@ -392,12 +429,20 @@ function saveAudioImmediately(tempAudioPath) {
   const audioPath = path.join(tempFolder, `${baseFilename}${ext}`);
 
   try {
+    // Get file size before copy
+    const fileSize = fs.statSync(tempAudioPath).size;
+    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+    console.log(`[TIMING] File copy starting - size: ${fileSizeMB} MB`);
+
     fs.copyFileSync(tempAudioPath, audioPath);
-    console.log('Audio saved immediately to:', audioPath);
+
+    const copyDuration = ((Date.now() - saveStartTime) / 1000).toFixed(2);
+    console.log(`[TIMING] saveAudioImmediately DONE in ${copyDuration}s - saved to: ${audioPath}`);
     savedAudioPathInBackup = audioPath; // Store for later deletion
     return audioPath;
   } catch (error) {
-    console.error('Failed to save audio immediately:', error);
+    const copyDuration = ((Date.now() - saveStartTime) / 1000).toFixed(2);
+    console.error(`[TIMING] saveAudioImmediately FAILED after ${copyDuration}s:`, error);
     return null;
   }
 }
@@ -415,10 +460,9 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {string} options.originalAudioPath - Path to original audio file (before VAD, optional)
  * @param {boolean} options.saveTranscript - Whether to save transcript
  * @param {boolean} options.saveAudio - Whether to save audio
- * @param {Object} options.shortenings - Shortenings from v1.2 hybrid mode
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, shortenings = null, utterances = null, words = null, topicSegments = null, passages = null, docLinks = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, kzvDocumentation = null } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, utterances = null, words = null, topicSegments = null, passages = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, kzvDocumentation = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -458,40 +502,6 @@ function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping 
   // Create base filename: YYYY-MM-DD_HH-MM_JobID_[Names]
   let filenameSuffix = nameParts.length > 0 ? nameParts.join('_') : 'Unbekannt';
   const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}_${filenameSuffix}`;
-
-  // Build shortenings section if available
-  let shorteningsSection = '';
-  if (shortenings) {
-    const shorteningParts = [];
-    if (shortenings.keywords90) {
-      shorteningParts.push(`── Stichworte (90% kürzer) ──\n\n${shortenings.keywords90}`);
-    }
-    if (shortenings.chef70) {
-      shorteningParts.push(`── Chef Ultra (70% kürzer) ──\n\n${shortenings.chef70}`);
-    }
-    if (shortenings.chef50) {
-      shorteningParts.push(`── Chef (50% kürzer) ──\n\n${shortenings.chef50}`);
-    }
-    if (shortenings.pvs40) {
-      shorteningParts.push(`── PVS (40% kürzer) ──\n\n${shortenings.pvs40}`);
-    }
-    if (shortenings.zfa30) {
-      shorteningParts.push(`── ZFA (30% kürzer) ──\n\n${shortenings.zfa30}`);
-    }
-    if (shortenings.normalized) {
-      shorteningParts.push(`── Normalisiert (sprachlich optimiert) ──\n\n${shortenings.normalized}`);
-    }
-    if (shorteningParts.length > 0) {
-      shorteningsSection = `
-
-────────────────────────────────────────────────────────────────────
-  KÜRZUNGEN
-────────────────────────────────────────────────────────────────────
-
-${shorteningParts.join('\n\n')}
-`;
-    }
-  }
 
   // Build KZV documentation section if available (Agent V2.1)
   let kzvSection = '';
@@ -540,7 +550,7 @@ ${recognizedSpeakersLine}
 ────────────────────────────────────────────────────────────────────
 
 ${summary}
-${kzvSection}${shorteningsSection}${normalizedSection}
+${kzvSection}${normalizedSection}
 
 ────────────────────────────────────────────────────────────────────
   TRANSKRIPT MIT SPRECHERN
@@ -608,10 +618,8 @@ ${finalTranscriptText}
           })),
           words: words || null, // Word-level timestamps for precise audio navigation
           summary: summary,
-          shortenings: shortenings || null,
           topicSegments: topicSegments || null, // KI-extracted topic segments for audio navigation
           passages: passages || null, // Semantic audio passages (15-40 sec thematic clips)
-          docLinks: docLinks || null, // Links from documentation text to audio passages
           status01: status01 || null, // Strukturierter 01-Befund (Zahnstatus)
           statusPA: statusPA || null // Strukturierter PA-Status (Parodontalstatus)
         };
@@ -718,194 +726,6 @@ function createLoginWindow() {
   });
 }
 
-function createTray() {
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-  tray = new Tray(iconPath);
-
-  // Don't set a static context menu - we'll show it dynamically on right-click
-  // This allows us to refresh user data before showing the menu
-  tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
-
-  // Cooldown to prevent too many API calls
-  let lastRefreshTime = 0;
-  const REFRESH_COOLDOWN = 10000; // Only refresh every 10 seconds max
-
-  // Right-click: Refresh data, then show menu
-  tray.on('right-click', async () => {
-    const token = store.get('authToken');
-    const now = Date.now();
-
-    // Refresh user data if logged in and cooldown has passed
-    if (token && (now - lastRefreshTime) > REFRESH_COOLDOWN) {
-      lastRefreshTime = now;
-      await refreshUserData();
-    }
-
-    // Build and show menu with current data
-    const menu = buildTrayMenu();
-    tray.popUpContextMenu(menu);
-  });
-
-  // Left-click: Open dashboard window (or login if not authenticated)
-  tray.on('click', () => {
-    const token = store.get('authToken');
-    if (token) {
-      openLocalDashboard();
-    } else {
-      createLoginWindow();
-    }
-  });
-}
-
-// Build and return the tray menu (called dynamically on right-click)
-function buildTrayMenu() {
-  const token = store.get('authToken');
-  const user = store.get('user');
-
-  if (!token) {
-    return Menu.buildFromTemplate([
-      { label: 'Anmelden', click: () => createLoginWindow() },
-      { type: 'separator' },
-      { label: 'Beenden', click: () => app.quit() }
-    ]);
-  }
-
-  const shortcut = store.get('shortcut') || 'F9';
-
-  // Check subscription/trial status (matching web app logic)
-  const hasActiveSubscription = user?.subscriptionStatus === 'active';
-  const isCanceled = user?.subscriptionStatus === 'canceled';
-  const minutesRemaining = user?.minutesRemaining || 0;
-
-  // Distinguish between true trial users and ex-subscribers
-  // Ex-subscriber: has stripeCustomerId (was once a paying customer) or subscription is canceled
-  const wasSubscriber = isCanceled || (user?.planTier === 'free_trial' && user?.stripeCustomerId);
-  const isRealTrial = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining > 0;
-  const trialExpired = user?.planTier === 'free_trial' && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
-
-  // No active subscription (either trial expired or was subscriber)
-  const noActiveSubscription = !hasActiveSubscription && (trialExpired || wasSubscriber);
-
-  // Determine menu label based on state
-  let recordingLabel;
-  let recordingEnabled = true;
-  if (isProcessing) {
-    recordingLabel = '⏳ Verarbeitung läuft...';
-    recordingEnabled = false;
-  } else if (isRecording) {
-    recordingLabel = `⏺ Aufnahme stoppen (${shortcut})`;
-  } else {
-    recordingLabel = `▶ Aufnahme starten (${shortcut})`;
-    // Disable if no active subscription
-    if (noActiveSubscription) {
-      recordingEnabled = false;
-    }
-  }
-
-  // Build status label for trial/subscription (matching web app)
-  let statusLabel;
-  if (hasActiveSubscription) {
-    statusLabel = `✓ DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`;
-  } else if (isRealTrial) {
-    statusLabel = `Testphase: ${minutesRemaining} Min übrig`;
-  } else if (wasSubscriber) {
-    // Was a subscriber but now canceled/expired - same as web app
-    statusLabel = '⚠️ KEIN AKTIVES ABO';
-  } else if (trialExpired) {
-    // True trial user who never subscribed
-    statusLabel = '⚠️ TESTPHASE BEENDET';
-  } else {
-    statusLabel = 'Kein aktives Abo';
-  }
-
-  return Menu.buildFromTemplate([
-    // Status display - clickable if trial expired to open subscription page
-    {
-      label: statusLabel,
-      enabled: trialExpired ? true : false,
-      click: trialExpired ? () => openWebDashboard('/subscription') : undefined,
-    },
-    // If trial expired or no subscription, show upgrade link
-    ...(trialExpired || (!hasActiveSubscription && !isRealTrial) ? [{
-      label: '🛒 JETZT ABO KAUFEN →',
-      click: () => {
-        openWebDashboard('/subscription');
-      }
-    }] : []),
-    { type: 'separator' },
-    {
-      label: recordingLabel,
-      enabled: recordingEnabled,
-      click: () => {
-        if (isRecording) {
-          stopRecording();
-        } else {
-          startRecording();
-        }
-      }
-    },
-    {
-      label: 'Audio-Datei transkribieren...',
-      enabled: !isRecording && !isProcessing && !noActiveSubscription,
-      click: () => {
-        selectAndTranscribeAudioFile();
-      }
-    },
-    {
-      label: 'Letzte Dokumentation anzeigen',
-      enabled: lastDocumentation !== null,
-      click: () => {
-        showLastResult();
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'App öffnen',
-      click: () => {
-        openLocalDashboard();
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Abmelden',
-      click: async () => {
-        const token = store.get('authToken');
-        // Stop heartbeat
-        stopHeartbeat();
-        // Logout from server (free device slot)
-        if (token) {
-          await apiClient.logout(token, store);
-        }
-        store.delete('authToken');
-        store.delete('user');
-
-        // Close dashboard window
-        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-          dashboardWindow.destroy();
-        }
-
-        showCustomNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet', 'info');
-
-        // Show login window after logout
-        createLoginWindow();
-      }
-    },
-    { type: 'separator' },
-    { label: 'Beenden', click: () => {
-      app.isQuitting = true;
-      app.quit();
-    }},
-    { type: 'separator' },
-    { label: `v${app.getVersion()}`, enabled: false }
-  ]);
-}
-
-// Legacy function for compatibility - just calls buildTrayMenu
-function updateTrayMenu() {
-  // No longer sets a static menu - menu is built dynamically on right-click
-  // This function is kept for compatibility with other code that calls it
-}
-
 // Select and transcribe an existing audio file
 async function selectAndTranscribeAudioFile() {
   const token = store.get('authToken');
@@ -955,7 +775,7 @@ async function processAudioFile(audioFilePath, options = {}) {
   const token = store.get('authToken');
 
   isProcessing = true;
-  updateTrayMenu();
+  trayModule.updateTrayMenu();
 
   // Change tray icon to processing state (use regular icon)
   const processingIconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -1129,49 +949,12 @@ async function processAudioFile(audioFilePath, options = {}) {
       // Continue anyway - speaker identification is optional
     }
 
-    // Generate documentation
-    const docMode = store.get('docMode', 'agent-v2');
-    let result;
-
-    if (docMode === 'agent-chain') {
-      // Agent-Kette: Use V2 endpoint with Bausteine
-      updateStatusOverlay('Dokumentation wird erstellt...', 'Agent-Kette analysiert Kategorien...', 'processing', { step: 4 });
-      const bausteine = bausteineManager.getAllBausteine();
-      result = await apiClient.getDocumentationV2(transcriptionId, token, bausteine);
-    } else if (docMode === 'hybrid-v1.2') {
-      // Hybrid V1.2: 1 API call, 60% cost savings
-      updateStatusOverlay('Dokumentation...', 'Hybrid-KI verarbeitet...', 'processing', { step: 4 });
-      result = await apiClient.getDocumentationV1_2(transcriptionId, token);
-    } else if (docMode === 'single-v1.1') {
-      // Single Prompt V1.1: Use experimental endpoint
-      updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung (V1.1)...', 'processing', { step: 4 });
-      result = await apiClient.getDocumentationV1_1(transcriptionId, token);
-    } else if (docMode === 'megaprompt') {
-      // Megaprompt: 7-Step Pipeline mit paralleler Extraktion
-      updateStatusOverlay('Dokumentation wird erstellt...', 'Megaprompt-Pipeline verarbeitet (7 Schritte)...', 'processing', { step: 4 });
-      result = await apiClient.getDocumentationMegaprompt(transcriptionId, token);
-    } else if (docMode === 'agent-v2') {
-      // Agent V2: 2-stufige Pipeline mit GPT-4.1 Thinking
-      updateStatusOverlay('Dokumentation...', 'Agent V2: Rekonstruktion + Dokumentation...', 'processing', { step: 4 });
-      result = await apiClient.getDocumentationAgentV2(transcriptionId, token);
-    } else if (docMode === 'agent-chain-v2.1') {
-      // Agent-Kette V2.1: Kopie von V2 für Entwicklung
-      updateStatusOverlay('Dokumentation wird erstellt...', 'Agent-Kette V2.1 analysiert Kategorien...', 'processing', { step: 4 });
-      const bausteine = bausteineManager.getAllBausteine();
-      result = await apiClient.getDocumentationV2_1(transcriptionId, token, bausteine);
-    } else if (docMode === 'agent-v2.1') {
-      // Agent V2.1: Kopie von Agent V2 für Entwicklung
-      updateStatusOverlay('Dokumentation...', 'Agent V2.1: Rekonstruktion + Dokumentation...', 'processing', { step: 4 });
-      result = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
-    } else {
-      // Single Prompt: Use standard endpoint
-      updateStatusOverlay('Dokumentation wird erstellt...', 'KI generiert Zusammenfassung...', 'processing', { step: 4 });
-      result = await apiClient.getDocumentation(transcriptionId, token);
-    }
+    // Generate documentation - Agent V2.1 only
+    updateStatusOverlay('Dokumentation...', 'KI-Agent erstellt Dokumentation...', 'processing', { step: 4 });
+    const result = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
 
     const documentation = result.documentation;
     const finalTranscript = result.transcript || transcript;
-    const shortenings = result.shortenings || null;
     const reconstructedTranscript = result.reconstructedTranscript || null;
     const transcriptWithSpeakers = result.transcriptWithSpeakers || null;
     const recognizedSpeakers = result.recognizedSpeakers || [];
@@ -1183,7 +966,6 @@ async function processAudioFile(audioFilePath, options = {}) {
     // Store for "show last result"
     lastDocumentation = documentation;
     lastTranscript = finalTranscript;
-    lastShortenings = shortenings;
     lastReconstructedTranscript = reconstructedTranscript;
     lastTranscriptWithSpeakers = transcriptWithSpeakers;
     lastRecognizedSpeakers = recognizedSpeakers;
@@ -1202,12 +984,12 @@ async function processAudioFile(audioFilePath, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, kzvDocumentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, kzvDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Reset processing state immediately so user knows it's done
     isProcessing = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -1227,7 +1009,6 @@ async function processAudioFile(audioFilePath, options = {}) {
     (async () => {
       let topicSegments = null;
       let passages = null;
-      let docLinks = null;
 
       // Extract topic segments using AI (for clickable audio navigation in dashboard)
       if (words && words.length > 0) {
@@ -1242,23 +1023,16 @@ async function processAudioFile(audioFilePath, options = {}) {
         }
       }
 
-      // Passagen-basiertes Matching
-      if (words && words.length > 0 && documentation) {
+      // Segment transcript into semantic passages (for topic badges)
+      if (words && words.length > 0) {
         try {
           debugLog('[Background] Segmenting transcript into semantic passages...');
           const passageResult = await apiClient.segmentPassages(token, transcript, words);
           passages = passageResult.passages || [];
           debugLog(`[Background] Passages created: ${passages.length}`);
-
-          if (passages.length > 0) {
-            debugLog('[Background] Matching documentation to audio passages...');
-            const matchResult = await apiClient.matchDocToAudio(token, documentation, passages);
-            docLinks = matchResult.links || null;
-            debugLog(`[Background] Doc links found: ${docLinks ? docLinks.length : 0}`);
-          }
-        } catch (matchError) {
-          console.error('[Background] Passage segmentation/matching failed (non-critical):', matchError);
-          debugLog('[Background] Passage matching failed: ' + matchError.message);
+        } catch (passageError) {
+          console.error('[Background] Passage segmentation failed (non-critical):', passageError);
+          debugLog('[Background] Passage segmentation failed: ' + passageError.message);
         }
       }
 
@@ -1271,12 +1045,10 @@ async function processAudioFile(audioFilePath, options = {}) {
             tempAudioPath: currentRecordingPath,
             saveTranscript: autoExport,
             saveAudio: keepAudio,
-            shortenings: shortenings,
             utterances: utterances,
             words: words,
             topicSegments: topicSegments,
             passages: passages,
-            docLinks: docLinks,
             reconstructedTranscript: reconstructedTranscript,
             transcriptWithSpeakers: transcriptWithSpeakers,
             recognizedSpeakers: recognizedSpeakers,
@@ -1309,7 +1081,7 @@ async function processAudioFile(audioFilePath, options = {}) {
       const user = await apiClient.getUser(token);
       if (user) {
         store.set('user', user);
-        updateTrayMenu();
+        trayModule.updateTrayMenu();
       }
     } catch (e) {
       console.error('Failed to update user info:', e);
@@ -1342,7 +1114,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     }
 
     isProcessing = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -1392,12 +1164,20 @@ async function processAudioFile(audioFilePath, options = {}) {
  */
 async function processFileWithVAD(audioFilePath, token, options = {}) {
   const { source = 'mic' } = options;
+  const processStartTime = Date.now();
+
+  // Get file size for logging
+  let fileSizeMB = '?';
+  try {
+    const fileSize = fs.statSync(audioFilePath).size;
+    fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+  } catch (e) {}
 
   console.log('');
   console.log('========================================');
   console.log('       VERARBEITUNG GESTARTET');
   console.log('========================================');
-  console.log(`  Datei: ${path.basename(audioFilePath)}`);
+  console.log(`  Datei: ${path.basename(audioFilePath)} (${fileSizeMB} MB)`);
   console.log(`  Quelle: ${source}`);
   console.log('');
 
@@ -1408,6 +1188,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
     console.log('///// SCHRITT 1: VAD /////');
     console.log('  Stille wird erkannt und entfernt...');
+    const vadStart = Date.now();
 
     // Run VAD on the file to get speech-only audio
     // Pass source for correct Auto-Level strategy (iPhone = always loudnorm)
@@ -1417,10 +1198,12 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
         updateStatusOverlay('Verarbeitung...', progress.message, 'processing', { step: 1 });
       }
     });
+    console.log(`[TIMING] VAD completed in ${((Date.now() - vadStart) / 1000).toFixed(2)}s`);
 
     // Now send the speech-only file to AssemblyAI
     console.log('///// SCHRITT 2: UPLOAD /////');
     console.log('  Audio wird an AssemblyAI gesendet...');
+    const uploadStart = Date.now();
     updateStatusOverlay('Verarbeitung...', 'Audio wird gesendet...', 'processing', { step: 1, uploadProgress: 0 });
 
     // Upload audio with progress tracking
@@ -1451,8 +1234,10 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
     // Upload the speech-only file (not the original)
     const transcriptionId = await apiClient.uploadAudio(wavPath, token, onProgress);
+    console.log(`[TIMING] Upload completed in ${((Date.now() - uploadStart) / 1000).toFixed(2)}s`);
 
     // Poll for real transcription status from AssemblyAI
+    const transcriptionStart = Date.now();
     let transcriptionResult;
     let attempts = 0;
     const maxAttempts = 180; // 3 minutes max
@@ -1487,6 +1272,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     }
 
     console.log('///// SCHRITT 3: TRANSKRIPTION /////');
+    console.log(`[TIMING] Transcription completed in ${((Date.now() - transcriptionStart) / 1000).toFixed(2)}s`);
     console.log('  AssemblyAI Transkription abgeschlossen');
 
     const transcript = transcriptionResult.transcriptText;
@@ -1512,6 +1298,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     // Speaker recognition
     console.log('///// SCHRITT 4: SPEAKER /////');
     console.log('  Sprecher werden identifiziert...');
+    const speakerStart = Date.now();
     let currentSpeakerMapping = null;
     updateStatusOverlay('Sprecher werden erkannt...', 'Stimmen werden analysiert...', 'processing', { step: 3 });
 
@@ -1525,41 +1312,23 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
         // Update backend with speaker mapping
         await apiClient.updateSpeakerMapping(transcriptionId, currentSpeakerMapping, token);
       }
+      console.log(`[TIMING] Speaker recognition completed in ${((Date.now() - speakerStart) / 1000).toFixed(2)}s`);
     } catch (speakerError) {
+      console.log(`[TIMING] Speaker recognition failed after ${((Date.now() - speakerStart) / 1000).toFixed(2)}s`);
       console.log('  [!] Fehler bei Sprechererkennung');
     }
 
-    // Generate documentation
+    // Generate documentation - Agent V2.1 only
     console.log('///// SCHRITT 5: DOKUMENTATION /////');
     console.log('  KI erstellt Dokumentation...');
-    updateStatusOverlay('Verarbeitung...', 'Dokumentation wird erstellt...', 'processing', { step: 4 });
+    const docStart = Date.now();
+    updateStatusOverlay('Verarbeitung...', 'KI-Agent erstellt Dokumentation...', 'processing', { step: 4 });
 
-    const docMode = store.get('docMode', 'agent-v2');
-    let docResponse;
-
-    if (docMode === 'agent-chain') {
-      const bausteine = bausteineManager.getAllBausteine();
-      docResponse = await apiClient.getDocumentationV2(transcriptionId, token, bausteine);
-    } else if (docMode === 'hybrid-v1.2') {
-      docResponse = await apiClient.getDocumentationV1_2(transcriptionId, token);
-    } else if (docMode === 'single-v1.1') {
-      docResponse = await apiClient.getDocumentationV1_1(transcriptionId, token);
-    } else if (docMode === 'megaprompt') {
-      docResponse = await apiClient.getDocumentationMegaprompt(transcriptionId, token);
-    } else if (docMode === 'agent-v2') {
-      docResponse = await apiClient.getDocumentationAgentV2(transcriptionId, token);
-    } else if (docMode === 'agent-chain-v2.1') {
-      const bausteine = bausteineManager.getAllBausteine();
-      docResponse = await apiClient.getDocumentationV2_1(transcriptionId, token, bausteine);
-    } else if (docMode === 'agent-v2.1') {
-      docResponse = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
-    } else {
-      docResponse = await apiClient.getDocumentation(transcriptionId, token);
-    }
+    const docResponse = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
+    console.log(`[TIMING] Documentation completed in ${((Date.now() - docStart) / 1000).toFixed(2)}s`);
 
     const documentation = docResponse.documentation;
     const finalTranscript = docResponse.transcript || transcript;  // Use formatted transcript with speaker labels
-    const shortenings = docResponse.shortenings || null;
     const reconstructedTranscript = docResponse.reconstructedTranscript || null;
     const transcriptWithSpeakers = docResponse.transcriptWithSpeakers || null;
     const recognizedSpeakers = docResponse.recognizedSpeakers || [];
@@ -1571,7 +1340,6 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     // Store for potential retry/copy
     lastDocumentation = documentation;
     lastTranscript = finalTranscript;
-    lastShortenings = shortenings;
     lastReconstructedTranscript = reconstructedTranscript;
     lastTranscriptWithSpeakers = transcriptWithSpeakers;
     lastRecognizedSpeakers = recognizedSpeakers;
@@ -1598,7 +1366,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, kzvDocumentation, transcript: finalTranscript, shortenings, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, kzvDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Increment today's recording count
@@ -1611,6 +1379,11 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     } else {
       store.set('todayRecordings', { date: todayStr, count: 1 });
     }
+
+    // Total processing time
+    console.log('');
+    console.log(`[TIMING] ========== TOTAL PROCESSING: ${((Date.now() - processStartTime) / 1000).toFixed(2)}s ==========`);
+    console.log('');
 
     // Notify dashboard to refresh stats
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -1629,7 +1402,6 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     (async () => {
       let topicSegments = null;
       let passages = null;
-      let docLinks = null;
 
       // Extract topic segments using AI (for clickable audio navigation in dashboard)
       if (words && words.length > 0) {
@@ -1643,22 +1415,15 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
         }
       }
 
-      // Passagen-basiertes Matching
-      if (words && words.length > 0 && documentation) {
+      // Segment transcript into semantic passages (for topic badges)
+      if (words && words.length > 0) {
         try {
           console.log('  [Background] Segmentiere Transkript in Passagen...');
           const passageResult = await apiClient.segmentPassages(token, transcript, words);
           passages = passageResult.passages || [];
           console.log(`  [Background] Passagen erstellt: ${passages.length}`);
-
-          if (passages.length > 0) {
-            console.log('  [Background] Matche Dokumentation mit Passagen...');
-            const matchResult = await apiClient.matchDocToAudio(token, documentation, passages);
-            docLinks = matchResult.links || null;
-            console.log(`  [Background] Doc-Links gefunden: ${docLinks ? docLinks.length : 0}`);
-          }
-        } catch (matchError) {
-          console.log('  [Background] Passagen-Matching fehlgeschlagen (nicht kritisch):', matchError.message);
+        } catch (passageError) {
+          console.log('  [Background] Passagen-Segmentierung fehlgeschlagen (nicht kritisch):', passageError.message);
         }
       }
 
@@ -1674,12 +1439,10 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
             originalAudioPath: audioFilePath,
             saveTranscript: autoExport,
             saveAudio: keepAudio,
-            shortenings: shortenings,
             utterances: utterances,
             words: words,
             topicSegments: topicSegments,
             passages: passages,
-            docLinks: docLinks,
             reconstructedTranscript: reconstructedTranscript,
             transcriptWithSpeakers: transcriptWithSpeakers,
             recognizedSpeakers: recognizedSpeakers,
@@ -1700,6 +1463,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     console.log('');
     console.log('!!!!! FEHLER !!!!!');
     console.log(`  ${error.message}`);
+    console.log(`[TIMING] FAILED after ${((Date.now() - processStartTime) / 1000).toFixed(2)}s`);
     console.log('!!!!!!!!!!!!!!!!!!');
 
     updateStatusOverlay('Fehler', error.message, 'error');
@@ -1710,7 +1474,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
   } finally {
     isProcessing = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
   }
 }
 
@@ -1735,7 +1499,7 @@ async function startRecording() {
     if (freshUser) {
       user = freshUser;
       store.set('user', freshUser);
-      updateTrayMenu();
+      trayModule.updateTrayMenu();
     }
   } catch (e) {
     console.log('Could not fetch fresh user data, using cached:', e.message);
@@ -1800,7 +1564,7 @@ async function startRecording() {
 
     // Recording started successfully - now update UI
     isRecording = true;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
     tray.setImage(recordingIconPath);
@@ -1843,7 +1607,7 @@ async function startRecordingWithIphone() {
   try {
     isRecording = true;
     isIphoneSession = true;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Change tray icon to recording state
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
@@ -2014,7 +1778,7 @@ async function startRecordingWithIphone() {
 
     isRecording = false;
     isIphoneSession = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2286,7 +2050,7 @@ async function stopRecordingWithIphone() {
     iphoneFfmpegProcess = null;
     iphoneRecordingPath = null;
     isRecording = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2323,7 +2087,7 @@ async function stopRecordingWithIphone() {
 
     isIphoneSession = false;
     isRecording = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     throw error;
   }
@@ -2342,6 +2106,57 @@ async function startRecordingWithVAD() {
     const deleteAudio = store.get('deleteAudio', true);
     console.log('[VAD] microphoneName:', microphoneName);
 
+    // Check if selected microphone is available BEFORE starting
+    if (microphoneName) {
+      const availableDevices = await audioRecorder.listAudioDevices();
+
+      // Extract vendor:product ID from saved name (e.g., "046d:0aba")
+      // This is the most reliable way to identify USB devices across port changes
+      const savedVendorId = microphoneName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+
+      // Helper: normalize device name for comparison (fallback only)
+      // Removes: USB IDs, number prefixes, parentheses, "Mikrofon"
+      const normalizeName = (name) => {
+        return name
+          .replace(/\([0-9a-f]{4}:[0-9a-f]{4}\)/gi, '')  // Remove USB IDs
+          .replace(/\d+-\s*/g, '')                        // Remove number prefixes like "2- "
+          .replace(/[()]/g, '')                           // Remove parentheses
+          .replace(/mikrofon/gi, '')                      // Remove "Mikrofon"
+          .replace(/\s+/g, ' ')                           // Normalize whitespace
+          .toLowerCase()
+          .trim();
+      };
+
+      const savedNormalized = normalizeName(microphoneName);
+
+      const selectedMicAvailable = availableDevices.some(d => {
+        // 1. Exact match
+        if (d.name === microphoneName) return true;
+
+        // 2. Vendor:product ID match (handles USB port changes like "2- Logitech" -> "4- Logitech")
+        // This is the same logic used in audio-utils.js and dashboard.js
+        if (savedVendorId) {
+          const currentVendorId = d.name.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+          if (currentVendorId && currentVendorId === savedVendorId) return true;
+        }
+
+        // 3. Normalized name match (fallback for FFmpeg names without vendor ID)
+        const currentNormalized = normalizeName(d.name);
+        if (savedNormalized && currentNormalized && savedNormalized === currentNormalized) return true;
+
+        return false;
+      });
+
+      console.log('[VAD] Mic check - selected:', microphoneName, '| vendorId:', savedVendorId, '| normalized:', savedNormalized);
+      console.log('[VAD] Mic check - available:', availableDevices.map(d => d.name));
+      console.log('[VAD] Mic check - found:', selectedMicAvailable);
+
+      if (!selectedMicAvailable) {
+        updateStatusOverlay('Mikrofon nicht verbunden', microphoneName, 'error');
+        return;
+      }
+    }
+
     // Start recording first - only update UI state if successful
     currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
     console.log('[VAD] Recording started:', currentRecordingPath);
@@ -2349,7 +2164,7 @@ async function startRecordingWithVAD() {
     // Recording started successfully - now update UI
     isRecording = true;
     isVadSession = true;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
     tray.setImage(recordingIconPath);
@@ -2373,7 +2188,8 @@ async function startRecordingWithVAD() {
 
 async function stopRecordingWithVAD() {
   // VAD-Modus: Aufnahme stoppen, dann Offline-VAD analysieren (wie File Upload)
-  console.log('[VAD] ========== Stop Recording (Offline-VAD Mode) ==========');
+  const stopStartTime = Date.now();
+  console.log('[TIMING] ========== stopRecordingWithVAD START ==========');
   try {
     tray.setToolTip('DentDoc - Stoppe Aufnahme...');
 
@@ -2384,26 +2200,28 @@ async function stopRecordingWithVAD() {
     }
 
     // Stop FFmpeg recording
+    const ffmpegStopStart = Date.now();
     await audioRecorder.stopRecording();
-    console.log('[VAD] Recording stopped:', currentRecordingPath);
+    console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s - path: ${currentRecordingPath}`);
 
     // Downsample 48kHz to 16kHz for VAD/transcription
+    const downsampleStart = Date.now();
     try {
       await audioRecorder.downsampleTo16k(currentRecordingPath);
-      console.log('[VAD] Downsampled to 16kHz');
+      console.log(`[TIMING] Downsample completed in ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s`);
     } catch (err) {
-      console.warn('[VAD] Downsampling failed, using original:', err.message);
+      console.warn(`[TIMING] Downsampling failed after ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s:`, err.message);
     }
 
     isRecording = false;
     isVadSession = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(iconPath);
 
-    // Save audio immediately (before VAD processing)
+    // Save audio immediately (before VAD processing) - this can block on network drives!
     saveAudioImmediately(currentRecordingPath);
 
     // Process with Offline-VAD (same flow as file upload)
@@ -2419,7 +2237,7 @@ async function stopRecordingWithVAD() {
     // Reset state on error
     isRecording = false;
     isVadSession = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2431,6 +2249,9 @@ async function stopRecordingWithVAD() {
 }
 
 async function stopRecording() {
+  const stopStartTime = Date.now();
+  console.log('[TIMING] ========== stopRecording START ==========');
+
   // Check if we're in iPhone mode
   if (isIphoneSession) {
     console.log('[Recording] iPhone mode active - stopping iPhone session');
@@ -2464,18 +2285,21 @@ async function stopRecording() {
   try {
     tray.setToolTip('DentDoc - Verarbeite Aufnahme...');
 
+    const ffmpegStopStart = Date.now();
     await audioRecorder.stopRecording();
+    console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s`);
 
     // Downsample 48kHz to 16kHz for transcription
+    const downsampleStart = Date.now();
     try {
       await audioRecorder.downsampleTo16k(currentRecordingPath);
-      console.log('[Recording] Downsampled to 16kHz');
+      console.log(`[TIMING] Downsample completed in ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s`);
     } catch (err) {
-      console.warn('[Recording] Downsampling failed, using original:', err.message);
+      console.warn(`[TIMING] Downsampling failed after ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s:`, err.message);
     }
 
     isRecording = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2493,7 +2317,7 @@ async function stopRecording() {
     // Reset state on error
     isRecording = false;
     isProcessing = false;
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2503,89 +2327,6 @@ async function stopRecording() {
     updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestoppt werden', 'error');
   }
 }
-
-function showNotification(title, body, onClick = null) {
-  const notification = new Notification({
-    title,
-    body,
-    icon: path.join(__dirname, 'assets', 'icon.png')
-  });
-
-  if (onClick) {
-    notification.on('click', onClick);
-  }
-
-  notification.show();
-}
-
-// Custom notification popup window (styled like status overlay)
-let notificationPopupWindow = null;
-let notificationClickCallback = null;
-
-function showCustomNotification(title, body, type = 'warning', onClick = null) {
-  const { screen } = require('electron');
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const workArea = primaryDisplay.workArea;
-
-  // Close existing popup if any
-  if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
-    notificationPopupWindow.close();
-  }
-
-  notificationClickCallback = onClick;
-
-  notificationPopupWindow = new BrowserWindow({
-    width: 380,
-    height: 160,
-    x: workArea.x + workArea.width - 400,
-    y: workArea.y + workArea.height - 180,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable: false,
-    movable: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-
-  notificationPopupWindow.loadFile('src/notification-popup.html');
-
-  notificationPopupWindow.webContents.on('did-finish-load', () => {
-    // Check if window still exists (could be closed rapidly)
-    if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
-      notificationPopupWindow.webContents.send('show-notification', {
-        title,
-        body,
-        type,
-        hasClickAction: !!onClick
-      });
-    }
-  });
-
-  notificationPopupWindow.on('closed', () => {
-    notificationPopupWindow = null;
-    notificationClickCallback = null;
-  });
-}
-
-// IPC handlers for notification popup
-ipcMain.on('close-notification-popup', () => {
-  if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
-    notificationPopupWindow.close();
-  }
-});
-
-ipcMain.on('notification-popup-clicked', () => {
-  if (notificationClickCallback) {
-    notificationClickCallback();
-  }
-  if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
-    notificationPopupWindow.close();
-  }
-});
 
 function getValidOverlayPosition() {
   const { screen } = require('electron');
@@ -2655,17 +2396,14 @@ function getOverlaySizeForState(type, extra = {}) {
 
     case 'success':
       // Calculate height based on which sections are visible
-      const hasShorts = extra.shortenings && Object.keys(extra.shortenings).length > 0;
       const hasKzv = !!extra.kzvDocumentation;
       const hasBefund = extra.status01 || extra.statusPA;
 
       // Base height: 300 (header + 2 main buttons)
       // + 70 for KZV section
-      // + 117 for shortenings section
       // + 85 for befund section
       let successHeight = 300;
       if (hasKzv) successHeight += 70;
-      if (hasShorts) successHeight += 117;
       if (hasBefund) successHeight += 85;
 
       return { width: 402, height: successHeight };
@@ -2862,7 +2600,6 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     documentation: extra.documentation || null,
     kzvDocumentation: extra.kzvDocumentation || null,
     transcript: extra.transcript || null,
-    shortenings: extra.shortenings || null,
     micUrl: extra.micUrl || null,
     reconstructedTranscript: extra.reconstructedTranscript || null,
     transcriptWithSpeakers: extra.transcriptWithSpeakers || null,
@@ -2931,7 +2668,6 @@ function showLastResult() {
       documentation: lastDocumentation,
       kzvDocumentation: lastKzvDocumentation,
       transcript: lastTranscript,
-      shortenings: lastShortenings,
       reconstructedTranscript: lastReconstructedTranscript,
       transcriptWithSpeakers: lastTranscriptWithSpeakers,
       recognizedSpeakers: lastRecognizedSpeakers,
@@ -3063,7 +2799,7 @@ ipcMain.on('cancel-recording', async () => {
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(iconPath);
     tray.setToolTip('DentDoc - Bereit');
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     console.log('Recording cancelled by user');
   }
@@ -3105,14 +2841,9 @@ ipcMain.handle('get-dashboard-stats', () => {
   const profiles = voiceProfiles.getAllProfiles();
   const profileCount = profiles.length;
 
-  // Get bausteine count
-  const bausteine = bausteineManager.getAllBausteine();
-  const bausteineCount = bausteine.length;
-
   return {
     todayRecordings: count,
-    profileCount,
-    bausteineCount
+    profileCount
   };
 });
 
@@ -3143,9 +2874,12 @@ ipcMain.handle('get-all-transcripts', async () => {
             metadata.filePath = fullPath;
             metadata.folderName = path.basename(path.dirname(fullPath));
             // Check if audio file exists (try multiple extensions)
+            // Check both original and speech_only versions
             const basePath = fullPath.replace('.json', '');
             const audioExtensions = ['.wav', '.webm', '.mp3', '.m4a', '.ogg'];
-            metadata.hasAudio = audioExtensions.some(ext => fs.existsSync(basePath + ext));
+            const hasOriginal = audioExtensions.some(ext => fs.existsSync(basePath + ext));
+            const hasSpeechOnly = audioExtensions.some(ext => fs.existsSync(basePath + '_speech_only' + ext));
+            metadata.hasAudio = hasOriginal || hasSpeechOnly;
             transcripts.push(metadata);
           } catch (err) {
             console.error(`Failed to parse JSON: ${fullPath}`, err.message);
@@ -3434,6 +3168,11 @@ ipcMain.handle('open-external-url', (event, url) => {
   return true;
 });
 
+// Show notification from renderer
+ipcMain.handle('show-notification', (event, title, body) => {
+  showNotification(title, body);
+});
+
 // Get current shortcut for dashboard display
 ipcMain.handle('get-shortcut', () => {
   return store.get('shortcut', 'F9');
@@ -3581,77 +3320,6 @@ ipcMain.on('minimize-to-tray', () => {
   }
 });
 
-// Start heartbeat to keep device session active
-function startHeartbeat() {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-  }
-
-  // Send heartbeat every 5 minutes (just to keep session alive)
-  heartbeatInterval = setInterval(async () => {
-    const token = store.get('authToken');
-    if (!token) {
-      stopHeartbeat();
-      return;
-    }
-
-    const isValid = await apiClient.heartbeat(token, store);
-    if (!isValid) {
-      // Session expired - device was logged out remotely
-      console.log('Session expired - logging out locally');
-      stopHeartbeat();
-      store.delete('authToken');
-      store.delete('user');
-      updateTrayMenu();
-      showNotification('Sitzung beendet', 'Sie wurden von einem anderen Gerät abgemeldet.');
-      createLoginWindow();
-    }
-  }, 5 * 60 * 1000); // 5 minutes
-
-  // Also send immediate heartbeat on start
-  const token = store.get('authToken');
-  if (token) {
-    apiClient.heartbeat(token, store).catch(console.error);
-  }
-}
-
-// Refresh user data and check for subscription changes
-async function refreshUserData() {
-  const token = store.get('authToken');
-  if (!token) return;
-
-  try {
-    const oldUser = store.get('user');
-    const newUser = await apiClient.getUser(token);
-    if (newUser) {
-      store.set('user', newUser);
-
-      // Check if subscription status changed (e.g., user just subscribed)
-      const wasTrialExpired = oldUser?.planTier === 'free_trial' && (oldUser?.minutesRemaining || 0) <= 0 && oldUser?.subscriptionStatus !== 'active';
-      const isNowActive = newUser.subscriptionStatus === 'active';
-
-      if (wasTrialExpired && isNowActive) {
-        // User just subscribed! Show notification
-        showNotification(
-          '🎉 Willkommen bei DentDoc Pro!',
-          `Ihr Abonnement ist jetzt aktiv. Sie können unbegrenzt dokumentieren.`
-        );
-      }
-
-      updateTrayMenu();
-    }
-  } catch (e) {
-    console.log('Could not refresh user data:', e.message);
-  }
-}
-
-function stopHeartbeat() {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-  }
-}
-
 // IPC Handlers for login window
 ipcMain.handle('resize-login-window', (event, height) => {
   if (loginWindow && !loginWindow.isDestroyed()) {
@@ -3665,10 +3333,10 @@ ipcMain.handle('login', async (event, email, password) => {
     const response = await apiClient.login(email, password, store);
     store.set('authToken', response.token);
     store.set('user', response.user);
-    updateTrayMenu();
+    trayModule.updateTrayMenu();
 
     // Start heartbeat
-    startHeartbeat();
+    session.startHeartbeat();
 
     if (loginWindow) {
       loginWindow.close();
@@ -3742,7 +3410,7 @@ ipcMain.handle('login', async (event, email, password) => {
 ipcMain.handle('logout', async () => {
   const token = store.get('authToken');
   // Stop heartbeat
-  stopHeartbeat();
+  session.stopHeartbeat();
   // Logout from server (free device slot)
   if (token) {
     await apiClient.logout(token, store);
@@ -3798,9 +3466,9 @@ ipcMain.handle('get-settings', async () => {
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', true),
-    docMode: store.get('docMode', 'agent-v2'),
+    docMode: store.get('docMode', 'agent-v2.1'),  // Default to agent-v2.1
     theme: store.get('theme', 'dark'),
-    vadEnabled: store.get('vadEnabled', true)
+    vadEnabled: store.get('vadEnabled', true)  // VAD enabled by default
   };
 });
 
@@ -3851,11 +3519,6 @@ ipcMain.handle('save-settings', async (event, settings) => {
     store.set('keepAudio', settings.keepAudio);
   }
 
-  // Save documentation mode
-  if (settings.docMode !== undefined) {
-    store.set('docMode', settings.docMode);
-  }
-
   // Save theme
   if (settings.theme !== undefined) {
     store.set('theme', settings.theme);
@@ -3865,6 +3528,12 @@ ipcMain.handle('save-settings', async (event, settings) => {
   if (settings.vadEnabled !== undefined) {
     store.set('vadEnabled', settings.vadEnabled);
     console.log('Saved vadEnabled:', settings.vadEnabled);
+  }
+
+  // Save docMode setting
+  if (settings.docMode !== undefined) {
+    store.set('docMode', settings.docMode);
+    console.log('Saved docMode:', settings.docMode);
   }
 
   // Save microphone source (desktop/iphone)
@@ -4476,79 +4145,43 @@ ipcMain.handle('get-debug-log-path', async () => {
   return DEBUG_LOG;
 });
 
-// =============================================================================
-// PRAXIS-EINSTELLUNGEN API (V1.2 Textbausteine)
-// =============================================================================
+// Upload debug logs to backend for remote troubleshooting
+ipcMain.handle('upload-debug-logs', async () => {
+  try {
+    const token = store.get('authToken');
+    if (!token) {
+      return { success: false, error: 'Nicht angemeldet' };
+    }
+
+    // Read the debug log file
+    let logs = '';
+    if (fs.existsSync(DEBUG_LOG)) {
+      logs = fs.readFileSync(DEBUG_LOG, 'utf8');
+      // Limit to last 500KB to avoid huge uploads
+      const maxSize = 500 * 1024;
+      if (logs.length > maxSize) {
+        logs = logs.slice(-maxSize);
+      }
+    }
+
+    if (!logs || logs.trim().length === 0) {
+      return { success: false, error: 'Debug-Log ist leer' };
+    }
+
+    // Get app version
+    const appVersion = app.getVersion();
+
+    // Upload to backend
+    const result = await apiClient.uploadDebugLogs(token, store, logs, appVersion);
+    return { success: true, debugLogId: result.debugLogId };
+  } catch (error) {
+    console.error('Upload debug logs error:', error);
+    return { success: false, error: error.message || 'Upload fehlgeschlagen' };
+  }
+});
 
 ipcMain.handle('get-token', () => {
   return store.get('authToken');
-});
-
-ipcMain.handle('api-get-praxis-einstellungen', async (event, token) => {
-  console.log('[Praxis-Einstellungen] GET called, token:', token ? 'present' : 'missing');
-  try {
-    const result = await apiClient.getPraxisEinstellungen(token);
-    console.log('[Praxis-Einstellungen] GET result:', JSON.stringify(result).substring(0, 200));
-    return result;
-  } catch (error) {
-    console.error('[Praxis-Einstellungen] GET error:', error.message);
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('api-add-textbaustein', async (event, token, key, text) => {
-  try {
-    const result = await apiClient.addTextbaustein(token, key, text);
-    return result;
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('api-remove-textbaustein', async (event, token, key) => {
-  try {
-    const result = await apiClient.removeTextbaustein(token, key);
-    return result;
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('api-reset-praxis-einstellungen', async (event, token) => {
-  try {
-    const result = await apiClient.resetPraxisEinstellungen(token);
-    return result;
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('api-add-themen-anpassung', async (event, token, themenAnpassung) => {
-  try {
-    const result = await apiClient.addThemenAnpassung(token, themenAnpassung);
-    return result;
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-
-ipcMain.handle('api-remove-themen-anpassung', async (event, token, thema) => {
-  try {
-    const result = await apiClient.removeThemenAnpassung(token, thema);
-    return result;
-  } catch (error) {
-    return { error: error.message };
-  }
-});
-
-// Generic update for Praxis-Einstellungen (new V2 format)
-ipcMain.handle('api-update-praxis-einstellungen', async (event, token, updates) => {
-  try {
-    const result = await apiClient.updatePraxisEinstellungen(token, updates);
-    return result;
-  } catch (error) {
-    return { error: error.message };
-  }
 });
 
 ipcMain.handle('open-temp-folder', async () => {
@@ -4603,244 +4236,6 @@ ipcMain.handle('select-file-dialog', async (event, options = {}) => {
   return result.filePaths[0];
 });
 
-// IPC Handlers for Bausteine
-const bausteineManager = require('./src/bausteine');
-
-// Bausteine mit Kategorien laden (neues Format)
-ipcMain.handle('get-bausteine-with-categories', async () => {
-  return {
-    data: bausteineManager.getAllBausteineWithCategories(),
-    defaults: bausteineManager.getDefaultBausteineWithCategories(),
-    path: bausteineManager.getBausteinePath()
-  };
-});
-
-// Legacy: Flaches Format für Kompatibilität
-ipcMain.handle('get-bausteine', async () => {
-  return {
-    bausteine: bausteineManager.getAllBausteine(),
-    defaults: bausteineManager.getDefaultBausteine()
-  };
-});
-
-// Bausteine speichern (neues Format mit Kategorien)
-ipcMain.handle('save-bausteine-with-categories', async (event, data) => {
-  bausteineManager.saveAllBausteineWithCategories(data);
-  return { success: true };
-});
-
-// Legacy: Flaches Format speichern
-ipcMain.handle('save-bausteine', async (event, bausteine) => {
-  bausteineManager.saveAllBausteine(bausteine);
-  return { success: true };
-});
-
-// Pfad-Management
-ipcMain.handle('get-bausteine-path', async () => {
-  return bausteineManager.getBausteinePath();
-});
-
-ipcMain.handle('set-bausteine-path', async (event, newPath) => {
-  bausteineManager.setBausteinePath(newPath);
-  return { success: true };
-});
-
-// Prüft ob im Zielordner bereits eine bausteine.json existiert
-ipcMain.handle('check-bausteine-exists', async (event, targetPath) => {
-  return fs.existsSync(targetPath);
-});
-
-// Kopiert die aktuelle bausteine.json in einen neuen Ordner
-ipcMain.handle('copy-bausteine-to-path', async (event, targetPath) => {
-  const currentPath = bausteineManager.getBausteinePath();
-  const currentData = bausteineManager.getAllBausteineWithCategories();
-
-  // Zielordner erstellen falls nötig
-  const targetDir = path.dirname(targetPath);
-  if (!fs.existsSync(targetDir)) {
-    fs.mkdirSync(targetDir, { recursive: true });
-  }
-
-  // Daten in neue Datei schreiben
-  fs.writeFileSync(targetPath, JSON.stringify(currentData, null, 2), 'utf8');
-
-  // Pfad umstellen
-  bausteineManager.setBausteinePath(targetPath);
-
-  return { success: true };
-});
-
-// Dialog für Bausteine-Pfad-Wechsel
-ipcMain.handle('show-bausteine-path-dialog', async (event, targetPath) => {
-  const targetExists = fs.existsSync(targetPath);
-  const currentPath = bausteineManager.getBausteinePath();
-  const hasCurrentFile = fs.existsSync(currentPath);
-
-  // Prüfe ob aktuelle Datei Änderungen hat (nicht nur Defaults)
-  let hasCustomData = false;
-  if (hasCurrentFile) {
-    try {
-      const data = JSON.parse(fs.readFileSync(currentPath, 'utf8'));
-      hasCustomData = true; // Wenn Datei existiert, hat sie potenziell custom Daten
-    } catch (e) {
-      hasCustomData = false;
-    }
-  }
-
-  let buttons = [];
-  let message = '';
-  let detail = '';
-
-  if (targetExists && hasCurrentFile) {
-    // Beide existieren
-    buttons = ['Aktuelle Bausteine kopieren', 'Vorhandene Datei verwenden', 'Abbrechen'];
-    message = 'Im Zielordner existiert bereits eine Bausteine-Datei.';
-    detail = 'Möchten Sie Ihre aktuellen Bausteine dorthin kopieren (überschreibt vorhandene) oder die vorhandene Datei verwenden?';
-  } else if (targetExists) {
-    // Nur Ziel existiert
-    buttons = ['Vorhandene Datei verwenden', 'Mit Standards überschreiben', 'Abbrechen'];
-    message = 'Im Zielordner existiert bereits eine Bausteine-Datei.';
-    detail = 'Möchten Sie diese verwenden oder mit Standard-Bausteinen überschreiben?';
-  } else if (hasCurrentFile) {
-    // Nur aktuelle existiert
-    buttons = ['Aktuelle Bausteine kopieren', 'Mit Standards beginnen', 'Abbrechen'];
-    message = 'Bausteine-Speicherort ändern';
-    detail = 'Möchten Sie Ihre aktuellen Bausteine in den neuen Ordner kopieren oder mit Standard-Bausteinen neu beginnen?';
-  } else {
-    // Keine existiert - einfach wechseln
-    return { action: 'use_defaults' };
-  }
-
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'question',
-    buttons,
-    defaultId: 0,
-    cancelId: buttons.length - 1,
-    title: 'Bausteine-Speicherort ändern',
-    message,
-    detail
-  });
-
-  // Mapping der Antworten
-  if (result.response === buttons.length - 1) {
-    return { action: 'cancel' };
-  }
-
-  if (targetExists && hasCurrentFile) {
-    // Beide existieren
-    if (result.response === 0) return { action: 'copy_current' };
-    if (result.response === 1) return { action: 'use_existing' };
-  } else if (targetExists) {
-    // Nur Ziel existiert
-    if (result.response === 0) return { action: 'use_existing' };
-    if (result.response === 1) return { action: 'use_defaults' };
-  } else if (hasCurrentFile) {
-    // Nur aktuelle existiert
-    if (result.response === 0) return { action: 'copy_current' };
-    if (result.response === 1) return { action: 'use_defaults' };
-  }
-
-  return { action: 'cancel' };
-});
-
-// Kategorien-Management
-ipcMain.handle('create-category', async (event, name) => {
-  const category = bausteineManager.createCategory(name);
-  return { success: true, category };
-});
-
-ipcMain.handle('rename-category', async (event, categoryId, newName) => {
-  bausteineManager.renameCategory(categoryId, newName);
-  return { success: true };
-});
-
-ipcMain.handle('delete-category', async (event, categoryId) => {
-  bausteineManager.deleteCategory(categoryId);
-  return { success: true };
-});
-
-// Baustein-Management
-ipcMain.handle('create-baustein', async (event, categoryId, baustein) => {
-  const newBaustein = bausteineManager.createBaustein(categoryId, baustein);
-  return { success: true, baustein: newBaustein };
-});
-
-ipcMain.handle('update-baustein', async (event, bausteinId, updates) => {
-  bausteineManager.updateBaustein(bausteinId, updates);
-  return { success: true };
-});
-
-ipcMain.handle('delete-baustein', async (event, bausteinId) => {
-  bausteineManager.deleteBaustein(bausteinId);
-  return { success: true };
-});
-
-ipcMain.handle('move-baustein', async (event, bausteinId, targetCategoryId) => {
-  bausteineManager.moveBausteinToCategory(bausteinId, targetCategoryId);
-  return { success: true };
-});
-
-ipcMain.handle('reset-baustein', async (event, bausteinId) => {
-  bausteineManager.resetBaustein(bausteinId);
-  return { success: true };
-});
-
-ipcMain.handle('reset-all-bausteine', async () => {
-  bausteineManager.resetAllBausteine();
-  return { success: true };
-});
-
-ipcMain.handle('confirm-reset-baustein', async (event, bausteinName) => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'question',
-    buttons: ['Zurücksetzen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Baustein zurücksetzen',
-    message: `Baustein "${bausteinName}" auf Standard zurücksetzen?`
-  });
-  return result.response === 0;
-});
-
-ipcMain.handle('confirm-reset-all-bausteine', async () => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'warning',
-    buttons: ['Alle zurücksetzen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Alle Bausteine zurücksetzen',
-    message: 'ALLE Bausteine auf Standard zurücksetzen?',
-    detail: 'Dies kann nicht rückgängig gemacht werden!'
-  });
-  return result.response === 0;
-});
-
-ipcMain.handle('confirm-delete-category', async (event, categoryName) => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'warning',
-    buttons: ['Löschen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Kategorie löschen',
-    message: `Kategorie "${categoryName}" wirklich löschen?`,
-    detail: 'Die Bausteine werden in die Kategorie "Allgemein" verschoben.'
-  });
-  return result.response === 0;
-});
-
-ipcMain.handle('confirm-delete-baustein', async (event, bausteinName) => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'warning',
-    buttons: ['Löschen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Baustein löschen',
-    message: `Baustein "${bausteinName}" wirklich löschen?`,
-    detail: 'Dies kann nicht rückgängig gemacht werden!'
-  });
-  return result.response === 0;
-});
-
 ipcMain.handle('confirm-delete-profile', async () => {
   const result = await dialog.showMessageBox(dashboardWindow, {
     type: 'warning',
@@ -4852,67 +4247,6 @@ ipcMain.handle('confirm-delete-profile', async () => {
     detail: 'Dies kann nicht rückgängig gemacht werden!'
   });
   return result.response === 0;
-});
-
-ipcMain.handle('confirm-delete-textbaustein', async (event, key) => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'warning',
-    buttons: ['Löschen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Textbaustein löschen',
-    message: `Textbaustein "${key}" wirklich löschen?`,
-    detail: 'Dies kann nicht rückgängig gemacht werden!'
-  });
-  return result.response === 0;
-});
-
-ipcMain.handle('confirm-reset-textbausteine', async () => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'warning',
-    buttons: ['Alle zurücksetzen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Textbausteine zurücksetzen',
-    message: 'Alle Textbausteine auf Standard zurücksetzen?',
-    detail: 'Dies kann nicht rückgängig gemacht werden!'
-  });
-  return result.response === 0;
-});
-
-ipcMain.handle('confirm-delete-thema', async (event, themaName) => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'warning',
-    buttons: ['Löschen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Thema löschen',
-    message: `Thema "${themaName}" wirklich löschen?`,
-    detail: 'Dies kann nicht rückgängig gemacht werden!'
-  });
-  return result.response === 0;
-});
-
-ipcMain.handle('confirm-reset-themen', async () => {
-  const result = await dialog.showMessageBox(dashboardWindow, {
-    type: 'warning',
-    buttons: ['Alle zurücksetzen', 'Abbrechen'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Themen zurücksetzen',
-    message: 'Alle Themen auf Standard zurücksetzen?',
-    detail: 'Dies kann nicht rückgängig gemacht werden!'
-  });
-  return result.response === 0;
-});
-
-ipcMain.handle('import-bausteine', async (event, json) => {
-  bausteineManager.importBausteine(json);
-  return { success: true };
-});
-
-ipcMain.handle('export-bausteine', async () => {
-  return bausteineManager.exportBausteine();
 });
 
 // IPC Handlers for voice profiles
@@ -5756,7 +5090,48 @@ app.whenReady().then(() => {
   // TODO: Remove this line after testing tray balloon
   store.delete('hasSeenTrayHint');
 
-  createTray();
+  // Initialize tray module with dependencies
+  trayModule.init({
+    store,
+    refreshUserData: () => session.refreshUserData(),
+    openLocalDashboard,
+    createLoginWindow,
+    startRecording,
+    stopRecording,
+    showLastResult,
+    selectAndTranscribeAudioFile,
+    openWebDashboard,
+    showCustomNotification,
+    updateStatusOverlay,
+    logout: async () => {
+      const token = store.get('authToken');
+      session.stopHeartbeat();
+      if (token) {
+        await apiClient.logout(token, store);
+      }
+      store.delete('authToken');
+      store.delete('user');
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        dashboardWindow.destroy();
+      }
+      showCustomNotification('Abgemeldet', 'Sie wurden erfolgreich abgemeldet', 'info');
+      createLoginWindow();
+    },
+    getState: () => ({ isRecording, isProcessing, lastDocumentation })
+  });
+  trayModule.createTray();
+  tray = trayModule.getTray();
+
+  // Initialize notification IPC handlers
+  initNotificationIPC();
+
+  // Initialize session module with dependencies
+  session.init({
+    store,
+    updateTrayMenu: trayModule.updateTrayMenu,
+    showNotification,
+    createLoginWindow
+  });
 
   // Initialize VAD Controller
   vadController.initialize();
@@ -5809,7 +5184,7 @@ app.whenReady().then(() => {
     apiClient.heartbeat(token, store).then(isValid => {
       if (isValid) {
         // Token valid, start heartbeat and get user data
-        startHeartbeat();
+        session.startHeartbeat();
         return apiClient.getUser(token);
       } else {
         // Session expired
@@ -5817,7 +5192,7 @@ app.whenReady().then(() => {
       }
     }).then(user => {
       store.set('user', user);
-      updateTrayMenu();
+      trayModule.updateTrayMenu();
 
       // Create dashboard window hidden at startup (for F9 audio monitoring)
       // The renderer needs to be running to handle getUserMedia for real audio levels
@@ -5869,7 +5244,7 @@ app.whenReady().then(() => {
       }
     }).catch(() => {
       // Token invalid or session expired, show login
-      stopHeartbeat();
+      session.stopHeartbeat();
       store.delete('authToken');
       store.delete('user');
       createLoginWindow();
