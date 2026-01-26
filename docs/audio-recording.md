@@ -14,6 +14,127 @@ Die App unterstützt drei Aufnahme-Modi:
 
 ---
 
+## Aufnahme- und Verarbeitungs-Status (State Management)
+
+### Zwei getrennte Zustände
+
+Die App unterscheidet strikt zwischen **Aufnahme** und **Verarbeitung**:
+
+| Flag | Bedeutung | Wann aktiv |
+|------|-----------|------------|
+| `isRecording` | FFmpeg nimmt auf | F9 Start → F9 Stop |
+| `isProcessing` | Verarbeitung läuft | F9 Stop → Erfolg/Fehler |
+
+**Wichtig:** Diese Zustände schließen sich gegenseitig aus. Während `isProcessing=true` ist, kann keine neue Aufnahme gestartet werden.
+
+### State Machine
+
+```
+IDLE (isRecording=false, isProcessing=false)
+  │
+  F9 → startRecording()
+  ↓
+RECORDING (isRecording=true, isProcessing=false)
+  │    UI: "🎤 Aufnahme läuft"
+  │    Tray: Recording-Icon
+  │
+  F9 → stopRecording()
+  ↓
+  FFmpeg stoppt
+  ↓
+PROCESSING (isRecording=false, isProcessing=true)
+  │    UI: Zeigt aktuellen Schritt
+  │    F9 wird ignoriert!
+  │
+  ├─ Downsampling...
+  ├─ Audio wird gespeichert...
+  ├─ Stille wird entfernt (VAD)...
+  ├─ Audio wird hochgeladen...
+  ├─ Transkription läuft...
+  ├─ Sprecher werden erkannt...
+  └─ Dokumentation wird erstellt...
+  │
+  ↓
+SUCCESS/ERROR → isProcessing=false
+  ↓
+IDLE (bereit für neue Aufnahme)
+```
+
+### Implementierung (main.js)
+
+```javascript
+// Globale Flags
+let isRecording = false;   // Line ~116
+let isProcessing = false;  // Line ~117
+
+// Guard in stopRecording() - verhindert doppelte F9-Presse
+async function stopRecording() {
+  if (isProcessing) {
+    console.log('[Recording] Already processing, ignoring stop request');
+    return;
+  }
+  // ...
+}
+
+// In stopRecordingWithVAD() - sofortiger Status-Wechsel nach FFmpeg-Stop
+async function stopRecordingWithVAD() {
+  // FFmpeg stoppen
+  await audioRecorder.stopRecording();
+
+  // SOFORT Status wechseln (vor Downsampling!)
+  isRecording = false;
+  isVadSession = false;
+  isProcessing = true;
+
+  // UI aktualisieren
+  updateStatusOverlay('Verarbeitung läuft', 'Downsampling...', 'processing');
+
+  // Jetzt erst Downsampling (kann lange dauern bei großen Dateien)
+  await audioRecorder.downsampleTo16k(currentRecordingPath);
+
+  // Verarbeitung...
+  await processFileWithVAD(currentRecordingPath, token, { source: 'mic' });
+}
+```
+
+### Sicherheits-Timeout
+
+Falls die Verarbeitung unerwartet hängt (FFmpeg-Crash, Netzwerk-Timeout, etc.), wird `isProcessing` nach 5 Minuten automatisch zurückgesetzt:
+
+```javascript
+// In stopRecordingWithVAD()
+const processingTimeout = setTimeout(() => {
+  if (isProcessing) {
+    console.error('[SAFETY] Processing timeout after 5 minutes - auto-resetting state');
+    isProcessing = false;
+    trayModule.updateTrayMenu();
+    autoUploadDebugLogs('processing-timeout');
+  }
+}, 5 * 60 * 1000);  // 5 Minuten
+
+// Timeout wird bei Erfolg/Fehler gelöscht
+clearProcessingTimeout();
+```
+
+### Fehlerbehandlung
+
+| Szenario | Was passiert | isProcessing Reset? |
+|----------|--------------|---------------------|
+| Fehler vor processFileWithVAD | Catch-Block in stopRecordingWithVAD | ✓ Ja |
+| Fehler in processFileWithVAD | Finally-Block in processFileWithVAD | ✓ Ja |
+| App-Crash/Hang | Sicherheits-Timeout (5 Min) | ✓ Ja |
+
+### Warum diese Architektur?
+
+**Problem vorher:** Bei langen Aufnahmen (50+ Minuten) dauerte das Downsampling ~140 Sekunden. Wenn der User während dieser Zeit F9 drückte:
+- `isRecording` war noch `true`
+- Ein zweiter `stopRecordingWithVAD()` wurde ausgelöst
+- EBUSY-Fehler (Datei gesperrt) und FFmpeg-Crashes
+
+**Lösung:** `isRecording=false` und `isProcessing=true` werden SOFORT nach FFmpeg-Stop gesetzt, nicht erst nach dem Downsampling.
+
+---
+
 ## Standard-Aufnahme (audioRecorderFFmpeg.js)
 
 ### Funktionsweise

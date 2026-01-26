@@ -690,7 +690,7 @@ async function loadLastDocumentation() {
 
 document.getElementById('copyLastDocBtn').addEventListener('click', async () => {
   if (lastDocData && lastDocData.documentation) {
-    await navigator.clipboard.writeText(lastDocData.documentation);
+    await ipcRenderer.invoke('copy-to-clipboard', lastDocData.documentation);
     const btn = document.getElementById('copyLastDocBtn');
     const originalHTML = btn.innerHTML;
     btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Kopiert!';
@@ -959,8 +959,13 @@ async function loadSettingsView() {
   const theme = settings.theme || 'dark';
   document.getElementById('settingsThemeSelect').value = theme;
 
-  const docMode = settings.docMode || 'agent-v2.1';
-  document.getElementById('settingsDocModeSelect').value = docMode;
+  const docModeSelect = document.getElementById('settingsDocModeSelect');
+  docModeSelect.value = settings.docMode || 'agent-v2.1';
+  // If stored value doesn't exist in dropdown (deleted agent), fall back to default
+  if (!docModeSelect.value) {
+    docModeSelect.value = 'agent-v2.1';
+  }
+  const docMode = docModeSelect.value;
 
   await loadSettingsMicrophones();
 

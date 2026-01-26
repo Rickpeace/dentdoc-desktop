@@ -53,6 +53,12 @@ function debugLog(message) {
   }
 }
 
+// Valid docMode values - update this when adding/removing agents
+const VALID_DOC_MODES = ['agent-v2.1'];
+function validateDocMode(mode) {
+  return VALID_DOC_MODES.includes(mode) ? mode : 'agent-v2.1';
+}
+
 // Override console methods to also write to debug log
 const originalConsoleLog = console.log;
 const originalConsoleWarn = console.warn;
@@ -144,6 +150,45 @@ app.setLoginItemSettings({
   openAtLogin: true,
   path: app.getPath('exe')
 });
+
+/**
+ * Copy text to clipboard with HTML and RTF formatting preserved.
+ * This ensures line breaks are preserved when pasting into rich text fields
+ * (like Z1 Dental PVS comment windows) that strip plain text formatting.
+ */
+function copyToClipboardWithFormatting(text) {
+  // === HTML Format ===
+  const escapeHtml = (str) => str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  const escaped = escapeHtml(text);
+  const paragraphs = escaped.split(/\r?\n\r?\n/);
+  const htmlParagraphs = paragraphs.map(p => p.replace(/\r?\n/g, '<br>'));
+  const html = '<p>' + htmlParagraphs.join('</p><p>') + '</p>';
+
+  // === RTF Format ===
+  // RTF uses \par for line breaks, needs escaping for \ { }
+  const escapeRtf = (str) => str
+    .replace(/\\/g, '\\\\')
+    .replace(/\{/g, '\\{')
+    .replace(/\}/g, '\\}');
+
+  const rtfEscaped = escapeRtf(text);
+  // Convert line breaks: \n\n = double \par (paragraph), \n = single \par (line break)
+  const rtfContent = rtfEscaped
+    .replace(/\r?\n\r?\n/g, '\\par\\par ')
+    .replace(/\r?\n/g, '\\par ');
+  const rtf = `{\\rtf1\\ansi\\deff0 ${rtfContent}}`;
+
+  // Write all formats - apps pick their preferred format
+  clipboard.write({
+    text: text,
+    html: html,
+    rtf: rtf
+  });
+}
 
 /**
  * Automatically upload debug logs to backend (fire-and-forget)
@@ -343,12 +388,16 @@ function registerShortcut(shortcut) {
       return;
     }
     shortcutLocked = true;
-    setTimeout(() => { shortcutLocked = false; }, 3000);  // 3 second cooldown
+    setTimeout(() => { shortcutLocked = false; }, 1000);  // 1 second cooldown
 
-    console.log('[Shortcut] F9 pressed, isRecording:', isRecording);
+    console.log('[Shortcut] F9 pressed, isRecording:', isRecording, 'isProcessing:', isProcessing);
 
     if (isRecording) {
       await stopRecording();
+    } else if (isProcessing) {
+      // Block F9 during processing - show warning but don't change status overlay
+      console.log('[Shortcut] Blocked - still processing');
+      showNotification('Bitte warten', 'Die vorherige Aufnahme wird noch verarbeitet...');
     } else {
       // Show immediate feedback before startRecording() does async work
       updateStatusOverlay('Aufnahme wird gestartet...', 'Bitte warten...', 'starting');
@@ -369,10 +418,14 @@ function registerShortcut(shortcut) {
       globalShortcut.register(oldShortcut, async () => {
         if (shortcutLocked) return;
         shortcutLocked = true;
-        setTimeout(() => { shortcutLocked = false; }, 3000);
+        setTimeout(() => { shortcutLocked = false; }, 1000);
 
         if (isRecording) {
           await stopRecording();
+        } else if (isProcessing) {
+          // Block F9 during processing - show warning but don't change status overlay
+          console.log('[Shortcut] Blocked - still processing');
+          showNotification('Bitte warten', 'Die vorherige Aufnahme wird noch verarbeitet...');
         } else {
           // Show immediate feedback before startRecording() does async work
           updateStatusOverlay('Aufnahme wird gestartet...', 'Bitte warten...', 'starting');
@@ -1021,8 +1074,8 @@ async function processAudioFile(audioFilePath, options = {}) {
     lastKzvDocumentation = kzvDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
-    // Copy to clipboard
-    clipboard.writeText(documentation);
+    // Copy to clipboard (with HTML formatting for rich text apps like Z1)
+    copyToClipboardWithFormatting(documentation);
 
     // Show success immediately - user can already paste the documentation
     const autoClose = store.get('autoCloseOverlay', false);
@@ -1408,8 +1461,8 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     lastKzvDocumentation = kzvDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
-    // Copy to clipboard
-    clipboard.writeText(documentation);
+    // Copy to clipboard (with HTML formatting for rich text apps like Z1)
+    copyToClipboardWithFormatting(documentation);
 
     // Show success IMMEDIATELY - user can already paste the documentation
     console.log('  Dokumentation erstellt!');
@@ -2294,6 +2347,33 @@ async function stopRecordingWithVAD() {
       console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s - path: ${currentRecordingPath}`);
     }
 
+    // IMMEDIATELY transition to processing state (before downsampling)
+    // This prevents double F9 press issues during long downsampling
+    isRecording = false;
+    isVadSession = false;
+    isProcessing = true;
+    trayModule.updateTrayMenu();
+
+    // Safety timeout: auto-reset isProcessing after 5 minutes in case of unexpected hang
+    const processingTimeout = setTimeout(() => {
+      if (isProcessing) {
+        console.error('[SAFETY] Processing timeout after 5 minutes - auto-resetting state');
+        isProcessing = false;
+        trayModule.updateTrayMenu();
+        tray.setToolTip('DentDoc - Bereit');
+        autoUploadDebugLogs('processing-timeout');
+      }
+    }, 5 * 60 * 1000);
+
+    // Clear timeout when processing completes (in finally block of processFileWithVAD)
+    const clearProcessingTimeout = () => clearTimeout(processingTimeout);
+
+    // Reset tray icon and show processing status
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Verarbeitung läuft...');
+    updateStatusOverlay('Verarbeitung läuft', 'Downsampling...', 'processing');
+
     // Downsample 48kHz to 16kHz for VAD/transcription
     const downsampleStart = Date.now();
     try {
@@ -2303,15 +2383,8 @@ async function stopRecordingWithVAD() {
       console.warn(`[TIMING] Downsampling failed after ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s:`, err.message);
     }
 
-    isRecording = false;
-    isVadSession = false;
-    trayModule.updateTrayMenu();
-
-    // Reset tray icon
-    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-    tray.setImage(iconPath);
-
     // Save audio immediately (before VAD processing) - this can block on network drives!
+    updateStatusOverlay('Verarbeitung läuft', 'Audio wird gespeichert...', 'processing');
     saveAudioImmediately(currentRecordingPath);
 
     // Process with Offline-VAD (same flow as file upload)
@@ -2321,14 +2394,21 @@ async function stopRecordingWithVAD() {
     const token = store.get('authToken');
     await processFileWithVAD(currentRecordingPath, token, { source: 'mic' });
 
+    // Clear safety timeout on successful completion
+    clearProcessingTimeout();
+
   } catch (error) {
+    // Clear safety timeout on error
+    clearProcessingTimeout();
+
     console.error('[VAD] Stop error:', error.message || error);
     debugLog(`[VAD] Stop error details: ${error.message}, stack: ${error.stack}`);
     autoUploadDebugLogs('stopRecordingWithVAD-error');
 
-    // Reset state on error
+    // Reset ALL state on error
     isRecording = false;
     isVadSession = false;
+    isProcessing = false;
     trayModule.updateTrayMenu();
 
     // Reset tray icon
@@ -2343,6 +2423,12 @@ async function stopRecordingWithVAD() {
 async function stopRecording() {
   const stopStartTime = Date.now();
   console.log('[TIMING] ========== stopRecording START ==========');
+
+  // Block if already processing (prevents double F9 press issues)
+  if (isProcessing) {
+    console.log('[Recording] Already processing, ignoring stop request');
+    return;
+  }
 
   // Check if we're in iPhone mode
   if (isIphoneSession) {
@@ -3276,10 +3362,14 @@ ipcMain.handle('get-shortcut', () => {
 ipcMain.handle('toggle-recording', async () => {
   if (isRecording) {
     await stopRecording();
-    return { recording: false };
+    return { recording: false, processing: isProcessing };
+  } else if (isProcessing) {
+    // Block during processing
+    showNotification('Bitte warten', 'Die vorherige Aufnahme wird noch verarbeitet...');
+    return { recording: false, processing: true, blocked: true };
   } else {
     await startRecording();
-    return { recording: true };
+    return { recording: isRecording, processing: false };
   }
 });
 
@@ -3350,7 +3440,7 @@ ipcMain.handle('reset-onboarding', () => {
 });
 
 ipcMain.handle('copy-to-clipboard', (event, text) => {
-  clipboard.writeText(text);
+  copyToClipboardWithFormatting(text);
   return true;
 });
 
@@ -3560,7 +3650,7 @@ ipcMain.handle('get-settings', async () => {
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', true),
-    docMode: store.get('docMode', 'agent-v2.1'),  // Default to agent-v2.1
+    docMode: validateDocMode(store.get('docMode', 'agent-v2.1')),
     theme: store.get('theme', 'dark'),
     vadEnabled: store.get('vadEnabled', true)  // VAD enabled by default
   };

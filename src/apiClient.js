@@ -735,7 +735,7 @@ async function segmentPassages(token, transcriptText, words) {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        timeout: 90000 // 90s timeout for AI processing (long transcripts can take time)
+        timeout: 120000 // 2 min timeout for AI processing (long transcripts can take time)
       }
     );
 

@@ -833,6 +833,17 @@
         </div>
       </div>
 
+      <!-- Normalized Transcript Section -->
+      <div id="normalizedSection" class="kzv-section">
+        <div class="kzv-label">Normalisiertes Transkript</div>
+        <div class="kzv-buttons">
+          <button id="copyNormalizedBtn" class="kzv-btn" title="Normalisiertes Transkript kopieren" disabled>
+            <span class="kzv-icon">📝</span>
+            <span>Transkript kopieren</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Befund Section (01/PA Status) -->
       <div id="befundSection" class="befund-section">
         <div class="befund-label">Strukturierte Befunde</div>
@@ -1262,6 +1273,18 @@
               copyKzvBtn.disabled = true;
             }
 
+            // Show normalized transcript section if available
+            const normalizedSection = document.getElementById('normalizedSection');
+            const copyNormalizedBtn = document.getElementById('copyNormalizedBtn');
+            if (currentReconstructedTranscript) {
+              normalizedSection.classList.add('visible');
+              copyNormalizedBtn.disabled = false;
+              copyNormalizedBtn.classList.remove('copied');
+            } else {
+              normalizedSection.classList.remove('visible');
+              copyNormalizedBtn.disabled = true;
+            }
+
             // Show befund section if 01 or PA status available
             const befundSection = document.getElementById('befundSection');
             const show01Btn = document.getElementById('show01Status');
@@ -1428,6 +1451,16 @@
       }
     });
 
+    // Copy Normalized Transcript button
+    document.getElementById('copyNormalizedBtn').addEventListener('click', () => {
+      if (currentReconstructedTranscript) {
+        ipcRenderer.invoke('copy-to-clipboard', currentReconstructedTranscript);
+        showCopied(document.getElementById('copyNormalizedBtn'));
+        lastClickedDoc = 'normalized';
+        saveLastClickedDoc();
+      }
+    });
+
     function showCopied(btn) {
       btn.classList.add('copied');
       setTimeout(() => {
@@ -1503,6 +1536,10 @@
         case 'kzv':
           textToCopy = currentKzvDocumentation;
           btnToHighlight = document.getElementById('copyKzvBtn');
+          break;
+        case 'normalized':
+          textToCopy = currentReconstructedTranscript;
+          btnToHighlight = document.getElementById('copyNormalizedBtn');
           break;
       }
 
