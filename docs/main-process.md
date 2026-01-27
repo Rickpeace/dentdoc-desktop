@@ -439,6 +439,49 @@ try {
 - Zeigt User-Email, Fehlermeldung, Kontext
 - Hilft bei Remote-Debugging
 
+### Auto-Upload Debug Logs
+
+Debug-Logs werden automatisch hochgeladen bei:
+- App-Start (nach erfolgreicher Token-Validierung)
+- Fehlern in Recording/Processing-Funktionen
+
+```javascript
+// main.js
+async function autoUploadDebugLogs(context) {
+  const token = store.get('authToken');
+  if (!token) return;
+
+  try {
+    const debugLogPath = path.join(os.tmpdir(), 'dentdoc-main-debug.log');
+    if (!fs.existsSync(debugLogPath)) return;
+
+    const logContent = fs.readFileSync(debugLogPath, 'utf8');
+    const last50KB = logContent.slice(-50000);  // Nur letzte 50KB
+
+    await apiClient.uploadDebugLog(token, {
+      context,
+      timestamp: new Date().toISOString(),
+      appVersion: app.getVersion(),
+      logs: last50KB
+    });
+    console.log(`[AUTO-UPLOAD] Context: ${context} at ${new Date().toISOString()}`);
+  } catch (err) {
+    // Fire-and-forget, keine Fehlerbehandlung nötig
+  }
+}
+```
+
+**Verwendung:**
+```javascript
+// Bei App-Start
+autoUploadDebugLogs('app-startup');
+
+// Bei Fehlern
+catch (error) {
+  autoUploadDebugLogs('stopRecordingWithVAD-error');
+}
+```
+
 ---
 
 ## Mikrofon-Verfügbarkeits-Check

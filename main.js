@@ -157,7 +157,14 @@ app.setLoginItemSettings({
  * (like Z1 Dental PVS comment windows) that strip plain text formatting.
  */
 function copyToClipboardWithFormatting(text) {
-  // === HTML Format ===
+  // === Plain Text with CRLF (Windows/Z1 standard) ===
+  // Normalize for Z1 "Erweiterte Dokumentation" plain text fields
+  const textCrlf = text
+    .replace(/\r?\n/g, '\r\n')           // LF → CRLF (wichtig für Z1)
+    .replace(/[ \t]+\r\n/g, '\r\n')      // Trailing spaces entfernen
+    .replace(/(\r\n){3,}/g, '\r\n\r\n'); // Max 1 Leerzeile
+
+  // === HTML Format (Word-compatible structure) ===
   const escapeHtml = (str) => str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -165,10 +172,12 @@ function copyToClipboardWithFormatting(text) {
 
   const escaped = escapeHtml(text);
   const paragraphs = escaped.split(/\r?\n\r?\n/);
-  const htmlParagraphs = paragraphs.map(p => p.replace(/\r?\n/g, '<br>'));
-  const html = '<p>' + htmlParagraphs.join('</p><p>') + '</p>';
+  const htmlParagraphs = paragraphs.map(p => p.replace(/\r?\n/g, '<br>\r\n'));
+  const htmlBody = '<p>' + htmlParagraphs.join('</p>\r\n<p>') + '</p>';
+  // Full HTML document structure like Word produces
+  const html = `<!DOCTYPE html>\r\n<html>\r\n<head>\r\n<meta charset="utf-8">\r\n</head>\r\n<body>\r\n${htmlBody}\r\n</body>\r\n</html>`;
 
-  // === RTF Format ===
+  // === RTF Format (Word-compatible with font table and codepage) ===
   // RTF uses \par for line breaks, needs escaping for \ { }
   const escapeRtf = (str) => str
     .replace(/\\/g, '\\\\')
@@ -180,11 +189,12 @@ function copyToClipboardWithFormatting(text) {
   const rtfContent = rtfEscaped
     .replace(/\r?\n\r?\n/g, '\\par\\par ')
     .replace(/\r?\n/g, '\\par ');
-  const rtf = `{\\rtf1\\ansi\\deff0 ${rtfContent}}`;
+  // Full RTF structure with font table and German codepage (like Word produces)
+  const rtf = `{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0\\fswiss\\fcharset0 Arial;}}{\\colortbl;\\red0\\green0\\blue0;}\\f0\\fs20 ${rtfContent}}`;
 
   // Write all formats - apps pick their preferred format
   clipboard.write({
-    text: text,
+    text: textCrlf,
     html: html,
     rtf: rtf
   });
@@ -699,7 +709,12 @@ ${finalTranscriptText}
     // Save transcript if enabled
     if (saveTranscript) {
       const transcriptPath = path.join(folderPath, `${baseFilename}.txt`);
-      fs.writeFileSync(transcriptPath, content, 'utf8');
+      // Normalize for Windows/Z1 compatibility
+      const contentCrlf = content
+        .replace(/\r?\n/g, '\r\n')           // LF → CRLF
+        .replace(/[ \t]+\r\n/g, '\r\n')      // Trailing spaces entfernen
+        .replace(/(\r\n){3,}/g, '\r\n\r\n'); // Max 1 Leerzeile
+      fs.writeFileSync(transcriptPath, contentCrlf, 'utf8');
 
       // Save JSON metadata for dashboard transcript browser
       if (utterances && utterances.length > 0) {

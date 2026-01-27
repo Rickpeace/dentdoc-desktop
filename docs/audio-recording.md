@@ -193,6 +193,45 @@ ffmpeg.stderr.on('data', (data) => {
 });
 ```
 
+### FFmpeg Crash Monitoring
+
+FFmpeg-Crashes werden erkannt und geloggt:
+
+```javascript
+// In audioRecorderFFmpeg.js - startRecording()
+let stderrOutput = '';
+ffmpegProcess.stderr.on('data', (data) => {
+  stderrOutput += data.toString();
+  if (stderrOutput.length > 2048) {
+    stderrOutput = stderrOutput.slice(-2048);  // Nur letzte 2KB
+  }
+});
+
+ffmpegProcess.once('close', (code, signal) => {
+  const wasRecording = recordingState === 'recording';
+
+  if (wasRecording) {
+    // FFmpeg unerwartet beendet!
+    console.error('[Recorder] FFmpeg CRASHED during recording!');
+    console.error('[Recorder] Exit code:', code, '| Signal:', signal);
+    console.error('[Recorder] Last stderr:', stderrOutput.slice(-500));
+
+    // Prüfe ob Datei existiert
+    if (fs.existsSync(currentFilePath)) {
+      const stats = fs.statSync(currentFilePath);
+      console.error('[Recorder] File exists, size:', stats.size, 'bytes');
+    }
+  }
+
+  recordingState = 'idle';
+});
+```
+
+**Hilft bei Diagnose von:**
+- Mikrofon-Verbindungsabbrüchen
+- Windows-Audio-Treiber-Problemen
+- Speicherplatz-Fehlern
+
 ---
 
 ## iPhone-Aufnahme

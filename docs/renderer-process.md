@@ -113,6 +113,28 @@ const transcripts = await ipcRenderer.invoke('get-all-transcripts');
 const detail = await ipcRenderer.invoke('get-transcript-detail', filePath);
 ```
 
+#### View-Wechsel & Mic Test Cleanup
+
+Beim Verlassen der Settings-View wird der Mikrofon-Test gestoppt. **Wichtig:** Dies darf nur passieren, wenn KEINE echte Aufnahme läuft!
+
+```javascript
+// In dashboard.js - leaveSettingsView()
+async function leaveSettingsView() {
+  // ... andere Cleanup-Aufgaben ...
+
+  // WICHTIG: Nur cleanup wenn KEINE echte Aufnahme läuft!
+  const recordingState = await ipcRenderer.invoke('get-recording-state').catch(() => ({}));
+  if (!recordingState.isRecording && !recordingState.isProcessing) {
+    await ipcRenderer.invoke('stop-mic-test').catch(() => {});
+    ipcRenderer.invoke('cleanup-mic-test');
+  }
+  // Ohne diesen Check würde das Öffnen der Settings während
+  // einer VAD-Aufnahme die echte Aufnahme löschen!
+}
+```
+
+**Bug-Fix (v1.6.10):** Vorher wurde `stop-mic-test` immer aufgerufen, auch während echter Aufnahmen. Da Mic-Test und VAD-Aufnahme denselben FFmpeg-Recorder verwenden, wurde die echte Aufnahme gelöscht.
+
 ---
 
 ## Setup Wizard (scripts/setup-wizard.js)
