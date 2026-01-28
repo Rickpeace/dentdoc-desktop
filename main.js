@@ -100,6 +100,103 @@ debugLog(`Is packaged: ${app && typeof app.isPackaged !== 'undefined' ? app.isPa
 debugLog(`Temp dir: ${os.tmpdir()}`);
 debugLog(`Debug log path: ${DEBUG_LOG}`);
 
+// Cleanup old temp files on startup (files older than 2 hours)
+function cleanupOldTempFiles() {
+  const MAX_AGE_HOURS = 2;
+  const MAX_AGE_MS = MAX_AGE_HOURS * 60 * 60 * 1000;
+  const now = Date.now();
+
+  const tempDirs = [
+    path.join(os.tmpdir(), 'dentdoc'),
+    path.join(os.tmpdir(), 'dentdoc', 'vad-recording'),
+    path.join(os.tmpdir(), 'dentdoc', 'pipeline'),
+    path.join(os.tmpdir(), 'dentdoc', 'pipeline', 'extract'),
+    path.join(os.tmpdir(), 'dentdoc', 'tests')
+  ];
+
+  let totalDeleted = 0;
+  let totalErrors = 0;
+
+  for (const tempDir of tempDirs) {
+    if (!fs.existsSync(tempDir)) {
+      continue;
+    }
+
+    try {
+      const files = fs.readdirSync(tempDir);
+
+      for (const file of files) {
+        const filePath = path.join(tempDir, file);
+
+        try {
+          const stats = fs.statSync(filePath);
+
+          // Skip directories (we handle them separately)
+          if (stats.isDirectory()) {
+            continue;
+          }
+
+          const fileAge = now - stats.mtimeMs;
+
+          // Only delete files older than MAX_AGE_HOURS
+          if (fileAge > MAX_AGE_MS) {
+            fs.unlinkSync(filePath);
+            totalDeleted++;
+            debugLog(`[Cleanup] Deleted old temp file: ${filePath} (age: ${Math.round(fileAge / 1000 / 60)} min)`);
+          }
+        } catch (fileError) {
+          // File might be in use or already deleted
+          totalErrors++;
+          debugLog(`[Cleanup] Could not delete ${filePath}: ${fileError.message}`);
+        }
+      }
+    } catch (dirError) {
+      debugLog(`[Cleanup] Error reading ${tempDir}: ${dirError.message}`);
+    }
+  }
+
+  // Also clean up dentdoc-preview-*.wav files in temp root
+  try {
+    const tempRoot = os.tmpdir();
+    const rootFiles = fs.readdirSync(tempRoot);
+
+    for (const file of rootFiles) {
+      // Only clean up dentdoc-related files
+      if (!file.startsWith('dentdoc-preview-') && !file.startsWith('dentdoc-')) {
+        continue;
+      }
+
+      const filePath = path.join(tempRoot, file);
+
+      try {
+        const stats = fs.statSync(filePath);
+
+        if (stats.isDirectory()) {
+          continue; // Skip the dentdoc folder itself
+        }
+
+        const fileAge = now - stats.mtimeMs;
+
+        if (fileAge > MAX_AGE_MS) {
+          fs.unlinkSync(filePath);
+          totalDeleted++;
+          debugLog(`[Cleanup] Deleted old temp file: ${filePath} (age: ${Math.round(fileAge / 1000 / 60)} min)`);
+        }
+      } catch (fileError) {
+        totalErrors++;
+        debugLog(`[Cleanup] Could not delete ${filePath}: ${fileError.message}`);
+      }
+    }
+  } catch (rootError) {
+    debugLog(`[Cleanup] Error reading temp root: ${rootError.message}`);
+  }
+
+  if (totalDeleted > 0 || totalErrors > 0) {
+    console.log(`[Cleanup] Startup cleanup: ${totalDeleted} old temp files deleted, ${totalErrors} errors`);
+    debugLog(`[Cleanup] Startup cleanup complete: ${totalDeleted} deleted, ${totalErrors} errors`);
+  }
+}
+
 let speakerRecognition;
 try {
   debugLog('Loading speaker-recognition module...');
@@ -122,6 +219,7 @@ let pendingStatusUpdate = null;
 let isRecording = false;
 let isProcessing = false;
 let isEnrolling = false;
+let recordingStartCancelled = false;  // Flag to abort startRecording() if user cancels during startup
 let currentRecordingPath = null;
 let savedAudioPathInBackup = null; // Path to audio saved in "Fehlgeschlagen" folder (deleted after successful save)
 let currentEnrollmentPath = null;
@@ -487,6 +585,61 @@ function sanitizeFilename(name) {
 }
 
 /**
+ * Quick check if transcriptPath folder is accessible for writing.
+ * Shows warning dialog if folder is unavailable.
+ * @returns {Promise<boolean>} true if folder is OK or user wants to continue, false to abort
+ */
+async function checkTranscriptFolderBeforeRecording() {
+  const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
+  const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
+
+  try {
+    // Quick check: try to access the folder
+    if (!fs.existsSync(transcriptPath)) {
+      // Try to create it
+      fs.mkdirSync(transcriptPath, { recursive: true });
+    }
+
+    // Try to write a test file
+    const testFile = path.join(transcriptPath, '.dentdoc-test');
+    fs.writeFileSync(testFile, 'test', 'utf8');
+    fs.unlinkSync(testFile);
+
+    return true; // Folder is OK
+  } catch (error) {
+    console.warn('[FolderCheck] Transcript folder not accessible:', transcriptPath, error.message);
+    debugLog(`[FolderCheck] Folder error: ${transcriptPath} - ${error.code}: ${error.message}`);
+
+    // Show warning dialog
+    const result = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Aufnahme starten', 'Abbrechen'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Speicherordner nicht erreichbar',
+      message: 'Der Transkript-Ordner ist nicht verfügbar.',
+      detail: `Der Ordner "${transcriptPath}" ist nicht erreichbar oder nicht beschreibbar.\n\n` +
+              'Mögliche Ursachen:\n' +
+              '• Netzwerkverbindung unterbrochen\n' +
+              '• Keine Schreibberechtigung\n' +
+              '• Ordner wurde gelöscht\n\n' +
+              'Die Aufnahme kann trotzdem gestartet werden, aber Transkripte werden NICHT gespeichert.\n' +
+              'Die Dokumentation wird wie gewohnt in die Zwischenablage kopiert.'
+    });
+
+    const userContinued = result.response === 0;
+    if (userContinued) {
+      // Log that user continued despite folder issue - helps track folder problems
+      debugLog(`[FolderCheck] User continued recording despite folder issue: ${transcriptPath}`);
+      autoUploadDebugLogs('folder-access-warning');
+    }
+
+    // 0 = "Aufnahme starten", 1 = "Abbrechen"
+    return userContinued;
+  }
+}
+
+/**
  * Saves audio file immediately after recording stops (before transcription).
  * This ensures audio is preserved even if transcription fails.
  * @param {string} tempAudioPath - Path to temporary audio file
@@ -525,18 +678,19 @@ function saveAudioImmediately(tempAudioPath) {
   const minutes = String(now.getMinutes()).padStart(2, '0');
 
   // Save to "Fehlgeschlagen" folder (backup in case transcription fails)
-  const tempFolder = path.join(baseFolderPath, 'Fehlgeschlagen');
-  if (!fs.existsSync(tempFolder)) {
-    fs.mkdirSync(tempFolder, { recursive: true });
-    console.log('Created folder:', tempFolder);
-  }
-
-  // Get file extension from source
-  const ext = path.extname(tempAudioPath) || '.webm';
-  const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}`;
-  const audioPath = path.join(tempFolder, `${baseFilename}${ext}`);
-
+  // This entire block is wrapped in try/catch so folder issues don't crash the flow
   try {
+    const tempFolder = path.join(baseFolderPath, 'Fehlgeschlagen');
+    if (!fs.existsSync(tempFolder)) {
+      fs.mkdirSync(tempFolder, { recursive: true });
+      console.log('Created folder:', tempFolder);
+    }
+
+    // Get file extension from source
+    const ext = path.extname(tempAudioPath) || '.webm';
+    const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}`;
+    const audioPath = path.join(tempFolder, `${baseFilename}${ext}`);
+
     // Get file size before copy
     const fileSize = fs.statSync(tempAudioPath).size;
     const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
@@ -550,7 +704,11 @@ function saveAudioImmediately(tempAudioPath) {
     return audioPath;
   } catch (error) {
     const copyDuration = ((Date.now() - saveStartTime) / 1000).toFixed(2);
-    console.error(`[TIMING] saveAudioImmediately FAILED after ${copyDuration}s:`, error);
+    console.warn(`[Backup] Audio backup skipped - folder not accessible: ${error.message}`);
+    console.log(`[TIMING] saveAudioImmediately skipped after ${copyDuration}s (folder issue)`);
+    debugLog(`[Backup] Audio backup failed: ${baseFolderPath} - ${error.code}: ${error.message}`);
+    // Don't crash - just skip the backup. The recording will still be processed.
+    // Note: autoUploadDebugLogs is called from checkTranscriptFolderBeforeRecording if user continued
     return null;
   }
 }
@@ -1615,6 +1773,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 }
 
 async function startRecording() {
+  // Reset cancel flag at start
+  recordingStartCancelled = false;
+
   const token = store.get('authToken');
   if (!token) {
     showNotification('Fehler', 'Bitte melden Sie sich zuerst an');
@@ -1650,6 +1811,25 @@ async function startRecording() {
 
   if (isTrialUser && minutesRemaining <= 0 && !hasActiveSubscription) {
     updateStatusOverlay('Testphase beendet', 'Bitte abonnieren Sie DentDoc Pro um fortzufahren.', 'error');
+    return;
+  }
+
+  // Check if transcript folder is accessible (only if we're saving something)
+  const shouldSaveTranscript = store.get('autoExport', true);
+  const shouldSaveAudio = store.get('keepAudio', true);
+
+  if (shouldSaveTranscript || shouldSaveAudio) {
+    const folderOk = await checkTranscriptFolderBeforeRecording();
+    if (!folderOk) {
+      console.log('[Recording] User cancelled due to folder access issue');
+      hideStatusOverlay(); // Hide the "Aufnahme wird gestartet" overlay
+      return;
+    }
+  }
+
+  // Check if user cancelled during startup
+  if (recordingStartCancelled) {
+    console.log('[Recording] Cancelled during startup');
     return;
   }
 
@@ -1717,6 +1897,14 @@ async function startRecording() {
     }
   } catch (error) {
     console.error('Recording error:', error);
+
+    // Force stop to ensure mic is released if FFmpeg partially started
+    try {
+      await audioRecorder.forceStop();
+    } catch (e) {
+      // Ignore - just ensuring cleanup
+    }
+
     autoUploadDebugLogs('startRecording-error');
     updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestartet werden', 'error');
   }
@@ -2296,6 +2484,12 @@ async function startRecordingWithVAD() {
       }
     }
 
+    // Check if user cancelled during startup (e.g., during mic check)
+    if (recordingStartCancelled) {
+      console.log('[VAD] Cancelled during startup');
+      return;
+    }
+
     // Start recording first - only update UI state if successful
     currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
     console.log('[VAD] Recording started:', currentRecordingPath);
@@ -2321,6 +2515,14 @@ async function startRecordingWithVAD() {
 
   } catch (error) {
     console.error('[VAD] Start error:', error.message || error);
+
+    // Force stop to ensure mic is released if FFmpeg partially started
+    try {
+      await audioRecorder.forceStop();
+    } catch (e) {
+      // Ignore - just ensuring cleanup
+    }
+
     // Reset states on start failure
     isRecording = false;
     isVadSession = false;
@@ -2334,6 +2536,16 @@ async function stopRecordingWithVAD() {
   // VAD-Modus: Aufnahme stoppen, dann Offline-VAD analysieren (wie File Upload)
   const stopStartTime = Date.now();
   console.log('[TIMING] ========== stopRecordingWithVAD START ==========');
+
+  // Define at function scope so catch block can always access it
+  let processingTimeoutId = null;
+  const clearProcessingTimeout = () => {
+    if (processingTimeoutId) {
+      clearTimeout(processingTimeoutId);
+      processingTimeoutId = null;
+    }
+  };
+
   try {
     tray.setToolTip('DentDoc - Stoppe Aufnahme...');
 
@@ -2369,19 +2581,17 @@ async function stopRecordingWithVAD() {
     isProcessing = true;
     trayModule.updateTrayMenu();
 
-    // Safety timeout: auto-reset isProcessing after 5 minutes in case of unexpected hang
-    const processingTimeout = setTimeout(() => {
+    // Safety timeout: auto-reset isProcessing after 10 minutes in case of unexpected hang
+    // (Long recordings 50+ min can take 6+ minutes to process: VAD + Upload + Transcription + Documentation)
+    processingTimeoutId = setTimeout(() => {
       if (isProcessing) {
-        console.error('[SAFETY] Processing timeout after 5 minutes - auto-resetting state');
+        console.error('[SAFETY] Processing timeout after 10 minutes - auto-resetting state');
         isProcessing = false;
         trayModule.updateTrayMenu();
         tray.setToolTip('DentDoc - Bereit');
         autoUploadDebugLogs('processing-timeout');
       }
-    }, 5 * 60 * 1000);
-
-    // Clear timeout when processing completes (in finally block of processFileWithVAD)
-    const clearProcessingTimeout = () => clearTimeout(processingTimeout);
+    }, 10 * 60 * 1000);
 
     // Reset tray icon and show processing status
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2949,10 +3159,27 @@ ipcMain.on('open-tooth-chart', (event, data) => {
 
 // IPC handler for cancelling recording (X button during recording or waiting-iphone)
 ipcMain.on('cancel-recording', async () => {
+  console.log('[Cancel] Cancel requested - isRecording:', isRecording);
+
+  // Always hide the overlay first
+  hideStatusOverlay();
+
+  // Set flag to abort startup if recording hasn't started yet
+  if (!isRecording) {
+    recordingStartCancelled = true;
+    console.log('[Cancel] Recording start cancelled (was in startup phase)');
+    return;
+  }
+
   if (isRecording) {
+    // Notify dashboard to stop audio monitoring
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('recording-stopped');
+    }
+
     try {
-      // Stop the audio recorder without processing
-      await audioRecorder.stopRecording();
+      // Stop the audio recorder - use forceStop to ensure FFmpeg is fully killed
+      await audioRecorder.forceStop();
     } catch (error) {
       console.log('Error stopping recorder:', error);
     }
@@ -2986,7 +3213,18 @@ ipcMain.on('cancel-recording', async () => {
       console.log('[iPhone] Recording cancelled by user');
     }
 
+    // Delete temp recording file (not needed when cancelled)
+    if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
+      try {
+        fs.unlinkSync(currentRecordingPath);
+        console.log('[Cancel] Deleted temp file:', currentRecordingPath);
+      } catch (e) {
+        console.warn('[Cancel] Could not delete temp file:', e.message);
+      }
+    }
+
     isRecording = false;
+    isVadSession = false;  // Reset VAD session flag
     isProcessing = false;
     currentRecordingPath = null;
 
@@ -4420,6 +4658,251 @@ ipcMain.handle('select-folder', async () => {
   return selectedPath;
 });
 
+// Helper function to get German error message for folder permission errors
+function getFolderPermissionErrorMessage(error) {
+  const code = error.code || '';
+  switch (code) {
+    case 'ENOENT':
+      return 'Pfad nicht gefunden - Netzwerk verbunden?';
+    case 'EACCES':
+    case 'EPERM':
+      return 'Zugriff verweigert - keine Berechtigung';
+    case 'ETIMEDOUT':
+    case 'ENETUNREACH':
+    case 'EHOSTUNREACH':
+      return 'Netzwerkordner nicht erreichbar - Verbindung prüfen';
+    case 'EROFS':
+      return 'Ordner ist schreibgeschützt';
+    case 'ENOSPC':
+      return 'Kein Speicherplatz verfügbar';
+    case 'EIO':
+      return 'Lese-/Schreibfehler - Verbindung prüfen';
+    case 'EBUSY':
+      return 'Ordner wird von anderem Programm verwendet';
+    case 'ENAMETOOLONG':
+      return 'Pfad ist zu lang (max. 260 Zeichen)';
+    case 'EINVAL':
+      return 'Ungültiger Pfadname';
+    default:
+      return `Unbekannter Fehler: ${error.message || 'Unbekannt'}`;
+  }
+}
+
+// Validate folder permissions by actually testing read/write/create operations
+ipcMain.handle('validate-folder-permissions', async (event, folderPath) => {
+  const testFolderName = '.dentdoc-permission-test';
+  const testFileName = 'test.txt';
+  const testContent = 'DentDoc permission test ' + Date.now();
+
+  const result = {
+    success: false,
+    readable: false,
+    writable: false,
+    canCreateSubfolders: false,
+    error: null,
+    errorCode: null
+  };
+
+  try {
+    // Check if path exists
+    if (!fs.existsSync(folderPath)) {
+      // Try to create the folder
+      try {
+        fs.mkdirSync(folderPath, { recursive: true });
+        console.log('validate-folder-permissions: Created folder:', folderPath);
+      } catch (mkdirError) {
+        result.error = 'Ordner existiert nicht und kann nicht erstellt werden';
+        result.errorCode = 'CANNOT_CREATE_FOLDER';
+        console.log('validate-folder-permissions: Cannot create folder:', mkdirError.message);
+        return result;
+      }
+    }
+
+    // Check read permission by listing directory
+    try {
+      fs.readdirSync(folderPath);
+      result.readable = true;
+      console.log('validate-folder-permissions: Read permission OK');
+    } catch (readError) {
+      result.error = 'Keine Leseberechtigung für diesen Ordner';
+      result.errorCode = 'NO_READ_PERMISSION';
+      console.log('validate-folder-permissions: No read permission:', readError.message);
+      return result;
+    }
+
+    // Check subfolder creation
+    const testFolderPath = path.join(folderPath, testFolderName);
+    try {
+      // Clean up any leftover test folder from previous failed attempts
+      if (fs.existsSync(testFolderPath)) {
+        fs.rmSync(testFolderPath, { recursive: true, force: true });
+      }
+      fs.mkdirSync(testFolderPath);
+      result.canCreateSubfolders = true;
+      console.log('validate-folder-permissions: Subfolder creation OK');
+    } catch (subfolderError) {
+      result.error = 'Keine Berechtigung zum Erstellen von Unterordnern';
+      result.errorCode = 'NO_SUBFOLDER_PERMISSION';
+      console.log('validate-folder-permissions: No subfolder permission:', subfolderError.message);
+      return result;
+    }
+
+    // Check write permission
+    const testFilePath = path.join(testFolderPath, testFileName);
+    try {
+      fs.writeFileSync(testFilePath, testContent, 'utf8');
+
+      // Verify by reading back
+      const readBack = fs.readFileSync(testFilePath, 'utf8');
+      if (readBack !== testContent) {
+        throw new Error('File content mismatch');
+      }
+
+      result.writable = true;
+      console.log('validate-folder-permissions: Write permission OK');
+    } catch (writeError) {
+      result.error = 'Keine Schreibberechtigung für diesen Ordner';
+      result.errorCode = 'NO_WRITE_PERMISSION';
+      console.log('validate-folder-permissions: No write permission:', writeError.message);
+      // Still try to clean up
+      try {
+        fs.rmSync(testFolderPath, { recursive: true, force: true });
+      } catch (e) { /* ignore */ }
+      return result;
+    }
+
+    // Clean up test files
+    try {
+      fs.rmSync(testFolderPath, { recursive: true, force: true });
+      console.log('validate-folder-permissions: Cleanup successful');
+    } catch (cleanupError) {
+      console.warn('validate-folder-permissions: Could not clean up test folder:', cleanupError.message);
+      // Not a failure - permissions are validated
+    }
+
+    result.success = true;
+    console.log('validate-folder-permissions: All checks passed for:', folderPath);
+    return result;
+
+  } catch (error) {
+    // Handle any unexpected errors
+    result.error = getFolderPermissionErrorMessage(error);
+    result.errorCode = error.code || 'UNKNOWN_ERROR';
+    console.log('validate-folder-permissions: Error:', error.code, error.message);
+    return result;
+  }
+});
+
+// Folder selection with validation - combines dialog and permission check
+ipcMain.handle('select-folder-with-validation', async (event, options = {}) => {
+  const dialogResult = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: options.title || 'Ordner auswählen'
+  });
+
+  console.log('select-folder-with-validation: Dialog result:', JSON.stringify(dialogResult));
+
+  if (dialogResult.canceled || !dialogResult.filePaths || dialogResult.filePaths.length === 0) {
+    console.log('select-folder-with-validation: Dialog cancelled');
+    return { success: false, canceled: true };
+  }
+
+  const selectedPath = dialogResult.filePaths[0];
+
+  if (!selectedPath || selectedPath.trim() === '') {
+    console.log('select-folder-with-validation: Empty path');
+    return { success: false, canceled: true };
+  }
+
+  console.log('select-folder-with-validation: Validating permissions for:', selectedPath);
+
+  // Validate permissions using the same logic
+  const testFolderName = '.dentdoc-permission-test';
+  const testFileName = 'test.txt';
+  const testContent = 'DentDoc permission test ' + Date.now();
+
+  const validation = {
+    success: false,
+    readable: false,
+    writable: false,
+    canCreateSubfolders: false,
+    error: null,
+    errorCode: null
+  };
+
+  try {
+    // Check if path exists
+    if (!fs.existsSync(selectedPath)) {
+      try {
+        fs.mkdirSync(selectedPath, { recursive: true });
+      } catch (mkdirError) {
+        validation.error = 'Ordner existiert nicht und kann nicht erstellt werden';
+        validation.errorCode = 'CANNOT_CREATE_FOLDER';
+        return { success: false, path: selectedPath, validation };
+      }
+    }
+
+    // Check read permission
+    try {
+      fs.readdirSync(selectedPath);
+      validation.readable = true;
+    } catch (readError) {
+      validation.error = 'Keine Leseberechtigung für diesen Ordner';
+      validation.errorCode = 'NO_READ_PERMISSION';
+      return { success: false, path: selectedPath, validation };
+    }
+
+    // Check subfolder creation
+    const testFolderPath = path.join(selectedPath, testFolderName);
+    try {
+      if (fs.existsSync(testFolderPath)) {
+        fs.rmSync(testFolderPath, { recursive: true, force: true });
+      }
+      fs.mkdirSync(testFolderPath);
+      validation.canCreateSubfolders = true;
+    } catch (subfolderError) {
+      validation.error = 'Keine Berechtigung zum Erstellen von Unterordnern';
+      validation.errorCode = 'NO_SUBFOLDER_PERMISSION';
+      return { success: false, path: selectedPath, validation };
+    }
+
+    // Check write permission
+    const testFilePath = path.join(testFolderPath, testFileName);
+    try {
+      fs.writeFileSync(testFilePath, testContent, 'utf8');
+      const readBack = fs.readFileSync(testFilePath, 'utf8');
+      if (readBack !== testContent) {
+        throw new Error('File content mismatch');
+      }
+      validation.writable = true;
+    } catch (writeError) {
+      validation.error = 'Keine Schreibberechtigung für diesen Ordner';
+      validation.errorCode = 'NO_WRITE_PERMISSION';
+      try {
+        fs.rmSync(testFolderPath, { recursive: true, force: true });
+      } catch (e) { /* ignore */ }
+      return { success: false, path: selectedPath, validation };
+    }
+
+    // Clean up
+    try {
+      fs.rmSync(testFolderPath, { recursive: true, force: true });
+    } catch (cleanupError) {
+      console.warn('select-folder-with-validation: Cleanup warning:', cleanupError.message);
+    }
+
+    validation.success = true;
+    console.log('select-folder-with-validation: Validation passed for:', selectedPath);
+    return { success: true, path: selectedPath, validation };
+
+  } catch (error) {
+    validation.error = getFolderPermissionErrorMessage(error);
+    validation.errorCode = error.code || 'UNKNOWN_ERROR';
+    console.log('select-folder-with-validation: Validation error:', error.code, error.message);
+    return { success: false, path: selectedPath, validation };
+  }
+});
+
 // File selection dialog
 ipcMain.handle('select-file-dialog', async (event, options = {}) => {
   const result = await dialog.showOpenDialog({
@@ -4540,16 +5023,11 @@ ipcMain.handle('cancel-voice-enrollment', async () => {
 
   const pathToDelete = currentEnrollmentPath;
 
-  // Only stop if actually recording
-  const recorderState = audioRecorder.getState();
-  if (recorderState === 'recording') {
-    try {
-      await audioRecorder.stopRecording();
-    } catch (error) {
-      console.error('Error stopping recording during cancel:', error);
-    }
-  } else {
-    console.log('Enrollment cancel: Recorder not in recording state:', recorderState);
+  // Force stop to ensure mic is released
+  try {
+    await audioRecorder.forceStop();
+  } catch (error) {
+    console.error('Error stopping recording during cancel:', error);
   }
 
   // Delete the temporary recording file
@@ -5286,6 +5764,9 @@ ipcMain.handle('get-app-version', () => {
 });
 
 app.whenReady().then(() => {
+  // Cleanup old temp files from previous sessions
+  cleanupOldTempFiles();
+
   // TODO: Remove this line after testing tray balloon
   store.delete('hasSeenTrayHint');
 
@@ -5459,9 +5940,20 @@ app.on('window-all-closed', (e) => {
   e.preventDefault();
 });
 
-app.on('will-quit', () => {
+app.on('will-quit', async () => {
   // Unregister all shortcuts
   globalShortcut.unregisterAll();
+
+  // Stop any active recording and release microphone
+  if (isRecording) {
+    console.log('[Quit] Stopping active recording before quit');
+    try {
+      await audioRecorder.forceStop();
+    } catch (err) {
+      console.error('[Quit] Error stopping recording:', err);
+    }
+  }
+
   // Clean up mic test file
   cleanupMicTestFile();
 });

@@ -15,6 +15,24 @@ const views = document.querySelectorAll('.view');
 let currentView = 'home';
 
 async function switchView(viewName) {
+  // Check for unsaved settings changes when leaving settings page
+  if (currentView === 'settings' && viewName !== 'settings' && settingsHasUnsavedChanges) {
+    const result = await showUnsavedSettingsDialog();
+
+    if (result === 'cancel') {
+      return; // Stay on settings page
+    }
+
+    if (result === 'save') {
+      // Trigger save - the save handler already navigates to home after saving
+      document.getElementById('settingsSaveBtn').click();
+      return;
+    }
+
+    // result === 'discard' - reset flag and continue navigation
+    settingsHasUnsavedChanges = false;
+  }
+
   // Check for smartphone mic warning when leaving settings
   if (currentView === 'settings' && viewName !== 'settings') {
     if (typeof checkSmartphoneMicWarning === 'function') {
@@ -754,11 +772,49 @@ async function initSidebarLinks() {
 initSidebarLinks();
 
 // ===== Window Controls =====
-document.getElementById('minimizeBtn').addEventListener('click', () => {
+document.getElementById('minimizeBtn').addEventListener('click', async () => {
+  // Check for unsaved settings when minimizing from settings page
+  if (currentView === 'settings' && settingsHasUnsavedChanges) {
+    const result = await showUnsavedSettingsDialog();
+
+    if (result === 'cancel') {
+      return; // Stay on settings page
+    }
+
+    if (result === 'save') {
+      document.getElementById('settingsSaveBtn').click();
+      setTimeout(() => ipcRenderer.send('minimize-window'), 900);
+      return;
+    }
+
+    // result === 'discard' - reset flag and minimize
+    settingsHasUnsavedChanges = false;
+  }
+
   ipcRenderer.send('minimize-window');
 });
 
-document.getElementById('closeBtn').addEventListener('click', () => {
+document.getElementById('closeBtn').addEventListener('click', async () => {
+  // Check for unsaved settings when closing from settings page
+  if (currentView === 'settings' && settingsHasUnsavedChanges) {
+    const result = await showUnsavedSettingsDialog();
+
+    if (result === 'cancel') {
+      return; // Stay on settings page
+    }
+
+    if (result === 'save') {
+      // Trigger save, then close after save completes
+      document.getElementById('settingsSaveBtn').click();
+      // The save handler will navigate away, then we close
+      setTimeout(() => ipcRenderer.send('minimize-to-tray'), 900);
+      return;
+    }
+
+    // result === 'discard' - reset flag and close
+    settingsHasUnsavedChanges = false;
+  }
+
   ipcRenderer.send('minimize-to-tray');
 });
 
@@ -979,7 +1035,7 @@ async function loadSettingsView() {
     autoExport: settings.autoExport || false,
     keepAudio: settings.keepAudio || false,
     docMode: docMode,
-    theme: settings.theme || 'dark',
+    // Note: theme excluded - saves immediately on change
     vadEnabled: settings.vadEnabled !== false
   };
 }
@@ -1120,7 +1176,7 @@ function settingsCheckForChanges() {
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
     docMode: document.getElementById('settingsDocModeSelect').value,
-    theme: document.getElementById('settingsThemeSelect').value,
+    // Note: theme is excluded - it saves immediately on change
     vadEnabled: document.getElementById('settingsVadEnabled').checked
   };
 
@@ -1784,21 +1840,76 @@ document.addEventListener('keydown', async (e) => {
 });
 
 // Settings Path Buttons
+
+// Helper function to show folder validation error inline
+function showFolderValidationError(inputId, errorMessage) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+
+  // Remove any existing error
+  clearFolderValidationError(inputId);
+
+  // Create error element
+  const errorEl = document.createElement('div');
+  errorEl.id = inputId + 'Error';
+  errorEl.className = 'path-validation-error';
+  errorEl.innerHTML = `
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="15" y1="9" x2="9" y2="15"/>
+      <line x1="9" y1="9" x2="15" y2="15"/>
+    </svg>
+    <span>${errorMessage}</span>
+  `;
+
+  // Insert after the input's parent row
+  const parentRow = input.closest('.path-input-row') || input.parentElement;
+  parentRow.insertAdjacentElement('afterend', errorEl);
+
+  // Add error styling to input
+  input.classList.add('input-error');
+}
+
+// Helper function to clear folder validation error
+function clearFolderValidationError(inputId) {
+  const input = document.getElementById(inputId);
+  const errorEl = document.getElementById(inputId + 'Error');
+
+  if (errorEl) {
+    errorEl.remove();
+  }
+  if (input) {
+    input.classList.remove('input-error');
+  }
+}
+
 document.getElementById('settingsOpenSoundBtn').addEventListener('click', async () => {
   await ipcRenderer.invoke('open-sound-settings');
 });
 
 document.getElementById('settingsBrowseTranscriptBtn').addEventListener('click', async () => {
   console.log('Browse transcript folder clicked');
-  const result = await ipcRenderer.invoke('select-folder');
-  console.log('select-folder result:', result);
-  if (result) {
-    document.getElementById('settingsTranscriptPath').value = result;
-    console.log('Set transcriptPath input to:', result);
-    settingsCheckForChanges();
-  } else {
-    console.log('No folder selected or dialog cancelled');
+  const result = await ipcRenderer.invoke('select-folder-with-validation', {
+    title: 'Transkript-Ordner auswählen'
+  });
+  console.log('select-folder-with-validation result:', result);
+
+  if (result.canceled) {
+    console.log('Dialog cancelled');
+    return;
   }
+
+  if (!result.success) {
+    console.log('Folder validation failed:', result.validation?.error);
+    showFolderValidationError('settingsTranscriptPath', result.validation?.error || 'Ordner nicht verwendbar');
+    return;
+  }
+
+  // Success - clear any previous error and update the path
+  clearFolderValidationError('settingsTranscriptPath');
+  document.getElementById('settingsTranscriptPath').value = result.path;
+  console.log('Set transcriptPath input to:', result.path);
+  settingsCheckForChanges();
 });
 
 document.getElementById('settingsOpenTranscriptFolderBtn').addEventListener('click', async () => {
@@ -1809,11 +1920,26 @@ document.getElementById('settingsOpenTranscriptFolderBtn').addEventListener('cli
 });
 
 document.getElementById('settingsBrowseProfilesBtn').addEventListener('click', async () => {
-  const result = await ipcRenderer.invoke('select-folder');
-  if (result) {
-    document.getElementById('settingsProfilesPath').value = result;
-    settingsCheckForChanges();
+  console.log('Browse profiles folder clicked');
+  const result = await ipcRenderer.invoke('select-folder-with-validation', {
+    title: 'Stimmprofile-Ordner auswählen'
+  });
+  console.log('select-folder-with-validation result:', result);
+
+  if (result.canceled) {
+    return;
   }
+
+  if (!result.success) {
+    console.log('Folder validation failed:', result.validation?.error);
+    showFolderValidationError('settingsProfilesPath', result.validation?.error || 'Ordner nicht verwendbar');
+    return;
+  }
+
+  // Success - clear any previous error and update the path
+  clearFolderValidationError('settingsProfilesPath');
+  document.getElementById('settingsProfilesPath').value = result.path;
+  settingsCheckForChanges();
 });
 
 document.getElementById('settingsOpenProfilesFolderBtn').addEventListener('click', async () => {
@@ -1823,10 +1949,11 @@ document.getElementById('settingsOpenProfilesFolderBtn').addEventListener('click
   }
 });
 
-// Settings Theme
-document.getElementById('settingsThemeSelect').addEventListener('change', () => {
-  document.documentElement.setAttribute('data-theme', document.getElementById('settingsThemeSelect').value);
-  settingsCheckForChanges();
+// Settings Theme - saves immediately (excluded from unsaved changes check)
+document.getElementById('settingsThemeSelect').addEventListener('change', async () => {
+  const theme = document.getElementById('settingsThemeSelect').value;
+  document.documentElement.setAttribute('data-theme', theme);
+  await ipcRenderer.invoke('set-theme', theme);
 });
 
 // Settings change tracking
@@ -1910,6 +2037,33 @@ function showWarningModal(title, message) {
   });
 }
 
+// Show unsaved settings dialog with 3 options: Save, Discard, Cancel
+function showUnsavedSettingsDialog() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('unsavedSettingsModal');
+    const saveBtn = document.getElementById('unsavedSaveBtn');
+    const discardBtn = document.getElementById('unsavedDiscardBtn');
+    const cancelBtn = document.getElementById('unsavedCancelBtn');
+
+    modal.style.display = 'flex';
+
+    const cleanup = () => {
+      modal.style.display = 'none';
+      saveBtn.removeEventListener('click', onSave);
+      discardBtn.removeEventListener('click', onDiscard);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+
+    const onSave = () => { cleanup(); resolve('save'); };
+    const onDiscard = () => { cleanup(); resolve('discard'); };
+    const onCancel = () => { cleanup(); resolve('cancel'); };
+
+    saveBtn.addEventListener('click', onSave);
+    discardBtn.addEventListener('click', onDiscard);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
 // Check if smartphone is selected but not paired
 function checkSmartphoneMicWarning() {
   const micSource = document.querySelector('input[name="micSource"]:checked')?.value;
@@ -1956,13 +2110,26 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
     await ipcRenderer.invoke('save-settings', settings);
     settingsHasUnsavedChanges = false;
 
+    // Update initial settings to match saved state (exclude theme - saves immediately)
+    settingsInitialSettings = {
+      shortcut: settings.shortcut,
+      microphoneId: settings.microphoneId,
+      microphoneSource: settings.microphoneSource,
+      transcriptPath: settings.transcriptPath,
+      profilesPath: settings.profilesPath,
+      autoClose: settings.autoClose,
+      autoExport: settings.autoExport,
+      keepAudio: settings.keepAudio,
+      docMode: settings.docMode,
+      vadEnabled: settings.vadEnabled
+    };
+
     const confirmation = document.getElementById('settingsSaveConfirmation');
     confirmation.style.display = 'block';
 
     setTimeout(() => {
       confirmation.style.display = 'none';
-      switchView('home');
-    }, 800);
+    }, 2000);
   } catch (error) {
     settingsShowStatus(document.getElementById('settingsShortcutStatus'), 'Fehler beim Speichern: ' + error.message, 'error');
   }
@@ -2003,12 +2170,27 @@ document.getElementById('profilesOpenFolderBtn').addEventListener('click', async
 });
 
 document.getElementById('profilesBrowseBtn').addEventListener('click', async () => {
-  const result = await ipcRenderer.invoke('select-folder');
-  if (result) {
-    document.getElementById('profilesPathInput').value = result;
-    await ipcRenderer.invoke('save-profiles-path', result);
-    loadProfiles();
+  console.log('Browse profiles folder clicked (profiles view)');
+  const result = await ipcRenderer.invoke('select-folder-with-validation', {
+    title: 'Stimmprofile-Ordner auswählen'
+  });
+  console.log('select-folder-with-validation result:', result);
+
+  if (result.canceled) {
+    return;
   }
+
+  if (!result.success) {
+    console.log('Folder validation failed:', result.validation?.error);
+    showFolderValidationError('profilesPathInput', result.validation?.error || 'Ordner nicht verwendbar');
+    return;
+  }
+
+  // Success - clear any previous error, update path, save and reload
+  clearFolderValidationError('profilesPathInput');
+  document.getElementById('profilesPathInput').value = result.path;
+  await ipcRenderer.invoke('save-profiles-path', result.path);
+  loadProfiles();
 });
 
 async function loadProfiles() {

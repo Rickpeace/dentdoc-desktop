@@ -5,6 +5,42 @@ const os = require('os');
 const crypto = require('crypto');
 const { convertForAssemblyAI } = require('./audio-converter');
 
+/**
+ * Check if audio file is already optimized (16kHz mono WAV)
+ * Reads only the WAV header (44 bytes) - very fast
+ * @param {string} filePath - Path to audio file
+ * @returns {boolean} true if already 16kHz mono WAV
+ */
+function isAlreadyOptimized(filePath) {
+  try {
+    // Only check WAV files
+    if (!filePath.toLowerCase().endsWith('.wav')) {
+      return false;
+    }
+
+    const buffer = Buffer.alloc(44);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buffer, 0, 44, 0);
+    fs.closeSync(fd);
+
+    // Check RIFF/WAVE header
+    const riff = buffer.toString('ascii', 0, 4);
+    const wave = buffer.toString('ascii', 8, 12);
+    if (riff !== 'RIFF' || wave !== 'WAVE') {
+      return false;
+    }
+
+    // Read audio format info from WAV header
+    const channels = buffer.readUInt16LE(22);
+    const sampleRate = buffer.readUInt32LE(24);
+
+    return channels === 1 && sampleRate === 16000;
+  } catch (err) {
+    console.log(`[Upload] Header check failed: ${err.message}`);
+    return false;
+  }
+}
+
 // DentDoc Vercel API URL
 const API_BASE_URL = process.env.API_URL || 'https://dentdoc-app.vercel.app/';
 
@@ -166,6 +202,7 @@ async function getUser(token) {
  */
 async function uploadAudio(audioFilePath, token, onProgress = null) {
   let optimizedFilePath = null;
+  let uploadFilePath = audioFilePath;
 
   try {
     // Check if file exists and has content
@@ -174,19 +211,29 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       throw new Error('EMPTY_RECORDING');
     }
 
-    // STEP 0: Convert audio with AssemblyAI-optimized filters
-    // (highpass=200Hz, lowpass=3000Hz for better transcription)
-    if (onProgress) {
-      onProgress({ phase: 'prepare', percent: 0, message: 'Audio wird optimiert...' });
+    // Check if file is already optimized (16kHz mono WAV from VAD pipeline)
+    const alreadyOptimized = isAlreadyOptimized(audioFilePath);
+
+    if (alreadyOptimized) {
+      // Skip conversion - file is already 16kHz mono WAV
+      console.log(`  [Upload] Bereits optimiert (16kHz mono) - Konvertierung übersprungen`);
+      uploadFilePath = audioFilePath;
+    } else {
+      // Convert audio with AssemblyAI-optimized filters
+      // (highpass=200Hz, lowpass=3000Hz for better transcription)
+      if (onProgress) {
+        onProgress({ phase: 'prepare', percent: 0, message: 'Audio wird optimiert...' });
+      }
+      console.log(`  [Upload] Konvertiere zu 16kHz mono...`);
+      optimizedFilePath = await convertForAssemblyAI(audioFilePath);
+      uploadFilePath = optimizedFilePath;
+      console.log(`  [Upload] Konvertiert: ${require('path').basename(optimizedFilePath)}`);
     }
 
-    optimizedFilePath = await convertForAssemblyAI(audioFilePath);
-
-    const fileName = require('path').basename(optimizedFilePath);
-    const fileBuffer = fs.readFileSync(optimizedFilePath);
-    const optimizedSizeMB = (fileBuffer.length / (1024 * 1024)).toFixed(2);
-    console.log(`  [TEMP] Erstellt: ${fileName} (${optimizedSizeMB} MB)`);
-    console.log(`         Pfad: ${optimizedFilePath}`);
+    const fileName = require('path').basename(uploadFilePath);
+    const fileBuffer = fs.readFileSync(uploadFilePath);
+    const fileSizeMB = (fileBuffer.length / (1024 * 1024)).toFixed(2);
+    console.log(`  [Upload] Datei: ${fileName} (${fileSizeMB} MB)`);
 
     // STEP 1: Upload via Railway Proxy (API-Key bleibt auf Railway, nicht im Desktop!)
     if (onProgress) {
@@ -258,7 +305,7 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       });
 
       // Track progress using chunked writing for accurate progress reporting
-      const chunkSize = 512 * 1024; // 512KB chunks
+      const chunkSize = 5 * 1024 * 1024; // 5MB chunks (weniger Overhead)
       let lastReportedPercent = 0;
       let offset = 0;
 

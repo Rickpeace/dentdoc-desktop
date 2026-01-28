@@ -778,7 +778,10 @@ function stopRecording() {
  * @internal
  */
 async function forceStop() {
-  console.warn('[Recorder] FORCE STOP called - emergency cleanup');
+  console.log('[Recorder] FORCE STOP called - cancelling recording');
+
+  // Set state BEFORE killing so close handler knows it's intentional (not a crash)
+  recordingState = 'stopping';
 
   if (ffmpegProcess) {
     try {

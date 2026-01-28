@@ -537,14 +537,6 @@
               </h1>
               <p>Passen Sie DentDoc an Ihre Bedürfnisse an</p>
             </div>
-            <button id="settingsStartTourBtn" class="tour-restart-btn" title="Geführte Tour starten">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                <line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              Tour starten
-            </button>
           </div>
 
           <div class="settings-content">
@@ -1018,6 +1010,26 @@
           <div class="modal-actions">
             <button class="btn btn-primary" id="warningModalConfirm">Fortfahren</button>
             <button class="btn btn-secondary" id="warningModalCancel">Abbrechen</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Unsaved Settings Modal -->
+      <div class="modal-overlay" id="unsavedSettingsModal" style="display: none;">
+        <div class="modal warning-modal">
+          <div class="warning-modal-icon">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+          </div>
+          <h2>Ungespeicherte Änderungen</h2>
+          <p>Sie haben Änderungen an den Einstellungen vorgenommen, die noch nicht gespeichert wurden.</p>
+          <div class="modal-actions-3">
+            <button class="btn btn-primary" id="unsavedSaveBtn">Speichern</button>
+            <button class="btn btn-secondary" id="unsavedDiscardBtn">Verwerfen</button>
+            <button class="btn btn-ghost" id="unsavedCancelBtn">Abbrechen</button>
           </div>
         </div>
       </div>

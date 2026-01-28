@@ -169,25 +169,67 @@ class SetupWizard {
 
     // Path buttons
     document.getElementById('wizardBrowseTranscriptBtn')?.addEventListener('click', async () => {
-      const result = await ipcRenderer.invoke('select-folder');
-      if (result) {
-        this.settings.transcriptPath = result;
-        document.getElementById('wizardTranscriptPath').value = result;
+      console.log('Wizard: Browse transcript folder clicked');
+      const result = await ipcRenderer.invoke('select-folder-with-validation', {
+        title: 'Transkript-Ordner auswählen'
+      });
+      console.log('Wizard: select-folder-with-validation result:', result);
+
+      if (result.canceled) {
+        return;
       }
+
+      if (!result.success) {
+        console.log('Wizard: Folder validation failed:', result.validation?.error);
+        if (typeof showFolderValidationError === 'function') {
+          showFolderValidationError('wizardTranscriptPath', result.validation?.error || 'Ordner nicht verwendbar');
+        } else {
+          alert(result.validation?.error || 'Ordner nicht verwendbar');
+        }
+        return;
+      }
+
+      // Success - clear any previous error
+      if (typeof clearFolderValidationError === 'function') {
+        clearFolderValidationError('wizardTranscriptPath');
+      }
+      this.settings.transcriptPath = result.path;
+      document.getElementById('wizardTranscriptPath').value = result.path;
     });
 
     document.getElementById('wizardBrowseProfilesBtn')?.addEventListener('click', async () => {
-      const result = await ipcRenderer.invoke('select-folder');
-      if (result) {
-        this.settings.profilesPath = result;
-        document.getElementById('wizardProfilesPath').value = result;
+      console.log('Wizard: Browse profiles folder clicked');
+      const result = await ipcRenderer.invoke('select-folder-with-validation', {
+        title: 'Stimmprofile-Ordner auswählen'
+      });
+      console.log('Wizard: select-folder-with-validation result:', result);
 
-        // Save the new path immediately so get-voice-profiles can use it
-        await ipcRenderer.invoke('save-settings', { profilesPath: result });
-
-        // Reload existing profiles from the new path
-        await this.loadExistingProfiles();
+      if (result.canceled) {
+        return;
       }
+
+      if (!result.success) {
+        console.log('Wizard: Folder validation failed:', result.validation?.error);
+        if (typeof showFolderValidationError === 'function') {
+          showFolderValidationError('wizardProfilesPath', result.validation?.error || 'Ordner nicht verwendbar');
+        } else {
+          alert(result.validation?.error || 'Ordner nicht verwendbar');
+        }
+        return;
+      }
+
+      // Success - clear any previous error
+      if (typeof clearFolderValidationError === 'function') {
+        clearFolderValidationError('wizardProfilesPath');
+      }
+      this.settings.profilesPath = result.path;
+      document.getElementById('wizardProfilesPath').value = result.path;
+
+      // Save the new path immediately so get-voice-profiles can use it
+      await ipcRenderer.invoke('save-settings', { profilesPath: result.path });
+
+      // Reload existing profiles from the new path
+      await this.loadExistingProfiles();
     });
 
     // Voice profile recording in wizard

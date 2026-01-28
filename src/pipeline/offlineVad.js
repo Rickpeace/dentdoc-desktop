@@ -14,12 +14,12 @@ const { app } = require('electron');
 const CONFIG = {
   sampleRate: 16000,
   // Speech detection timing
-  speechStartMs: 60,       // 60ms speech to start (war 80 - schneller reagieren)
+  speechStartMs: 64,       // 64ms speech to start (= 1 frame bei 64ms frameMs)
   speechStopMs: 800,       // 800ms silence to end segment (war 600 - mehr Toleranz)
   // Padding around speech - KRITISCH für erste Buchstaben!
   preRollMs: 1200,         // 1200ms before speech (war 800 - noch mehr Puffer für erste Buchstaben)
   postRollMs: 500,         // 500ms after speech (war 400)
-  frameMs: 20,
+  frameMs: 64,             // 64ms frames for offline (war 20ms - viel schneller auf alten PCs)
   // Silero VAD parameters - weniger streng für bessere Erkennung
   sileroThreshold: 0.25,   // War 0.4 - noch sensitiver damit weniger weggeschnitten wird
   minSpeechDuration: 0.1,  // War 0.15 - kürzere Sprache erkennen
@@ -250,7 +250,8 @@ function createVAD() {
   };
 
   try {
-    const vad = new sherpaLib.Vad(vadConfig, CONFIG.sampleRate);
+    // bufferSizeInSeconds = 60 (nicht sampleRate!)
+    const vad = new sherpaLib.Vad(vadConfig, 60);
     console.log('[VAD] VAD instance created successfully');
     return vad;
   } catch (err) {
@@ -272,19 +273,24 @@ function detectSpeechSegments(samples, vad) {
   let silenceFrameCount = 0;
   let currentSpeechStart = null;
 
-  const totalFrames = Math.floor(samples.length / frameSize);
+  // Math.ceil damit der letzte Teil-Frame nicht verloren geht
+  const totalFrames = Math.ceil(samples.length / frameSize);
+
+  // Pre-allocate buffer ONCE instead of every frame (major performance boost)
+  const safeSamples = new Float32Array(frameSize);
 
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
     const start = frameIdx * frameSize;
-    const end = start + frameSize;
-    const frameSamples = samples.slice(start, end);
+    const end = Math.min(start + frameSize, samples.length);
+    const frameSamples = samples.subarray(start, end);
 
-    // Create safe copy for Sherpa
-    const arrayBuffer = new ArrayBuffer(frameSamples.length * 4);
-    const safeSamples = new Float32Array(arrayBuffer);
-    for (let i = 0; i < frameSamples.length; i++) {
-      safeSamples[i] = frameSamples[i];
+    // Zero-fill für letzten Frame falls kürzer als frameSize
+    if (frameSamples.length < frameSize) {
+      safeSamples.fill(0);
     }
+
+    // TypedArray.set() ist viel schneller als JS for-loop
+    safeSamples.set(frameSamples);
 
     vad.acceptWaveform(safeSamples);
     const detected = vad.isDetected();
@@ -295,6 +301,9 @@ function detectSpeechSegments(samples, vad) {
       silenceFrameCount = 0;
     } else {
       silenceFrameCount++;
+      // Wichtig: speechFrameCount zurücksetzen wenn noch nicht in Speech-Mode
+      // Sonst summieren sich zufällige Einzeldetektionen zu falschem Speech-Start
+      if (!isSpeech) speechFrameCount = 0;
     }
 
     const currentTimeMs = (frameIdx * frameSize / CONFIG.sampleRate) * 1000;

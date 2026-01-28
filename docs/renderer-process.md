@@ -64,9 +64,22 @@ Das Dashboard ist ein Single-Page-App mit Tab-Navigation:
 - Shortcut-Konfiguration
 - Theme (Dark/Light)
 - Auto-Export Einstellungen
-- Pfade für Transkripte/Audio
+- Pfade für Transkripte/Audio (mit Berechtigungsprüfung)
 - Mikrofon-Test
 - Über/Version
+
+**Ungespeicherte Änderungen:**
+- `settingsHasUnsavedChanges` Flag trackt ob Änderungen vorliegen
+- Bei Navigation weg von Settings → Dialog mit 3 Optionen:
+  - **Speichern** - Änderungen speichern
+  - **Verwerfen** - Änderungen verwerfen
+  - **Abbrechen** - Auf Settings bleiben
+- Auch bei Minimize/Close-Button wird geprüft
+
+**Ordner-Validierung:**
+- Browse-Buttons verwenden `select-folder-with-validation`
+- Bei Fehler: Roter Rahmen + Inline-Fehlermeldung
+- Prüft: Lesen, Schreiben, Unterordner erstellen
 
 ---
 

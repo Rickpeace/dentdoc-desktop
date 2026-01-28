@@ -10,6 +10,65 @@ let recognizer = null;
 let modelPath = null;
 
 /**
+ * Check if file is already 16kHz mono PCM WAV (skip conversion)
+ * Reads only WAV header (64 bytes) - very fast, zero risk
+ * @param {string} filePath - Path to audio file
+ * @returns {boolean} true if already optimal format
+ */
+function is16kMonoPcmWav(filePath) {
+  try {
+    if (!filePath?.toLowerCase().endsWith('.wav')) return false;
+
+    const fd = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(64);
+    fs.readSync(fd, header, 0, 64, 0);
+    fs.closeSync(fd);
+
+    // Check RIFF/WAVE header
+    if (header.toString('ascii', 0, 4) !== 'RIFF') return false;
+    if (header.toString('ascii', 8, 12) !== 'WAVE') return false;
+
+    const audioFormat = header.readUInt16LE(20);   // 1 = PCM
+    const numChannels = header.readUInt16LE(22);   // 1 = mono
+    const sampleRate = header.readUInt32LE(24);    // 16000
+    const bitsPerSample = header.readUInt16LE(34); // 16
+
+    return audioFormat === 1 && numChannels === 1 && sampleRate === 16000 && bitsPerSample === 16;
+  } catch {
+    return false; // Bei Fehler: sicherheitshalber konvertieren
+  }
+}
+
+/**
+ * Run async functions with concurrency limit
+ * Prevents CPU overload on old PCs
+ * @param {Array} items - Items to process
+ * @param {number} limit - Max concurrent operations
+ * @param {Function} fn - Async function to run
+ * @returns {Promise<Array>} Results
+ */
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let i = 0;
+
+  async function worker() {
+    while (true) {
+      const idx = i++;
+      if (idx >= items.length) return;
+      results[idx] = await fn(items[idx], idx);
+    }
+  }
+
+  // Start workers (max = limit or items.length, whichever is smaller)
+  const workers = Array(Math.min(limit, items.length))
+    .fill(0)
+    .map(worker);
+
+  await Promise.all(workers);
+  return results;
+}
+
+/**
  * Initialize Sherpa-ONNX speaker recognition
  * Uses bundled model from app directory
  */
@@ -255,15 +314,29 @@ async function identifySpeaker(audioFilePath, startMs, durationMs = 30000, thres
  * @returns {Object} Speaker mapping { "A": "Dr. Notle", "B": "Patient" }
  */
 async function identifySpeakersFromUtterances(audioFilePath, utterances) {
-  const audioConverter = require('../audio-converter');
+  // EARLY EXIT: Keine Profile = keine Sprechererkennung nötig
+  // Spart ~5-15s (kein Model-Loading, kein Audio-Processing)
+  const profiles = voiceProfiles.getAllProfiles();
+  if (!profiles || profiles.length === 0) {
+    console.log('[Speaker Recognition] Keine Profile vorhanden - Überspringe Sprechererkennung');
+    const speakerMapping = {};
+    if (utterances && utterances.length > 0) {
+      const speakers = [...new Set(utterances.map(u => u?.speaker).filter(Boolean))];
+      for (const speaker of speakers) {
+        speakerMapping[speaker] = `Sprecher ${speaker}`;
+      }
+    }
+    return speakerMapping;
+  }
 
   let wavPath = audioFilePath;
 
-  // Convert to WAV 16kHz if needed
-  if (audioFilePath.toLowerCase().endsWith('.webm') ||
-      audioFilePath.toLowerCase().endsWith('.mp3') ||
-      audioFilePath.toLowerCase().endsWith('.m4a')) {
-    console.log('Converting audio to WAV 16kHz for speaker identification...');
+  // Smart conversion skip: nur konvertieren wenn wirklich nötig
+  if (is16kMonoPcmWav(audioFilePath)) {
+    console.log('[Speaker Recognition] Audio bereits 16kHz mono PCM - Konvertierung übersprungen');
+  } else {
+    console.log('[Speaker Recognition] Konvertiere Audio zu 16kHz mono...');
+    const audioConverter = require('../audio-converter');
     wavPath = await audioConverter.convertToWav16k(audioFilePath);
   }
 
@@ -285,24 +358,90 @@ async function identifySpeakersFromUtterances(audioFilePath, utterances) {
     });
   }
 
-  // Identify each speaker by concatenating their segments
-  for (const [speaker, segments] of Object.entries(speakerSegments)) {
+  // Initialize model once before parallel processing
+  await initialize();
+
+  // Process speakers in PARALLEL with limit=2 (prevents CPU overload on old PCs)
+  const speakerEntries = Object.entries(speakerSegments);
+  const PARALLEL_LIMIT = 2;
+
+  // Logging für Support/Debugging
+  console.log(`[Speaker Recognition] Profile: ${profiles.length}, Speaker: ${speakerEntries.length}, Parallel: ${PARALLEL_LIMIT}`);
+
+  // Fallback-Funktion für Fehlerfall (basiert auf utterances, nicht speakerEntries)
+  const createFallbackMapping = (utts) => {
+    const mapping = {};
+    const speakers = new Set(utts?.map(u => u?.speaker).filter(Boolean));
+    for (const s of speakers) mapping[s] = `Sprecher ${s}`;
+    return mapping;
+  };
+
+  // Segment selection constants
+  const MIN_SEGMENT_MS = 800;      // Ignore short utterances (ja, mhm, ok)
+  const MAX_PER_SEGMENT_MS = 5000;  // Cap per segment at 5s (more diversity, avoid diarization errors)
+  const TARGET_MS = 30000;          // Total audio to collect
+
+  let results;
+  try {
+    results = await mapLimit(speakerEntries, PARALLEL_LIMIT, async ([speaker, segments]) => {
     try {
-      // Concatenate audio from all speaker segments until we have 30 seconds
+      // Smart segment selection: longest first, filter short ones, cap each
+      let candidates = segments
+        .filter(s => s.duration >= MIN_SEGMENT_MS)
+        .sort((a, b) => b.duration - a.duration);
+
+      // Fallback: wenn alle Segmente zu kurz, nimm alle (sortiert nach Länge)
+      if (candidates.length === 0) {
+        console.log(`[Speaker ${speaker}] Fallback: alle Segmente < ${MIN_SEGMENT_MS}ms, nutze ungefiltert`);
+        candidates = [...segments].sort((a, b) => b.duration - a.duration);
+      }
+
+      // Debug: zeige Segment-Statistik
+      console.log(`[Speaker ${speaker}] Segmente: ${segments.length} total, ${candidates.length} filtered (>=${MIN_SEGMENT_MS}ms), longest: ${candidates[0]?.duration || 0}ms`);
+
       const audioSegments = [];
       let totalDuration = 0;
 
-      for (const segment of segments) {
-        if (totalDuration >= 30000) break; // We have enough
+      let segIdx = 0;
+      for (const segment of candidates) {
+        if (totalDuration >= TARGET_MS) break;
 
-        const segmentAudio = extractAudioSegment(
-          wavPath,
-          segment.start,
-          Math.min(segment.duration, 30000 - totalDuration)
+        // Cap each segment and respect remaining budget
+        const takeMs = Math.min(
+          segment.duration,
+          MAX_PER_SEGMENT_MS,
+          TARGET_MS - totalDuration
         );
 
-        audioSegments.push(segmentAudio);
-        totalDuration += Math.min(segment.duration, 30000 - totalDuration);
+        // Skip if takeMs is invalid
+        if (takeMs <= 0) continue;
+
+        // Extract from MIDDLE of segment (avoid speaker transitions at start/end)
+        const middleOffset = Math.max(0, Math.floor((segment.duration - takeMs) / 2));
+        const extractStart = segment.start + middleOffset;
+        const segmentAudio = extractAudioSegment(wavPath, extractStart, takeMs);
+
+        // Guard: nur hinzufügen wenn tatsächlich Samples extrahiert wurden
+        if (segmentAudio?.length > 0) {
+          audioSegments.push(segmentAudio);
+          totalDuration += takeMs;
+          segIdx++;
+          // Log first 5 segments taken (we expect ~6 with 5s cap)
+          if (segIdx <= 5) {
+            console.log(`[Speaker ${speaker}] Seg ${segIdx}: utt@${(segment.start / 1000).toFixed(1)}s (${segment.duration}ms) → extract@${(extractStart / 1000).toFixed(1)}s, take=${takeMs}ms`);
+          }
+        } else {
+          console.warn(`[Speaker ${speaker}] Leeres Segment bei start=${segment.start}ms, takeMs=${takeMs}`);
+        }
+      }
+      if (segIdx > 5) {
+        console.log(`[Speaker ${speaker}] ... and ${segIdx - 5} more segments`);
+      }
+
+      // Guard: wenn keine Audio-Daten, kein Matching möglich
+      if (audioSegments.length === 0 || totalDuration === 0) {
+        console.warn(`[Speaker ${speaker}] Keine Audio-Daten extrahiert, skip matching`);
+        return [speaker, `Sprecher ${speaker}`];
       }
 
       // Concatenate all segments into one Float32Array
@@ -316,34 +455,54 @@ async function identifySpeakersFromUtterances(audioFilePath, utterances) {
       }
 
       // Create embedding from concatenated pure speaker audio
-      await initialize();
       const stream = recognizer.createStream();
       stream.acceptWaveform({ sampleRate: 16000, samples: concatenatedAudio });
       stream.inputFinished();
       const embedding = recognizer.compute(stream, false);
 
-      // Compare with profiles
-      const profiles = voiceProfiles.getAllProfiles();
+      // Log segment collection results
+      console.log(`[Speaker ${speaker}] Collected: ${audioSegments.length} segments, ${(totalDuration / 1000).toFixed(1)}s total audio`);
+
+      // Compare with profiles (profiles already loaded at function start)
       let bestMatch = null;
       let bestScore = 0;
 
+      console.log(`[Speaker ${speaker}] Comparing against ${profiles.length} profiles:`);
       for (const profile of profiles) {
         const similarity = cosineSimilarity(embedding, profile.embedding);
+        const pct = (similarity * 100).toFixed(1);
+        const marker = similarity >= 0.7 ? '✓' : ' ';
+        console.log(`  ${marker} "${profile.name}" (${profile.role}): ${pct}%`);
+
         if (similarity > bestScore) {
           bestScore = similarity;
           bestMatch = profile;
         }
       }
 
-      if (bestScore >= 0.7) {
-        // Format as "Rolle - Name" (e.g., "Arzt - Dr. Notle")
-        speakerMapping[speaker] = `${bestMatch.role || 'Arzt'} - ${bestMatch.name}`;
+      const threshold = 0.7;
+      if (bestScore >= threshold) {
+        console.log(`[Speaker ${speaker}] ✓ MATCH: "${bestMatch.name}" with ${(bestScore * 100).toFixed(1)}% (threshold: ${(threshold * 100)}%)`);
+        return [speaker, `${bestMatch.role || 'Arzt'} - ${bestMatch.name}`];
       } else {
-        speakerMapping[speaker] = `Sprecher ${speaker}`;
+        console.log(`[Speaker ${speaker}] ✗ No match - best was "${bestMatch?.name}" with ${(bestScore * 100).toFixed(1)}% (threshold: ${(threshold * 100)}%)`);
+        return [speaker, `Sprecher ${speaker}`];
       }
     } catch (error) {
-      speakerMapping[speaker] = `Sprecher ${speaker}`;
+      console.error(`[Speaker ${speaker}] Error during recognition:`, error?.message);
+      console.error(`[Speaker ${speaker}] Stack:`, error?.stack);
+      return [speaker, `Sprecher ${speaker}`];
     }
+    });
+  } catch (parallelError) {
+    // Fallback bei kritischem Fehler - Pipeline darf nie komplett sterben
+    console.warn('[Speaker Recognition] Kritischer Fehler, verwende Fallback:', parallelError?.message);
+    return createFallbackMapping(utterances);
+  }
+
+  // Convert results array to mapping object
+  for (const [speaker, label] of results) {
+    speakerMapping[speaker] = label;
   }
 
   // Nice formatted log

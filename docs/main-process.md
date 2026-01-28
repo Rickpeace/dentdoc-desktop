@@ -303,6 +303,36 @@ ipcMain.handle('set-shortcut', (e, shortcut) => {
 });
 ```
 
+### Folder Validation Handler
+
+Validiert Ordner-Berechtigungen durch echte Schreibversuche (nicht nur `fs.access`). Wichtig für Netzwerkordner.
+
+```javascript
+ipcMain.handle('validate-folder-permissions', async (e, folderPath) => {
+  // 1. Prüft ob Ordner existiert (erstellt falls nötig)
+  // 2. Testet Leseberechtigung (readdirSync)
+  // 3. Erstellt Test-Unterordner .dentdoc-permission-test
+  // 4. Schreibt und liest Test-Datei
+  // 5. Räumt Test-Ordner auf
+  // Gibt zurück: { success, readable, writable, canCreateSubfolders, error, errorCode }
+});
+
+ipcMain.handle('select-folder-with-validation', async (e, options) => {
+  // Kombiniert Ordner-Dialog + Validierung in einem Aufruf
+  // Gibt zurück: { success, canceled, path, validation }
+});
+```
+
+**Fehler-Codes (Deutsch):**
+
+| Code | Meldung |
+|------|---------|
+| ENOENT | Pfad nicht gefunden - Netzwerk verbunden? |
+| EACCES/EPERM | Zugriff verweigert - keine Berechtigung |
+| ETIMEDOUT | Netzwerkordner nicht erreichbar |
+| EROFS | Ordner ist schreibgeschützt |
+| ENOSPC | Kein Speicherplatz verfügbar |
+
 ### Transcript Handler
 
 ```javascript
@@ -323,6 +353,9 @@ ipcMain.handle('get-transcript-detail', async (e, filePath) => {
 
 ```javascript
 app.whenReady().then(() => {
+  // 0. Alte Temp-Dateien aufräumen (>2 Stunden alt)
+  cleanupOldTempFiles();
+
   // 1. Tray-Modul initialisieren
   trayModule.init({ ... });
   trayModule.createTray();

@@ -1353,7 +1353,7 @@
     });
 
     closeBtn.addEventListener('click', () => {
-      if (currentState === 'recording' || currentState === 'waiting-iphone') {
+      if (currentState === 'starting' || currentState === 'recording' || currentState === 'waiting-iphone') {
         // Cancel recording - don't process
         ipcRenderer.send('cancel-recording');
       }

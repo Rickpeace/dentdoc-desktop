@@ -32,7 +32,12 @@ Die App unterscheidet strikt zwischen **Aufnahme** und **Verarbeitung**:
 ```
 IDLE (isRecording=false, isProcessing=false)
   │
-  F9 → startRecording()
+  F9 → checkTranscriptFolderBeforeRecording()
+  │    Falls Ordner nicht erreichbar:
+  │    → Warnung-Dialog (Fortfahren/Abbrechen)
+  │    → Bei "Fortfahren": Aufnahme startet, aber Transkript wird NICHT gespeichert
+  │
+  └─→ startRecording()
   ↓
 RECORDING (isRecording=true, isProcessing=false)
   │    UI: "🎤 Aufnahme läuft"
@@ -358,6 +363,138 @@ module.exports = {
   silenceThreshold: 0.5,    // VAD Confidence
   speechPadMs: 300,         // Padding um Sprache (verhindert abgeschnittene Wörter)
 };
+```
+
+### VAD Performance-Optimierungen (Januar 2026)
+
+Die folgenden Optimierungen wurden implementiert um die VAD-Verarbeitung auf alten PCs zu beschleunigen:
+
+#### 1. Vad Constructor Fix (kritisch!)
+
+```javascript
+// VORHER (Bug): bufferSizeInSeconds war 16000 statt 60
+const vad = new sherpaLib.Vad(vadConfig, CONFIG.sampleRate);  // FALSCH!
+
+// NACHHER (Fix):
+const vad = new sherpaLib.Vad(vadConfig, 60);  // 60 Sekunden Buffer
+```
+
+**Impact:** ~1.2 GB → ~4 MB RAM-Verbrauch
+
+#### 2. Buffer-Wiederverwendung
+
+```javascript
+// VORHER: Neuer Buffer pro Frame (165.000 Allokationen für 55 Min)
+for (let i = 0; i < numSamples; i++) {
+  safeSamples[i] = frameSamples[i];  // JS for-loop
+}
+
+// NACHHER: Ein Buffer, TypedArray.set()
+const safeSamples = new Float32Array(frameSize);  // Einmal allokieren
+safeSamples.set(frameSamples);  // Native Kopie, ~10-50x schneller
+```
+
+#### 3. Frame-Größe optimiert
+
+```javascript
+// VORHER: 20ms Frames → 165.000 Frames für 55 Min
+frameMs: 20
+
+// NACHHER: 64ms Frames → 51.500 Frames für 55 Min (3.2x weniger)
+frameMs: 64
+```
+
+#### 4. Audio-Ende nicht mehr abgeschnitten
+
+```javascript
+// VORHER: Letzter Teil-Frame ging verloren
+const totalFrames = Math.floor(samples.length / frameSize);
+
+// NACHHER: Math.ceil + Zero-Padding
+const totalFrames = Math.ceil(samples.length / frameSize);
+if (frameSamples.length < frameSize) {
+  safeSamples.fill(0);  // Zero-Padding für letzten Frame
+}
+```
+
+#### 5. Speech Counter Reset
+
+```javascript
+// VORHER: speechFrameCount summierte sich über Zeit auf
+if (detected) speechFrameCount++;
+else silenceFrameCount++;
+
+// NACHHER: Reset bei Nicht-Erkennung (verhindert falsche Speech-Starts)
+if (detected) {
+  speechFrameCount++;
+  silenceFrameCount = 0;
+} else {
+  silenceFrameCount++;
+  if (!isSpeech) speechFrameCount = 0;  // Reset!
+}
+```
+
+#### Gesamt-Performance (55-Min Aufnahme)
+
+| Metrik | Vorher | Nachher |
+|--------|--------|---------|
+| RAM-Verbrauch | ~1.2 GB | ~4 MB |
+| VAD-Zeit | 100-140s | 20-40s |
+| Frames | 165.000 | 51.500 |
+| Buffer-Allokationen | 165.000 | 1 |
+
+---
+
+## Upload-Optimierungen (Januar 2026)
+
+### Smart Conversion Skip
+
+Die `uploadAudio()` Funktion prüft jetzt ob die Datei bereits optimiert ist:
+
+```javascript
+// apiClient.js - isAlreadyOptimized()
+function isAlreadyOptimized(filePath) {
+  // Liest nur WAV-Header (44 Bytes) - instant
+  const buffer = Buffer.alloc(44);
+  // ... header lesen ...
+  const channels = buffer.readUInt16LE(22);
+  const sampleRate = buffer.readUInt32LE(24);
+  return channels === 1 && sampleRate === 16000;
+}
+
+// In uploadAudio():
+if (isAlreadyOptimized(audioFilePath)) {
+  console.log('[Upload] Bereits optimiert - Konvertierung übersprungen');
+  // Direkt hochladen ohne FFmpeg
+} else {
+  // convertForAssemblyAI() aufrufen
+}
+```
+
+**Ersparnis:** ~3-5 Sekunden (kein unnötiger FFmpeg-Aufruf)
+
+### Chunk-Size erhöht
+
+```javascript
+// VORHER: 512KB Chunks (viel HTTP-Overhead)
+const chunkSize = 512 * 1024;
+
+// NACHHER: 5MB Chunks
+const chunkSize = 5 * 1024 * 1024;
+```
+
+### Log-Ausgabe
+
+Bei optimierten Dateien erscheint im Log:
+```
+[Upload] Bereits optimiert (16kHz mono) - Konvertierung übersprungen
+[Upload] Datei: speech_only.wav (36.89 MB)
+```
+
+Bei nicht-optimierten Dateien:
+```
+[Upload] Konvertiere zu 16kHz mono...
+[Upload] Konvertiert: speech_only_assemblyai.wav
 ```
 
 ---
@@ -692,6 +829,108 @@ navigator.mediaDevices.addEventListener('devicechange', async () => {
 ```
 
 **Wichtig:** Nur Änderungen am AUSGEWÄHLTEN Mikrofon werden angezeigt, nicht alle Geräte.
+
+---
+
+## Aufnahme-Abbruch und Cleanup
+
+### Zwei Stop-Methoden
+
+| Methode | Zweck | Wann verwenden |
+|---------|-------|----------------|
+| `stopRecording()` | Normaler Stop | F9 zum Beenden, Verarbeitung folgt |
+| `forceStop()` | Sofortiger Abbruch | Cancel, Fehler, App-Quit |
+
+```javascript
+// forceStop() - Sofortiger Abbruch ohne Verarbeitung
+async function forceStop() {
+  recordingState = 'stopping';  // WICHTIG: VOR kill setzen!
+  if (ffmpegProcess) {
+    ffmpegProcess.kill('SIGTERM');
+  }
+  // Kein Promise, kein Warten auf close-Event
+}
+```
+
+**Wichtig:** `recordingState = 'stopping'` muss VOR dem Kill gesetzt werden, sonst erkennt der close-Handler es als Crash.
+
+### Abbruch während Startup-Phase
+
+User kann während "Aufnahme wird gestartet..." abbrechen:
+
+```javascript
+// Flag in main.js
+let recordingStartCancelled = false;
+
+// Am Anfang von startRecording()
+recordingStartCancelled = false;
+
+// Im cancel-recording Handler
+if (!isRecording) {
+  recordingStartCancelled = true;  // Startup abbrechen
+  return;
+}
+
+// In startRecording() und startRecordingWithVAD()
+if (recordingStartCancelled) {
+  console.log('[Recording] Cancelled during startup');
+  return;  // Abbruch vor FFmpeg-Start
+}
+```
+
+### Cancel-Handler (main.js)
+
+```javascript
+ipcMain.on('cancel-recording', async () => {
+  hideStatusOverlay();
+
+  // Fall 1: Noch in Startup-Phase
+  if (!isRecording) {
+    recordingStartCancelled = true;
+    return;
+  }
+
+  // Fall 2: Aufnahme läuft
+  dashboardWindow?.webContents.send('recording-stopped');
+  await audioRecorder.forceStop();
+
+  // Temp-Datei löschen (nicht speichern bei Cancel)
+  if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
+    fs.unlinkSync(currentRecordingPath);
+  }
+
+  // State zurücksetzen
+  isRecording = false;
+  isVadSession = false;
+  isProcessing = false;
+});
+```
+
+### Cleanup bei App-Quit
+
+```javascript
+app.on('will-quit', async () => {
+  globalShortcut.unregisterAll();
+
+  // Aktive Aufnahme stoppen
+  if (isRecording) {
+    await audioRecorder.forceStop();
+  }
+
+  cleanupMicTestFile();
+});
+```
+
+### Szenarien und Cleanup
+
+| Szenario | Cleanup-Methode | Temp-Datei |
+|----------|-----------------|------------|
+| Normaler Stop (F9) | `stopRecording()` | Behalten → Verarbeitung |
+| Cancel via X-Button | `forceStop()` | Löschen |
+| Cancel während Startup | Flag abbricht | Keine erstellt |
+| Fehler während Aufnahme | `forceStop()` | Löschen |
+| App-Quit während Aufnahme | `forceStop()` | OS räumt auf |
+| Voice Enrollment Cancel | `forceStop()` | Löschen |
 
 ---
 
