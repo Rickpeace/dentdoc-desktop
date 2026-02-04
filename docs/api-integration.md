@@ -15,7 +15,7 @@ Desktop App  →  Upload-Proxy (Railway)  →  AssemblyAI
 
 ```javascript
 // Production
-API_BASE_URL = 'https://dentdoc-app.vercel.app/'
+API_BASE_URL = 'https://dentdoc.de/'
 UPLOAD_PROXY_URL = 'https://dentdoc-upload-proxy.up.railway.app'
 
 // Development (via .env.local)
@@ -253,6 +253,57 @@ POST /api/transcriptions/{id}/speaker-mapping
 
 ---
 
+### Debug Logs
+
+#### `uploadDebugLogs(token, store, logs, appVersion, context)`
+
+Lädt Debug-Logs zur Remote-Fehlerbehebung hoch.
+
+```javascript
+await apiClient.uploadDebugLogs(token, store, logs, appVersion, 'manual');
+```
+
+**Request:**
+```http
+POST /api/debug-logs
+Authorization: Bearer <token>
+{
+  "deviceId": "uuid",
+  "hostname": "DESKTOP-ABC",
+  "appVersion": "1.6.13",
+  "logs": "...",
+  "uploadReason": "startup" | "error" | "manual" | "unknown"
+}
+```
+
+**Upload-Reason Mapping:**
+
+Der `context` Parameter wird zu `uploadReason` konvertiert:
+
+| Context | uploadReason |
+|---------|--------------|
+| `'startup'` | `'startup'` |
+| `'manual'` | `'manual'` |
+| Enthält `'error'`, `'timeout'`, `'warning'` | `'error'` |
+| Alles andere | `'unknown'` |
+
+**Auto-Upload (main.js):**
+
+```javascript
+// Fire-and-forget Upload bei Errors
+autoUploadDebugLogs('toggle-pause-error');
+autoUploadDebugLogs('recording-timeout');
+autoUploadDebugLogs('startup');
+```
+
+**Auto-Upload Triggers:**
+- `startup` - Bei App-Start (eingeloggt)
+- `toggle-pause-error` - Pause/Resume fehlgeschlagen
+- `recording-timeout` - Aufnahme Timeout
+- `manual` - User klickt "Debug-Logs senden"
+
+---
+
 ## Backend Endpoints (Vercel)
 
 ### Auth
@@ -295,6 +346,12 @@ POST /api/transcriptions/{id}/speaker-mapping
 |----------|--------|--------------|
 | `/api/subscription` | GET | Abo-Status |
 | `/api/subscription/portal` | GET | Stripe Portal URL |
+
+### Debug
+
+| Endpoint | Method | Beschreibung |
+|----------|--------|--------------|
+| `/api/debug-logs` | POST | Debug-Logs hochladen |
 
 ---
 
@@ -372,7 +429,7 @@ function getBaseUrl() {
 
 ```env
 # .env (Production)
-API_URL=https://dentdoc-app.vercel.app/
+API_URL=https://dentdoc.de/
 UPLOAD_PROXY_URL=https://dentdoc-upload-proxy.up.railway.app
 UPLOAD_PROXY_TOKEN=secret-token
 

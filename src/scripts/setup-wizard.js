@@ -6,7 +6,9 @@
 // Use existing ipcRenderer from dashboard.js (it's already declared there)
 // We just reference it directly since both scripts run in the same context
 
-// Shared audio utilities
+// Shared audio utilities - see src/scripts/audio-utils.js for:
+// - AudioMonitor, MicTester, loadMicrophones, getSelectedMicrophone
+// - isMicrophoneMatch, isMicrophoneAvailable (mic matching with vendor:product ID)
 const wizardAudioUtils = require('./scripts/audio-utils');
 
 class SetupWizard {
@@ -134,7 +136,7 @@ class SetupWizard {
     document.getElementById('wizardSkipSetupBtn')?.addEventListener('click', () => this.skipSetup());
 
     // Microphone
-    document.getElementById('wizardMicSelect')?.addEventListener('change', (e) => {
+    document.getElementById('wizardMicSelect')?.addEventListener('change', async (e) => {
       const mic = wizardAudioUtils.getSelectedMicrophone(e.target);
       this.settings.microphoneId = mic.deviceId;
       this.settings.microphoneName = mic.deviceName;
@@ -142,6 +144,13 @@ class SetupWizard {
         this.micTester.stop();
         this.resetMicTestUI();
       }
+      // Hide profile mic error if user selects a different mic
+      this.hideProfileMicError();
+      // Save mic setting immediately so voice enrollment can use it
+      await ipcRenderer.invoke('save-settings', {
+        microphoneId: mic.deviceId,
+        microphoneName: mic.deviceName
+      });
     });
     document.getElementById('wizardMicTestBtn')?.addEventListener('click', () => this.toggleMicTest());
     document.getElementById('wizardPlayMicBtn')?.addEventListener('click', () => this.playMicTest());
@@ -239,6 +248,54 @@ class SetupWizard {
 
     document.getElementById('wizardProfileCancelBtn')?.addEventListener('click', () => {
       this.cancelProfileRecording();
+    });
+
+    // Mic error link - go back to mic selection step
+    document.getElementById('wizardProfileMicErrorLink')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.hideProfileMicError();
+      this.showStep(1); // Step 1 is microphone setup
+    });
+
+    // Auto-refresh mic dropdown and hide error when microphone is reconnected
+    // Uses wizardAudioUtils.isMicrophoneAvailable() for smart matching (handles USB renumbering)
+    // See: src/scripts/audio-utils.js - isMicrophoneMatch(), isMicrophoneAvailable()
+    this.deviceChangeDebounce = null;
+    navigator.mediaDevices?.addEventListener('devicechange', () => {
+      clearTimeout(this.deviceChangeDebounce);
+      this.deviceChangeDebounce = setTimeout(async () => {
+        // Refresh mic dropdown if on mic setup step (step 1)
+        if (this.currentStep === 1) {
+          // Don't refresh during mic test
+          if (this.micTester && this.micTester.isRunning) {
+            console.log('[Wizard] Device change detected, but mic test running - skipping refresh');
+            return;
+          }
+          console.log('[Wizard] Device change detected, refreshing microphone list...');
+          await this.loadMicrophones();
+        }
+
+        // Check if mic error is visible and hide if mic reconnected
+        const errorCard = document.getElementById('wizardProfileMicError');
+        if (errorCard && errorCard.style.display !== 'none') {
+          try {
+            const settings = await ipcRenderer.invoke('get-settings');
+            const selectedMicName = settings?.microphoneName;
+
+            if (selectedMicName) {
+              // Use shared utility function for mic availability check
+              const micAvailable = await wizardAudioUtils.isMicrophoneAvailable(selectedMicName);
+
+              if (micAvailable) {
+                console.log('[Wizard] Selected microphone reconnected, hiding error card');
+                this.hideProfileMicError();
+              }
+            }
+          } catch (e) {
+            console.warn('[Wizard] Could not check mic availability:', e.message);
+          }
+        }
+      }, 500);
     });
 
     // === Mic Wizard Decision Tree Events ===
@@ -786,6 +843,9 @@ class SetupWizard {
     animationFrame: null
   };
 
+  // Store pending enrollment data for when Start is clicked in overlay
+  profilePendingEnrollment = null;
+
   async loadExistingProfiles() {
     try {
       const profiles = await ipcRenderer.invoke('get-voice-profiles');
@@ -807,6 +867,222 @@ class SetupWizard {
     }
   }
 
+  // ============================================================================
+  // Voice Profile Recording Overlay
+  // ============================================================================
+
+  /**
+   * Show recording overlay in ready state (with Start button)
+   */
+  async showRecordingOverlay(name, role) {
+    // Store enrollment data for when Start is clicked
+    this.profilePendingEnrollment = { name, role };
+
+    const overlay = document.getElementById('profilesRecordingOverlay');
+    const statusBadge = document.getElementById('profilesOverlayStatusBadge');
+    const statusIcon = document.getElementById('profilesOverlayStatusIcon');
+    const statusText = document.getElementById('profilesOverlayStatusText');
+    const progressSection = document.getElementById('profilesOverlayProgressSection');
+    const startBtn = document.getElementById('profilesOverlayStartBtn');
+
+    // Show overlay in ready state
+    overlay.style.display = 'flex';
+
+    // Set ready state
+    statusBadge.className = 'profiles-overlay-status-badge ready';
+    statusIcon.textContent = '🎙️';
+    statusText.textContent = 'Bereit zur Aufnahme';
+
+    // Hide progress, show start button
+    progressSection.style.display = 'none';
+    startBtn.style.display = 'inline-block';
+
+    // Reset progress
+    document.getElementById('profilesOverlayTime').textContent = '0s / 30s';
+    document.getElementById('profilesOverlayProgressFill').style.width = '0%';
+
+    // Start mic level monitoring
+    await this.startOverlayMicMonitoring();
+  }
+
+  /**
+   * Switch overlay to recording state and start actual recording
+   */
+  async startRecordingFromOverlay() {
+    if (!this.profilePendingEnrollment) return;
+
+    const { name, role } = this.profilePendingEnrollment;
+    const statusBadge = document.getElementById('profilesOverlayStatusBadge');
+    const statusIcon = document.getElementById('profilesOverlayStatusIcon');
+    const statusText = document.getElementById('profilesOverlayStatusText');
+    const progressSection = document.getElementById('profilesOverlayProgressSection');
+    const startBtn = document.getElementById('profilesOverlayStartBtn');
+
+    // Switch to recording state
+    statusBadge.className = 'profiles-overlay-status-badge recording';
+    statusIcon.innerHTML = '<span class="profiles-recording-dot"></span>';
+    statusText.textContent = 'Aufnahme läuft';
+
+    // Show progress, hide start button
+    progressSection.style.display = 'block';
+    startBtn.style.display = 'none';
+
+    try {
+      this.profileRecordingState.isRecording = true;
+      this.profileRecordingState.seconds = 0;
+
+      // Start backend recording
+      const result = await ipcRenderer.invoke('start-voice-enrollment', { name, role });
+
+      // Check if start was cancelled (race condition with cancel button)
+      if (result.cancelled) {
+        this.closeRecordingOverlay();
+        this.profileRecordingState.isRecording = false;
+        this.profilePendingEnrollment = null;
+        return;
+      }
+
+      // Check if there was an error
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      // Timer updates overlay progress
+      this.profileRecordingState.timer = setInterval(() => {
+        this.profileRecordingState.seconds++;
+        this.updateOverlayProgress(this.profileRecordingState.seconds, 30);
+
+        if (this.profileRecordingState.seconds >= 30) {
+          this.stopProfileRecording();
+        }
+      }, 1000);
+
+    } catch (error) {
+      console.error('Error starting profile recording:', error);
+
+      // Close overlay on error
+      this.closeRecordingOverlay();
+
+      // Check if it's a mic disconnected error
+      if (error.message && error.message.includes('Mikrofon nicht verbunden')) {
+        const deviceMatch = error.message.match(/: (.+)$/);
+        const deviceName = deviceMatch ? deviceMatch[1] : null;
+        this.showProfileMicError(deviceName);
+        this.showProfileStatus('', '');
+      } else {
+        this.showProfileStatus('Fehler beim Starten: ' + error.message, 'error');
+      }
+
+      this.profileRecordingState.isRecording = false;
+      this.profilePendingEnrollment = null;
+    }
+  }
+
+  /**
+   * Update progress display in overlay
+   */
+  updateOverlayProgress(seconds, total) {
+    const timeEl = document.getElementById('profilesOverlayTime');
+    const progressEl = document.getElementById('profilesOverlayProgressFill');
+    if (timeEl) timeEl.textContent = `${seconds}s / ${total}s`;
+    if (progressEl) progressEl.style.width = `${(seconds / total) * 100}%`;
+  }
+
+  /**
+   * Close recording overlay
+   */
+  closeRecordingOverlay() {
+    const overlay = document.getElementById('profilesRecordingOverlay');
+    if (overlay) overlay.style.display = 'none';
+    this.stopOverlayMicMonitoring();
+    this.profilePendingEnrollment = null;
+  }
+
+  /**
+   * Start mic level monitoring for overlay
+   */
+  async startOverlayMicMonitoring() {
+    try {
+      const micId = this.settings.microphoneId;
+      const constraints = micId ? { audio: { deviceId: { exact: micId } } } : { audio: true };
+
+      this.profileRecordingState.overlayMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.profileRecordingState.overlayAudioContext = new AudioContext();
+      this.profileRecordingState.overlayAnalyser = this.profileRecordingState.overlayAudioContext.createAnalyser();
+      this.profileRecordingState.overlayAnalyser.fftSize = 256;
+
+      const source = this.profileRecordingState.overlayAudioContext.createMediaStreamSource(
+        this.profileRecordingState.overlayMediaStream
+      );
+      source.connect(this.profileRecordingState.overlayAnalyser);
+
+      const bufferLength = this.profileRecordingState.overlayAnalyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const updateLevel = () => {
+        this.profileRecordingState.overlayAnalyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+        const normalized = Math.min(average / 128 * 100, 100);
+        const micBar = document.getElementById('profilesOverlayMicBar');
+        if (micBar) micBar.style.width = normalized + '%';
+        this.profileRecordingState.overlayAnimFrame = requestAnimationFrame(updateLevel);
+      };
+
+      updateLevel();
+    } catch (error) {
+      console.error('[Wizard Overlay] Audio monitoring error:', error);
+    }
+  }
+
+  /**
+   * Stop mic level monitoring for overlay
+   */
+  stopOverlayMicMonitoring() {
+    if (this.profileRecordingState.overlayAnimFrame) {
+      cancelAnimationFrame(this.profileRecordingState.overlayAnimFrame);
+      this.profileRecordingState.overlayAnimFrame = null;
+    }
+    if (this.profileRecordingState.overlayMediaStream) {
+      this.profileRecordingState.overlayMediaStream.getTracks().forEach(track => track.stop());
+      this.profileRecordingState.overlayMediaStream = null;
+    }
+    if (this.profileRecordingState.overlayAudioContext) {
+      this.profileRecordingState.overlayAudioContext.close();
+      this.profileRecordingState.overlayAudioContext = null;
+    }
+    const micBar = document.getElementById('profilesOverlayMicBar');
+    if (micBar) micBar.style.width = '0%';
+  }
+
+  /**
+   * Show mic error card with device name
+   */
+  showProfileMicError(deviceName) {
+    const errorCard = document.getElementById('wizardProfileMicError');
+    const deviceEl = document.getElementById('wizardProfileMicErrorDevice');
+
+    if (errorCard && deviceEl) {
+      deviceEl.textContent = deviceName || 'Unbekanntes Gerät';
+      errorCard.style.display = 'block';
+      document.getElementById('wizardProfileRecordBtn').style.display = 'none';
+    }
+  }
+
+  /**
+   * Hide mic error card
+   */
+  hideProfileMicError() {
+    const errorCard = document.getElementById('wizardProfileMicError');
+    if (errorCard) {
+      errorCard.style.display = 'none';
+    }
+    document.getElementById('wizardProfileRecordBtn').style.display = 'flex';
+  }
+
   async startProfileRecording() {
     const role = document.getElementById('wizardProfileRole').value;
     const name = document.getElementById('wizardProfileName').value.trim();
@@ -821,33 +1097,28 @@ class SetupWizard {
       return;
     }
 
+    // Hide any previous mic error
+    this.hideProfileMicError();
+
+    // Show overlay in ready state (recording starts when Start button is clicked)
+    await this.showRecordingOverlay(name, role);
+  }
+
+  // Legacy method - kept for compatibility but no longer used
+  async _startProfileRecordingLegacy() {
+    const role = document.getElementById('wizardProfileRole').value;
+    const name = document.getElementById('wizardProfileName').value.trim();
+
     try {
+      // This was the old flow - now handled by startRecordingFromOverlay
       this.profileRecordingState.isRecording = true;
       this.profileRecordingState.seconds = 0;
 
-      // Update UI
-      document.getElementById('wizardProfileRecordBtn').style.display = 'none';
-      document.getElementById('wizardProfileCancelBtn').style.display = 'flex';
-      document.getElementById('wizardProfileProgress').style.display = 'block';
-      document.getElementById('wizardProfileAudioLevel').style.display = 'block';
-      document.getElementById('wizardProfileRole').disabled = true;
-      document.getElementById('wizardProfileName').disabled = true;
-
-      this.showProfileStatus('Aufnahme läuft - bitte den Text vorlesen...', 'recording');
-
-      // Start audio monitoring
-      await this.startProfileAudioMonitoring();
-
-      // Start backend recording
       await ipcRenderer.invoke('start-voice-enrollment', { name, role });
 
-      // Start timer
       this.profileRecordingState.timer = setInterval(() => {
         this.profileRecordingState.seconds++;
-        const progress = (this.profileRecordingState.seconds / 30) * 100;
-        document.getElementById('wizardProfileProgressText').textContent =
-          `Aufnahme läuft... ${this.profileRecordingState.seconds}s / 30s`;
-        document.getElementById('wizardProfileProgressBar').style.width = `${progress}%`;
+        this.updateOverlayProgress(this.profileRecordingState.seconds, 30);
 
         if (this.profileRecordingState.seconds >= 30) {
           this.stopProfileRecording();
@@ -856,7 +1127,18 @@ class SetupWizard {
 
     } catch (error) {
       console.error('Error starting profile recording:', error);
-      this.showProfileStatus('Fehler beim Starten: ' + error.message, 'error');
+
+      this.closeRecordingOverlay();
+
+      if (error.message && error.message.includes('Mikrofon nicht verbunden')) {
+        const deviceMatch = error.message.match(/: (.+)$/);
+        const deviceName = deviceMatch ? deviceMatch[1] : null;
+        this.showProfileMicError(deviceName);
+        this.showProfileStatus('', '');
+      } else {
+        this.showProfileStatus('Fehler beim Starten: ' + error.message, 'error');
+      }
+
       this.resetProfileRecordingUI();
     }
   }
@@ -917,11 +1199,11 @@ class SetupWizard {
       this.profileRecordingState.timer = null;
     }
 
-    this.stopProfileAudioMonitoring();
+    // Close the overlay
+    this.closeRecordingOverlay();
 
     try {
       this.showProfileStatus('Stimmprofil wird verarbeitet...', 'processing');
-      document.getElementById('wizardProfileCancelBtn').style.display = 'none';
 
       await ipcRenderer.invoke('stop-voice-enrollment');
 
@@ -938,7 +1220,7 @@ class SetupWizard {
       console.error('Error stopping profile recording:', error);
       this.showProfileStatus('Fehler: ' + error.message, 'error');
     } finally {
-      this.resetProfileRecordingUI();
+      this.profileRecordingState.isRecording = false;
     }
   }
 
@@ -948,7 +1230,8 @@ class SetupWizard {
       this.profileRecordingState.timer = null;
     }
 
-    this.stopProfileAudioMonitoring();
+    // Close the overlay
+    this.closeRecordingOverlay();
 
     try {
       await ipcRenderer.invoke('cancel-voice-enrollment');
@@ -956,8 +1239,8 @@ class SetupWizard {
       console.error('Cancel error:', error);
     }
 
+    this.profileRecordingState.isRecording = false;
     this.showProfileStatus('', '');
-    this.resetProfileRecordingUI();
   }
 
   resetProfileRecordingUI() {

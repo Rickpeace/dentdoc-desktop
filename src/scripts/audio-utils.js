@@ -1,6 +1,21 @@
 /**
- * Shared Audio Utilities
- * Consolidates duplicated audio code from dashboard.js and setup-wizard.js
+ * Shared Audio Utilities (audio-utils.js)
+ * ========================================
+ *
+ * Consolidates audio-related code used by both dashboard.js and setup-wizard.js.
+ * IMPORTANT: Any changes here affect BOTH files!
+ *
+ * Exports:
+ * - AudioMonitor     - Real-time audio level monitoring (used for mic level bars)
+ * - MicTester        - Record & playback mic test functionality
+ * - loadMicrophones  - Populate mic dropdown with smart device matching
+ * - getSelectedMicrophone - Get selected mic from dropdown
+ * - isMicrophoneMatch     - Check if two mic names match (handles USB renumbering)
+ * - isMicrophoneAvailable - Check if a mic is available in current device list
+ *
+ * Used by:
+ * - dashboard.js  (imported as 'audioUtils')
+ * - setup-wizard.js (imported as 'wizardAudioUtils')
  */
 
 const { ipcRenderer } = require('electron');
@@ -117,6 +132,54 @@ class AudioMonitor {
 }
 
 // =============================================================================
+// MICROPHONE MATCHING
+// =============================================================================
+// These functions handle matching microphones when Windows renames them.
+// Example: USB mic "Jabra" becomes "Jabra (2)" after reconnect.
+// We match by vendor:product ID (e.g., "046d:0aba") instead of exact name.
+//
+// Used by: dashboard.js devicechange listener, setup-wizard.js devicechange listener
+// =============================================================================
+
+/**
+ * Check if a microphone matches by vendor:product ID (e.g., "046d:0aba")
+ * Handles USB port changes where Windows renumbers devices like "2- Logitech" -> "3- Logitech"
+ * @param {string} savedName - The saved microphone name
+ * @param {string} currentLabel - The current device label
+ * @returns {boolean}
+ */
+function isMicrophoneMatch(savedName, currentLabel) {
+  if (!savedName || !currentLabel) return false;
+
+  // Try exact match first
+  if (currentLabel === savedName) return true;
+
+  // Extract vendor:product ID from both names
+  const savedVendorId = savedName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+  const currentVendorId = currentLabel.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+
+  // Match by vendor:product ID if both have one
+  return savedVendorId && currentVendorId && savedVendorId === currentVendorId;
+}
+
+/**
+ * Check if a microphone is available in the current device list
+ * @param {string} micName - The microphone name to check
+ * @returns {Promise<boolean>}
+ */
+async function isMicrophoneAvailable(micName) {
+  if (!micName) return false;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const mics = devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+    return mics.some(m => isMicrophoneMatch(micName, m.label));
+  } catch (e) {
+    console.warn('Could not check mic availability:', e.message);
+    return false;
+  }
+}
+
+// =============================================================================
 // MICROPHONE ENUMERATION
 // =============================================================================
 
@@ -191,36 +254,19 @@ async function loadMicrophones(selectElement, selectedId = null, selectedName = 
       selectElement.appendChild(option);
     });
 
-    // Second pass: if not found by ID, try to find by name (with fuzzy matching)
+    // Second pass: if not found by ID, try to find by name (using shared matching function)
     if (!selectedDeviceId && selectedName) {
-      // Extract the core device identifier (e.g., vendor:product ID like "046d:0aba")
-      const savedVendorId = selectedName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1];
-
       for (let i = 0; i < selectElement.options.length; i++) {
         const option = selectElement.options[i];
         const micName = option.dataset.micName || '';
 
-        // Try exact match first
-        if (micName === selectedName) {
+        if (isMicrophoneMatch(selectedName, micName)) {
           option.selected = true;
           selectedDeviceId = option.value;
           selectedDeviceName = micName;
           wasFoundByName = true;
-          console.log('Microphone found by exact name:', selectedName);
+          console.log('Microphone found by name/vendor ID:', selectedName, '->', micName);
           break;
-        }
-
-        // Try vendor:product ID match (handles Windows renumbering like "2- Logitech")
-        if (savedVendorId) {
-          const currentVendorId = micName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1];
-          if (currentVendorId && currentVendorId.toLowerCase() === savedVendorId.toLowerCase()) {
-            option.selected = true;
-            selectedDeviceId = option.value;
-            selectedDeviceName = micName;
-            wasFoundByName = true;
-            console.log('Microphone found by vendor ID:', savedVendorId);
-            break;
-          }
         }
       }
     }
@@ -376,5 +422,7 @@ module.exports = {
   AudioMonitor,
   MicTester,
   loadMicrophones,
-  getSelectedMicrophone
+  getSelectedMicrophone,
+  isMicrophoneMatch,
+  isMicrophoneAvailable
 };

@@ -151,11 +151,11 @@ function checkAndPromotePending(profile) {
     return false;
   }
 
-  // 1. Duration gate: need 30s minimum
+  // 1. Duration gate: need 15s minimum (lowered from 30s for easier profile improvement)
   const totalDuration = profile.pending_embeddings.reduce(
     (sum, p) => sum + p.sourceDuration, 0
   );
-  if (totalDuration < 30000) {
+  if (totalDuration < 15000) {
     return false;
   }
 
@@ -476,13 +476,109 @@ function setDebugLog(logFn) {
   debugLog = logFn;
 }
 
+/**
+ * Add embedding DIRECTLY to confirmed (for manual utterance-to-profile)
+ * Skips pending system completely, recalculates centroid immediately
+ * @param {string} profileId - Profile ID
+ * @param {number[]} embedding - Voice embedding vector
+ * @param {Object} metadata - { sourceType, sourceDuration }
+ * @returns {Object|null} Updated profile or null
+ */
+function addConfirmedEmbedding(profileId, embedding, metadata = {}) {
+  const profiles = store.get('profiles', []);
+  const index = profiles.findIndex(p => p.id === profileId);
+
+  if (index === -1) return null;
+
+  let profile = migrateProfileToMultiEmbedding(profiles[index]);
+  const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
+
+  if (!profile.confirmed_embeddings) {
+    profile.confirmed_embeddings = [];
+  }
+
+  profile.confirmed_embeddings.push({
+    embedding: JSON.stringify(embeddingArray),
+    sourceType: metadata.sourceType || 'utterance',
+    sourceDuration: metadata.sourceDuration || 0,
+    createdAt: new Date().toISOString()
+  });
+
+  // Recompute centroid with all confirmed embeddings
+  const allEmbeddings = profile.confirmed_embeddings.map(e =>
+    typeof e.embedding === 'string' ? JSON.parse(e.embedding) : e.embedding
+  );
+  profile.centroid = computeCentroid(allEmbeddings);
+  profile.centroid_updated_at = new Date().toISOString();
+  profile.updatedAt = new Date().toISOString();
+
+  profiles[index] = profile;
+  store.set('profiles', profiles);
+
+  debugLog(`[VoiceProfile] confirmed embedding added to "${profile.name}" (now ${profile.confirmed_embeddings.length} samples)`);
+  return profile;
+}
+
+/**
+ * Create profile with IMMEDIATELY active embedding (not pending)
+ * For manual profile creation via utterance - profile is usable right away
+ * @param {string} name - Speaker name
+ * @param {number[]} embedding - Voice embedding vector
+ * @param {string} role - Speaker role (Arzt, ZFA, Sonstige)
+ * @param {Object} metadata - { sourceType, sourceDuration }
+ * @returns {Object} Created profile
+ */
+function saveProfileDirect(name, embedding, role = 'Arzt', metadata = {}) {
+  const profiles = store.get('profiles', []);
+
+  // Check if profile with this name already exists
+  const existing = getProfileByName(name);
+  if (existing) {
+    throw new Error(`Ein Stimmprofil für "${name}" existiert bereits`);
+  }
+
+  // Never allow Patient role
+  if (role === 'Patient') {
+    throw new Error('Patienten können nicht als Stimmprofil gespeichert werden');
+  }
+
+  const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
+  const now = new Date().toISOString();
+
+  const profile = {
+    id: Date.now().toString(),
+    name,
+    role,
+    createdAt: now,
+    updatedAt: now,
+    confirmed_embeddings: [{
+      embedding: JSON.stringify(embeddingArray),
+      sourceType: metadata.sourceType || 'utterance',
+      sourceDuration: metadata.sourceDuration || 0,
+      createdAt: now
+    }],
+    pending_embeddings: [],
+    centroid: embeddingArray,  // Immediately set!
+    centroid_updated_at: now,
+    embedding: null
+  };
+
+  profiles.push(profile);
+  store.set('profiles', profiles);
+
+  debugLog(`[VoiceProfile] created "${name}" with immediate embedding (utterance)`);
+  return profile;
+}
+
 module.exports = {
   getAllProfiles,
   getProfile,
   getProfileByName,
   saveProfile,
   saveProfileWithPending,
+  saveProfileDirect,
   addPendingEmbedding,
+  addConfirmedEmbedding,
   checkAndPromotePending,
   computeCentroid,
   cosineSimilarity,

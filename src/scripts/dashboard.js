@@ -5,10 +5,14 @@
  */
 
 const { ipcRenderer } = require('electron');
+// Shared audio utilities - see src/scripts/audio-utils.js for:
+// - AudioMonitor, MicTester, loadMicrophones, getSelectedMicrophone
+// - isMicrophoneMatch, isMicrophoneAvailable (mic matching with vendor:product ID)
 const audioUtils = require('./scripts/audio-utils');
+const transcriptModal = require('./scripts/transcript-modal');
 
 // ===== View Navigation =====
-const navItems = document.querySelectorAll('.nav-item');
+const navItems = document.querySelectorAll('.nav-item[data-view]');
 const views = document.querySelectorAll('.view');
 
 // Track current view for warning checks
@@ -747,20 +751,21 @@ loadSubscriptionStatus();
 // ===== Sidebar Links =====
 async function initSidebarLinks() {
   const baseUrl = await ipcRenderer.invoke('get-base-url');
+  const websiteUrl = await ipcRenderer.invoke('get-website-url');
 
   document.getElementById('linkWebsite').addEventListener('click', async (e) => {
     e.preventDefault();
-    await ipcRenderer.invoke('open-external-url', baseUrl);
+    await ipcRenderer.invoke('open-external-url', websiteUrl);
   });
 
   document.getElementById('linkDatenschutz').addEventListener('click', async (e) => {
     e.preventDefault();
-    await ipcRenderer.invoke('open-external-url', baseUrl + '/datenschutz');
+    await ipcRenderer.invoke('open-external-url', websiteUrl + '/datenschutz');
   });
 
   document.getElementById('linkImpressum').addEventListener('click', async (e) => {
     e.preventDefault();
-    await ipcRenderer.invoke('open-external-url', baseUrl + '/impressum');
+    await ipcRenderer.invoke('open-external-url', websiteUrl + '/impressum');
   });
 
   document.getElementById('logoutBtn').addEventListener('click', async (e) => {
@@ -824,7 +829,6 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHomeStats();
   loadAppVersion();
   initUpdateButton();
-  initBefundSectionHandlers();
 });
 
 // ===== Version & Updates =====
@@ -1012,8 +1016,9 @@ async function loadSettingsView() {
   await loadIphonePairingStatus(settings);
   updateMicSourceUI(microphoneSource);
 
-  const theme = settings.theme || 'dark';
-  document.getElementById('settingsThemeSelect').value = theme;
+  // DISABLED: Theme toggle - dark mode is now default
+  // const theme = settings.theme || 'dark';
+  // document.getElementById('settingsThemeSelect').value = theme;
 
   const docModeSelect = document.getElementById('settingsDocModeSelect');
   docModeSelect.value = settings.docMode || 'agent-v2.1';
@@ -1077,28 +1082,10 @@ async function loadSettingsMicrophones() {
 }
 
 // Listen for device changes (mic plugged in/out) and refresh the list
+// Uses audioUtils.isMicrophoneAvailable() for smart matching (handles USB renumbering)
+// See: src/scripts/audio-utils.js - isMicrophoneMatch(), isMicrophoneAvailable()
 let deviceChangeDebounce = null;
 let selectedMicWasAvailable = null; // Track if SELECTED mic was available
-
-/**
- * Check if a microphone matches by vendor:product ID (e.g., "046d:0aba")
- * This handles USB port changes where Windows renumbers devices like "2- Logitech" -> "3- Logitech"
- */
-function isMicrophoneMatch(savedName, currentLabel) {
-  // Try exact match first
-  if (currentLabel === savedName) return true;
-
-  // Extract vendor:product ID from both names
-  const savedVendorId = savedName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
-  const currentVendorId = currentLabel.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
-
-  // Match by vendor:product ID if both have one
-  if (savedVendorId && currentVendorId && savedVendorId === currentVendorId) {
-    return true;
-  }
-
-  return false;
-}
 
 navigator.mediaDevices?.addEventListener('devicechange', () => {
   // Debounce to avoid multiple rapid refreshes
@@ -1111,11 +1098,8 @@ navigator.mediaDevices?.addEventListener('devicechange', () => {
 
       // Only check if a specific mic is selected (not default)
       if (selectedMicName) {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const mics = devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
-
-        // Check if selected mic is in the list (by vendor:product ID)
-        const selectedMicAvailable = mics.some(m => isMicrophoneMatch(selectedMicName, m.label));
+        // Use shared utility function for mic availability check
+        const selectedMicAvailable = await audioUtils.isMicrophoneAvailable(selectedMicName);
 
         console.log(`[DeviceChange] Selected mic "${selectedMicName}" available: ${selectedMicAvailable} (was: ${selectedMicWasAvailable})`);
 
@@ -1124,6 +1108,9 @@ navigator.mediaDevices?.addEventListener('devicechange', () => {
           if (selectedMicAvailable) {
             console.log('[DeviceChange] Selected microphone reconnected!');
             ipcRenderer.invoke('show-notification', 'Mikrofon verbunden', selectedMicName);
+
+            // Hide mic error card in profiles view if it's visible
+            profilesHideMicError();
           } else {
             console.log('[DeviceChange] Selected microphone disconnected!');
             ipcRenderer.invoke('show-notification', 'Mikrofon getrennt', selectedMicName);
@@ -1155,9 +1142,7 @@ navigator.mediaDevices?.addEventListener('devicechange', () => {
     const settings = await ipcRenderer.invoke('get-settings');
     const selectedMicName = settings?.microphoneName;
     if (selectedMicName) {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const mics = devices.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
-      selectedMicWasAvailable = mics.some(m => isMicrophoneMatch(selectedMicName, m.label));
+      selectedMicWasAvailable = await audioUtils.isMicrophoneAvailable(selectedMicName);
       console.log(`[DeviceChange] Initial selected mic "${selectedMicName}" available: ${selectedMicWasAvailable}`);
     }
   } catch (e) {
@@ -1249,7 +1234,7 @@ async function loadIphonePairingStatus(settings) {
 async function generateMicQRCode() {
   try {
     const QRCode = require('qrcode');
-    const micUrl = 'https://dentdoc-app.vercel.app/mic';
+    const micUrl = 'https://dentdoc.de/mic';
 
     const qrContainer = document.getElementById('settingsIphoneMicQRCode');
     if (!qrContainer) return;
@@ -1460,7 +1445,7 @@ async function loadIphoneDashboardSection(shortcut) {
 async function generateDashboardMicQRCode() {
   try {
     const QRCode = require('qrcode');
-    const micUrl = 'https://dentdoc-app.vercel.app/mic';
+    const micUrl = 'https://dentdoc.de/mic';
 
     const qrContainer = document.getElementById('iphoneDashboardMicQR');
     if (!qrContainer) return;
@@ -1773,6 +1758,9 @@ document.getElementById('settingsMicSelect').addEventListener('change', () => {
     micNotFoundWarning.style.display = 'none';
   }
 
+  // Also hide profiles mic error if user selects a different mic
+  profilesHideMicError();
+
   if (settingsMicTester.isRunning) {
     settingsMicTester.stop();
     settingsStopMicTest();
@@ -1949,12 +1937,12 @@ document.getElementById('settingsOpenProfilesFolderBtn').addEventListener('click
   }
 });
 
-// Settings Theme - saves immediately (excluded from unsaved changes check)
-document.getElementById('settingsThemeSelect').addEventListener('change', async () => {
-  const theme = document.getElementById('settingsThemeSelect').value;
-  document.documentElement.setAttribute('data-theme', theme);
-  await ipcRenderer.invoke('set-theme', theme);
-});
+// DISABLED: Theme toggle - dark mode is now default
+// document.getElementById('settingsThemeSelect').addEventListener('change', async () => {
+//   const theme = document.getElementById('settingsThemeSelect').value;
+//   document.documentElement.setAttribute('data-theme', theme);
+//   await ipcRenderer.invoke('set-theme', theme);
+// });
 
 // Settings change tracking
 document.getElementById('settingsAutoExportCheckbox').addEventListener('change', settingsCheckForChanges);
@@ -2102,7 +2090,7 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
     docMode: document.getElementById('settingsDocModeSelect').value,
-    theme: document.getElementById('settingsThemeSelect').value,
+    // theme: document.getElementById('settingsThemeSelect').value,  // DISABLED: dark mode default
     vadEnabled: document.getElementById('settingsVadEnabled').checked
   };
 
@@ -2202,9 +2190,12 @@ async function loadProfiles() {
     return;
   }
 
+  // Normalize old English role values to German
+  const roleNormalize = { 'dentist': 'Arzt', 'assistant': 'ZFA', 'other': 'Sonstige' };
+
   const profilesByRole = {};
   for (const profile of profiles) {
-    const role = profile.role || 'Sonstige';
+    const role = roleNormalize[profile.role] || profile.role || 'Sonstige';
     if (!profilesByRole[role]) {
       profilesByRole[role] = [];
     }
@@ -2297,7 +2288,13 @@ document.getElementById('profilesCancelBtn').addEventListener('click', async () 
 
 async function profilesStartAudioMonitoring() {
   try {
-    profilesMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Use selected microphone from settings (like setup wizard does)
+    const settings = await ipcRenderer.invoke('get-settings');
+    const micId = settings?.microphoneId;
+    const constraints = micId ? { audio: { deviceId: { exact: micId } } } : { audio: true };
+    console.log('[Profiles] Starting audio monitoring with mic:', micId || 'default');
+
+    profilesMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
     profilesAudioContext = new AudioContext();
     profilesAnalyser = profilesAudioContext.createAnalyser();
     profilesAnalyser.fftSize = 256;
@@ -2344,6 +2341,259 @@ function profilesStopAudioMonitoring() {
   document.getElementById('profilesAudioIndicator').classList.remove('visible');
 }
 
+// ============================================================================
+// Voice Profile Recording Overlay
+// ============================================================================
+
+// Overlay state
+let profilesOverlayAudioContext = null;
+let profilesOverlayAnalyser = null;
+let profilesOverlayMediaStream = null;
+let profilesOverlayAnimFrame = null;
+let profilesPendingEnrollment = null; // Store name/role for when Start is clicked
+
+/**
+ * Show recording overlay in ready state (with Start button)
+ */
+async function profilesShowRecordingOverlay(name, role) {
+  // Store enrollment data for when Start is clicked
+  profilesPendingEnrollment = { name, role };
+
+  const overlay = document.getElementById('profilesRecordingOverlay');
+  const statusBadge = document.getElementById('profilesOverlayStatusBadge');
+  const statusIcon = document.getElementById('profilesOverlayStatusIcon');
+  const statusText = document.getElementById('profilesOverlayStatusText');
+  const progressSection = document.getElementById('profilesOverlayProgressSection');
+  const startBtn = document.getElementById('profilesOverlayStartBtn');
+
+  // Show overlay in ready state
+  overlay.style.display = 'flex';
+
+  // Set ready state
+  statusBadge.className = 'profiles-overlay-status-badge ready';
+  statusIcon.textContent = '🎙️';
+  statusText.textContent = 'Bereit zur Aufnahme';
+
+  // Hide progress, show start button
+  progressSection.style.display = 'none';
+  startBtn.style.display = 'inline-block';
+
+  // Reset progress
+  document.getElementById('profilesOverlayTime').textContent = '0s / 30s';
+  document.getElementById('profilesOverlayProgressFill').style.width = '0%';
+
+  // Start mic level monitoring
+  await profilesStartOverlayMicMonitoring();
+}
+
+/**
+ * Switch overlay to recording state and start actual recording
+ */
+async function profilesStartRecordingFromOverlay() {
+  if (!profilesPendingEnrollment) return;
+
+  const { name, role } = profilesPendingEnrollment;
+  const statusBadge = document.getElementById('profilesOverlayStatusBadge');
+  const statusIcon = document.getElementById('profilesOverlayStatusIcon');
+  const statusText = document.getElementById('profilesOverlayStatusText');
+  const progressSection = document.getElementById('profilesOverlayProgressSection');
+  const startBtn = document.getElementById('profilesOverlayStartBtn');
+
+  // Switch to recording state
+  statusBadge.className = 'profiles-overlay-status-badge recording';
+  statusIcon.innerHTML = '<span class="profiles-recording-dot"></span>';
+  statusText.textContent = 'Aufnahme läuft';
+
+  // Show progress, hide start button
+  progressSection.style.display = 'block';
+  startBtn.style.display = 'none';
+
+  try {
+    profilesIsRecording = true;
+
+    // Start backend recording
+    const result = await ipcRenderer.invoke('start-voice-enrollment', { name, role });
+
+    // Check if start was cancelled (race condition with cancel button)
+    if (result.cancelled) {
+      profilesCloseRecordingOverlay();
+      profilesIsRecording = false;
+      profilesPendingEnrollment = null;
+      return;
+    }
+
+    // Check if there was an error
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    // Timer updates overlay progress
+    let seconds = 0;
+    profilesRecordingTimer = setInterval(() => {
+      seconds++;
+      profilesUpdateOverlayProgress(seconds, PROFILES_RECORDING_DURATION);
+
+      if (seconds >= PROFILES_RECORDING_DURATION) {
+        clearInterval(profilesRecordingTimer);
+        profilesStopEnrollment();
+      }
+    }, 1000);
+
+  } catch (error) {
+    // Close overlay on error
+    profilesCloseRecordingOverlay();
+
+    // Check if it's a mic disconnected error
+    if (error.message && error.message.includes('Mikrofon nicht verbunden')) {
+      const deviceMatch = error.message.match(/: (.+)$/);
+      const deviceName = deviceMatch ? deviceMatch[1] : null;
+      profilesShowMicError(deviceName);
+      profilesShowStatus('', '');
+    } else {
+      profilesShowStatus('Fehler beim Starten: ' + error.message, 'error');
+    }
+
+    profilesIsRecording = false;
+    profilesPendingEnrollment = null;
+  }
+}
+
+/**
+ * Update progress display in overlay
+ */
+function profilesUpdateOverlayProgress(seconds, total) {
+  const timeEl = document.getElementById('profilesOverlayTime');
+  const progressEl = document.getElementById('profilesOverlayProgressFill');
+  if (timeEl) timeEl.textContent = `${seconds}s / ${total}s`;
+  if (progressEl) progressEl.style.width = `${(seconds / total) * 100}%`;
+}
+
+/**
+ * Close recording overlay
+ */
+function profilesCloseRecordingOverlay() {
+  const overlay = document.getElementById('profilesRecordingOverlay');
+  if (overlay) overlay.style.display = 'none';
+  profilesStopOverlayMicMonitoring();
+  profilesPendingEnrollment = null;
+}
+
+/**
+ * Start mic level monitoring for overlay
+ */
+async function profilesStartOverlayMicMonitoring() {
+  try {
+    const settings = await ipcRenderer.invoke('get-settings');
+    const micId = settings?.microphoneId;
+    const constraints = micId ? { audio: { deviceId: { exact: micId } } } : { audio: true };
+
+    profilesOverlayMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+    profilesOverlayAudioContext = new AudioContext();
+    profilesOverlayAnalyser = profilesOverlayAudioContext.createAnalyser();
+    profilesOverlayAnalyser.fftSize = 256;
+
+    const source = profilesOverlayAudioContext.createMediaStreamSource(profilesOverlayMediaStream);
+    source.connect(profilesOverlayAnalyser);
+
+    const bufferLength = profilesOverlayAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function updateLevel() {
+      profilesOverlayAnalyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / bufferLength;
+      const normalized = Math.min(average / 128 * 100, 100);
+      const micBar = document.getElementById('profilesOverlayMicBar');
+      if (micBar) micBar.style.width = normalized + '%';
+      profilesOverlayAnimFrame = requestAnimationFrame(updateLevel);
+    }
+
+    updateLevel();
+  } catch (error) {
+    console.error('[Profiles Overlay] Audio monitoring error:', error);
+  }
+}
+
+/**
+ * Stop mic level monitoring for overlay
+ */
+function profilesStopOverlayMicMonitoring() {
+  if (profilesOverlayAnimFrame) {
+    cancelAnimationFrame(profilesOverlayAnimFrame);
+    profilesOverlayAnimFrame = null;
+  }
+  if (profilesOverlayMediaStream) {
+    profilesOverlayMediaStream.getTracks().forEach(track => track.stop());
+    profilesOverlayMediaStream = null;
+  }
+  if (profilesOverlayAudioContext) {
+    profilesOverlayAudioContext.close();
+    profilesOverlayAudioContext = null;
+  }
+  const micBar = document.getElementById('profilesOverlayMicBar');
+  if (micBar) micBar.style.width = '0%';
+}
+
+/**
+ * Show mic error card with device name
+ */
+function profilesShowMicError(deviceName) {
+  const errorCard = document.getElementById('profilesMicError');
+  const deviceEl = document.getElementById('profilesMicErrorDevice');
+
+  deviceEl.textContent = deviceName || 'Unbekanntes Gerät';
+  errorCard.style.display = 'block';
+
+  // Hide the start button when error is shown
+  document.getElementById('profilesEnrollBtn').style.display = 'none';
+  document.getElementById('profilesCancelBtn').style.display = 'none';
+}
+
+/**
+ * Hide mic error card
+ */
+function profilesHideMicError() {
+  const errorCard = document.getElementById('profilesMicError');
+  if (errorCard) {
+    errorCard.style.display = 'none';
+  }
+  document.getElementById('profilesEnrollBtn').style.display = 'block';
+}
+
+// Setup mic error settings link
+document.getElementById('profilesMicErrorSettingsLink')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  profilesHideMicError();
+  // Navigate to settings view
+  document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+  document.querySelector('[data-view="settings"]').classList.add('active');
+  document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
+  document.getElementById('view-settings').classList.add('active');
+});
+
+// Setup overlay cancel button (handles both dashboard and wizard)
+document.getElementById('profilesOverlayCancelBtn')?.addEventListener('click', async () => {
+  // Check if wizard is recording
+  if (window.setupWizard && window.setupWizard.profileRecordingState?.isRecording) {
+    await window.setupWizard.cancelProfileRecording();
+  } else {
+    await profilesCancelEnrollment();
+  }
+});
+
+// Setup overlay start button (handles both dashboard and wizard)
+document.getElementById('profilesOverlayStartBtn')?.addEventListener('click', async () => {
+  // Check if wizard is in overlay mode
+  if (window.setupWizard && window.setupWizard.profilePendingEnrollment) {
+    await window.setupWizard.startRecordingFromOverlay();
+  } else {
+    await profilesStartRecordingFromOverlay();
+  }
+});
+
 async function profilesStartEnrollment() {
   const name = document.getElementById('profilesSpeakerName').value.trim();
   const role = document.getElementById('profilesSpeakerRole').value;
@@ -2358,37 +2608,11 @@ async function profilesStartEnrollment() {
     return;
   }
 
-  try {
-    profilesIsRecording = true;
-    profilesUpdateButton('Aufnahme läuft... (0s / 30s)', true);
-    profilesShowStatus('🔴 Sprechen Sie jetzt für 30 Sekunden...', 'recording');
+  // Hide any previous mic error
+  profilesHideMicError();
 
-    document.getElementById('profilesProgressBarContainer').classList.add('visible');
-    document.getElementById('profilesProgressBar').style.width = '0%';
-    document.getElementById('profilesCancelBtn').style.display = 'block';
-
-    await profilesStartAudioMonitoring();
-    await ipcRenderer.invoke('start-voice-enrollment', { name, role });
-
-    let seconds = 0;
-    profilesRecordingTimer = setInterval(() => {
-      seconds++;
-      profilesUpdateButton(`Aufnahme läuft... (${seconds}s / ${PROFILES_RECORDING_DURATION}s)`, true);
-      document.getElementById('profilesProgressBar').style.width = `${(seconds / PROFILES_RECORDING_DURATION) * 100}%`;
-
-      if (seconds >= PROFILES_RECORDING_DURATION) {
-        clearInterval(profilesRecordingTimer);
-        profilesStopEnrollment();
-      }
-    }, 1000);
-
-  } catch (error) {
-    profilesShowStatus('Fehler beim Starten: ' + error.message, 'error');
-    profilesIsRecording = false;
-    document.getElementById('profilesProgressBarContainer').classList.remove('visible');
-    document.getElementById('profilesCancelBtn').style.display = 'none';
-    profilesUpdateButton('Aufnahme starten (30 Sekunden)', false);
-  }
+  // Show overlay in ready state (recording starts when Start button is clicked)
+  await profilesShowRecordingOverlay(name, role);
 }
 
 async function profilesStopEnrollment() {
@@ -2397,11 +2621,10 @@ async function profilesStopEnrollment() {
     profilesRecordingTimer = null;
   }
 
-  profilesStopAudioMonitoring();
+  // Close the overlay
+  profilesCloseRecordingOverlay();
 
   try {
-    profilesUpdateButton('Verarbeite Aufnahme...', true);
-    document.getElementById('profilesCancelBtn').style.display = 'none';
     profilesShowStatus('⏳ Stimmprofil wird erstellt...', 'processing');
 
     await ipcRenderer.invoke('stop-voice-enrollment');
@@ -2409,8 +2632,6 @@ async function profilesStopEnrollment() {
     profilesShowStatus('✅ Stimmprofil erfolgreich erstellt!', 'success');
     document.getElementById('profilesSpeakerName').value = '';
     document.getElementById('profilesSpeakerRole').value = '';
-    document.getElementById('profilesProgressBarContainer').classList.remove('visible');
-    document.getElementById('profilesProgressBar').style.width = '0%';
     loadProfiles();
 
     setTimeout(() => {
@@ -2421,9 +2642,6 @@ async function profilesStopEnrollment() {
     profilesShowStatus('Fehler: ' + error.message, 'error');
   } finally {
     profilesIsRecording = false;
-    document.getElementById('profilesProgressBarContainer').classList.remove('visible');
-    document.getElementById('profilesCancelBtn').style.display = 'none';
-    profilesUpdateButton('Aufnahme starten (30 Sekunden)', false);
   }
 }
 
@@ -2433,18 +2651,16 @@ async function profilesCancelEnrollment() {
     profilesRecordingTimer = null;
   }
 
+  // Close the overlay
+  profilesCloseRecordingOverlay();
+
   try {
     await ipcRenderer.invoke('cancel-voice-enrollment');
   } catch (error) {
     console.error('Cancel error:', error);
   }
 
-  profilesStopAudioMonitoring();
   profilesIsRecording = false;
-  document.getElementById('profilesProgressBarContainer').classList.remove('visible');
-  document.getElementById('profilesProgressBar').style.width = '0%';
-  document.getElementById('profilesCancelBtn').style.display = 'none';
-  profilesUpdateButton('Aufnahme starten (30 Sekunden)', false);
   document.getElementById('profilesStatusMessage').innerHTML = '';
 }
 
@@ -3233,9 +3449,9 @@ document.addEventListener('keydown', (e) => {
       closeSpeakerOptimizationModal();
     }
     // Also close transcript modal
-    const transcriptModal = document.getElementById('transcriptModal');
-    if (transcriptModal?.style.display !== 'none') {
-      closeTranscriptModal();
+    const transcriptModalEl = document.getElementById('transcriptModal');
+    if (transcriptModalEl?.style.display !== 'none') {
+      transcriptModal.closeTranscriptModal();
     }
   }
 });
@@ -3246,7 +3462,6 @@ document.addEventListener('keydown', (e) => {
 
 let allTranscripts = [];
 let filteredTranscripts = [];
-let currentTranscriptData = null;
 let currentDateFilter = 'all';
 let currentSearchQuery = '';
 let customDateFrom = null;
@@ -3525,94 +3740,80 @@ function createTranscriptCard(transcript) {
     minute: '2-digit'
   });
 
-  // Get speakers
-  const speakers = transcript.speakers?.length > 0
-    ? transcript.speakers.join(', ')
-    : transcript.folderName || 'Unbekannt';
+  // Get speakers - just show the main one or combine
+  const speakersArray = transcript.speakers?.length > 0
+    ? transcript.speakers
+    : [transcript.folderName || 'Unbekannt'];
+  const speakersText = speakersArray.join(', ');
 
-  // Get summary preview (first 150 chars)
+  // Duration string
+  const durationMs = transcript.durationMs || transcript.duration;
+  let durationStr = '';
+  if (durationMs) {
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    durationStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  // Summary - shorter for compact view
   const summaryPreview = transcript.summary
-    ? transcript.summary.substring(0, 150) + (transcript.summary.length > 150 ? '...' : '')
-    : 'Keine Zusammenfassung verfügbar';
-
-  // Badges container
-  const badges = [];
-
-  // Audio badge
-  if (transcript.hasAudio) {
-    badges.push(`<div class="transcript-card-badge audio">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polygon points="5 3 19 12 5 21 5 3"/>
-      </svg>
-      Audio
-    </div>`);
-  }
-
-  // 01-Status badge (Zahnstatus) - clickable to open tooth chart
-  if (transcript.status01) {
-    const status01Json = JSON.stringify(transcript.status01).replace(/"/g, '&quot;');
-    badges.push(`<div class="transcript-card-badge status01 clickable" title="Klicken um Zahnstatus anzuzeigen" data-status01="${status01Json}">01</div>`);
-  }
-
-  // PA-Status badge (Parodontalstatus) - clickable to copy PA JSON
-  if (transcript.statusPA) {
-    const statusPAJson = JSON.stringify(transcript.statusPA).replace(/"/g, '&quot;');
-    badges.push(`<div class="transcript-card-badge statuspa clickable" title="Klicken um PA-JSON zu kopieren" data-statuspa="${statusPAJson}">PA</div>`);
-  }
-
-  const badgesHtml = badges.length > 0
-    ? `<div class="transcript-card-badges">${badges.join('')}</div>`
+    ? transcript.summary.substring(0, 80) + (transcript.summary.length > 80 ? '...' : '')
     : '';
 
+  // Status badges (01, PA)
+  const badges = [];
+  if (transcript.status01) {
+    const status01Json = JSON.stringify(transcript.status01).replace(/"/g, '&quot;');
+    badges.push(`<span class="card-badge" data-status01="${status01Json}" title="Zahnstatus">01</span>`);
+  }
+  if (transcript.statusPA) {
+    const statusPAJson = JSON.stringify(transcript.statusPA).replace(/"/g, '&quot;');
+    badges.push(`<span class="card-badge pa" data-statuspa="${statusPAJson}" title="PA-Status">PA</span>`);
+  }
+  const badgesHtml = badges.join('');
+
+  // Status indicator
+  const isProcessing = transcript.status === 'processing';
+
   card.innerHTML = `
-    <div class="transcript-card-header">
-      <div>
-        <div class="transcript-card-date">${dateStr}, ${timeStr}</div>
-        <div class="transcript-card-speakers">${speakers}</div>
-      </div>
+    <div class="card-row card-row-main">
+      <span class="card-date">${dateStr}</span>
+      <span class="card-time">${timeStr}</span>
+      ${durationStr ? `<span class="card-duration">${durationStr}</span>` : ''}
       ${badgesHtml}
+      <span class="card-status ${isProcessing ? 'processing' : ''}"></span>
     </div>
-    <div class="transcript-card-summary">${summaryPreview}</div>
+    <div class="card-row card-row-speaker">${speakersText}</div>
+    ${summaryPreview ? `<div class="card-row card-row-summary">${summaryPreview}</div>` : ''}
   `;
 
-  card.addEventListener('click', () => openTranscriptModal(transcript.filePath));
+  card.addEventListener('click', () => transcriptModal.openTranscriptModal(transcript.filePath));
 
   // Add click handlers for status badges (prevent opening modal)
-  const status01Badge = card.querySelector('.transcript-card-badge.status01');
+  const status01Badge = card.querySelector('.card-badge[data-status01]');
   if (status01Badge) {
     status01Badge.addEventListener('click', (e) => {
-      e.stopPropagation(); // Don't open transcript modal
-      const status01Str = status01Badge.dataset.status01;
-      if (status01Str) {
-        try {
-          const status01 = JSON.parse(status01Str);
-          ipcRenderer.send('open-tooth-chart', { status01 });
-        } catch (err) {
-          console.error('Failed to parse status01:', err);
-        }
+      e.stopPropagation();
+      try {
+        const status01 = JSON.parse(status01Badge.dataset.status01);
+        ipcRenderer.send('open-tooth-chart', { status01 });
+      } catch (err) {
+        console.error('Failed to parse status01:', err);
       }
     });
   }
 
-  const statusPABadge = card.querySelector('.transcript-card-badge.statuspa');
+  const statusPABadge = card.querySelector('.card-badge[data-statuspa]');
   if (statusPABadge) {
     statusPABadge.addEventListener('click', async (e) => {
-      e.stopPropagation(); // Don't open transcript modal
-      const statusPAStr = statusPABadge.dataset.statuspa;
-      if (statusPAStr) {
-        try {
-          const statusPA = JSON.parse(statusPAStr);
-          const jsonStr = JSON.stringify(statusPA, null, 2);
-          await ipcRenderer.invoke('copy-to-clipboard', jsonStr);
-          // Show brief feedback
-          const originalText = statusPABadge.textContent;
-          statusPABadge.textContent = '✓';
-          setTimeout(() => {
-            statusPABadge.textContent = originalText;
-          }, 1500);
-        } catch (err) {
-          console.error('Failed to copy PA status:', err);
-        }
+      e.stopPropagation();
+      try {
+        const statusPA = JSON.parse(statusPABadge.dataset.statuspa);
+        await ipcRenderer.invoke('copy-to-clipboard', JSON.stringify(statusPA, null, 2));
+        statusPABadge.textContent = '✓';
+        setTimeout(() => { statusPABadge.textContent = 'PA'; }, 1500);
+      } catch (err) {
+        console.error('Failed to copy PA status:', err);
       }
     });
   }
@@ -3620,728 +3821,9 @@ function createTranscriptCard(transcript) {
   return card;
 }
 
-// Filter transcripts by search query
-function filterTranscripts(query) {
-  if (!query.trim()) {
-    renderTranscriptsList(allTranscripts);
-    document.getElementById('transcriptCount').textContent = allTranscripts.length;
-    return;
-  }
 
-  const lowerQuery = query.toLowerCase();
-  const filtered = allTranscripts.filter(t => {
-    const date = new Date(t.createdAt);
-    const dateStr = date.toLocaleDateString('de-DE');
-    const timeStr = date.toLocaleTimeString('de-DE');
-    const speakers = t.speakers?.join(' ') || '';
-    const folder = t.folderName || '';
-
-    return dateStr.includes(lowerQuery) ||
-           timeStr.includes(lowerQuery) ||
-           speakers.toLowerCase().includes(lowerQuery) ||
-           folder.toLowerCase().includes(lowerQuery);
-  });
-
-  renderTranscriptsList(filtered);
-  document.getElementById('transcriptCount').textContent = filtered.length;
-}
-
-// Open transcript detail modal
-async function openTranscriptModal(filePath) {
-  try {
-    const result = await ipcRenderer.invoke('get-transcript-detail', filePath);
-    if (!result.success) {
-      console.error('Failed to load transcript:', result.error);
-      return;
-    }
-
-    currentTranscriptData = result.transcript;
-    const transcript = result.transcript;
-
-    // Set modal title
-    const date = new Date(transcript.createdAt);
-    const dateStr = date.toLocaleDateString('de-DE', {
-      weekday: 'long',
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric'
-    });
-    const timeStr = date.toLocaleTimeString('de-DE', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-    document.getElementById('transcriptModalTitle').textContent = `${dateStr}, ${timeStr}`;
-
-    // Set summary with clickable passage links (if available)
-    const summaryEl = document.getElementById('transcriptSummary');
-    if (transcript.docLinks && transcript.docLinks.length > 0 && transcript.audioPath) {
-      // Render with clickable links to audio passages
-      summaryEl.innerHTML = renderDocumentationWithPassageLinks(
-        transcript.summary || 'Keine Zusammenfassung verfuegbar',
-        transcript.docLinks
-      );
-      // Attach click handlers for the links
-      attachPassageLinkHandlers(summaryEl);
-    } else {
-      // No links, just plain text
-      summaryEl.textContent = transcript.summary || 'Keine Zusammenfassung verfuegbar';
-    }
-
-    // Render topic tags if available
-    renderTopicTags(transcript.topicSegments);
-
-    // Render utterances (with word-level timestamps if available)
-    renderUtterances(transcript.utterances, transcript.words);
-
-    // Setup audio player if audio exists
-    // Prefer speechOnlyPath (VAD-processed) because timestamps match this version
-    const audioToPlay = transcript.speechOnlyPath || transcript.audioPath;
-    if (audioToPlay) {
-      console.log('[Transcript] Loading audio from:', audioToPlay, transcript.speechOnlyPath ? '(speech_only)' : '(original)');
-      await setupAudioPlayer(audioToPlay);
-      document.getElementById('transcriptAudioPlayer').style.display = 'flex';
-    } else {
-      console.log('[Transcript] No audio file found for this transcript');
-      document.getElementById('transcriptAudioPlayer').style.display = 'none';
-      // Hide topic section if no audio (topics are useless without audio)
-      document.getElementById('topicSection').style.display = 'none';
-    }
-
-    // Setup Befund section (status01 / statusPA)
-    setupBefundSection(transcript.status01, transcript.statusPA);
-
-    // Show modal
-    document.getElementById('transcriptModal').style.display = 'flex';
-
-  } catch (error) {
-    console.error('Error opening transcript modal:', error);
-  }
-}
-
-// Close transcript modal
-function closeTranscriptModal() {
-  document.getElementById('transcriptModal').style.display = 'none';
-  // Stop audio if playing
-  const audio = document.getElementById('transcriptAudio');
-  if (audio) {
-    audio.pause();
-    audio.src = '';
-  }
-  // Hide topic popup and reset state
-  closeTopicPopup();
-  currentTranscriptData = null;
-  currentTopicSegments = null;
-}
-
-// Setup Befund section in transcript modal
-function setupBefundSection(status01, statusPA) {
-  const section = document.getElementById('transcriptBefundSection');
-  const show01Btn = document.getElementById('transcriptShow01Status');
-  const copy01Btn = document.getElementById('transcriptCopy01Json');
-  const copyPABtn = document.getElementById('transcriptCopyPAJson');
-
-  // Hide all initially
-  section.style.display = 'none';
-  show01Btn.style.display = 'none';
-  copy01Btn.style.display = 'none';
-  copyPABtn.style.display = 'none';
-
-  const hasStatus01 = status01 && typeof status01 === 'object';
-  const hasStatusPA = statusPA && typeof statusPA === 'object';
-
-  if (!hasStatus01 && !hasStatusPA) {
-    return; // Nothing to show
-  }
-
-  // Show section
-  section.style.display = 'block';
-
-  // Setup 01-Status buttons
-  if (hasStatus01) {
-    show01Btn.style.display = 'inline-flex';
-    copy01Btn.style.display = 'inline-flex';
-
-    // Store status01 for button handlers
-    show01Btn.dataset.status01 = JSON.stringify(status01);
-    copy01Btn.dataset.status01 = JSON.stringify(status01);
-  }
-
-  // Setup PA-Status button
-  if (hasStatusPA) {
-    copyPABtn.style.display = 'inline-flex';
-    copyPABtn.dataset.statusPA = JSON.stringify(statusPA);
-  }
-}
-
-// Initialize Befund section button handlers
-function initBefundSectionHandlers() {
-  // Show 01-Status in Tooth Chart
-  document.getElementById('transcriptShow01Status')?.addEventListener('click', function() {
-    const status01Str = this.dataset.status01;
-    if (status01Str) {
-      try {
-        const status01 = JSON.parse(status01Str);
-        ipcRenderer.send('open-tooth-chart', { status01 });
-      } catch (e) {
-        console.error('Failed to parse status01:', e);
-      }
-    }
-  });
-
-  // Copy 01-JSON
-  document.getElementById('transcriptCopy01Json')?.addEventListener('click', async function() {
-    const status01Str = this.dataset.status01;
-    if (status01Str) {
-      try {
-        const status01 = JSON.parse(status01Str);
-        const jsonStr = JSON.stringify(status01, null, 2);
-        await ipcRenderer.invoke('copy-to-clipboard', jsonStr);
-        this.querySelector('span').textContent = 'Kopiert!';
-        setTimeout(() => {
-          this.querySelector('span').textContent = '01-JSON kopieren';
-        }, 2000);
-      } catch (e) {
-        console.error('Failed to copy status01:', e);
-      }
-    }
-  });
-
-  // Copy PA-JSON
-  document.getElementById('transcriptCopyPAJson')?.addEventListener('click', async function() {
-    const statusPAStr = this.dataset.statusPA;
-    if (statusPAStr) {
-      try {
-        const statusPA = JSON.parse(statusPAStr);
-        const jsonStr = JSON.stringify(statusPA, null, 2);
-        await ipcRenderer.invoke('copy-to-clipboard', jsonStr);
-        this.querySelector('span').textContent = 'Kopiert!';
-        setTimeout(() => {
-          this.querySelector('span').textContent = 'PA-JSON kopieren';
-        }, 2000);
-      } catch (e) {
-        console.error('Failed to copy statusPA:', e);
-      }
-    }
-  });
-}
-
-// Format milliseconds to mm:ss
-function formatTime(ms) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-// Render utterances in modal (with optional word-level timestamps)
-function renderUtterances(utterances, words = null) {
-  const container = document.getElementById('transcriptUtterances');
-  container.innerHTML = '';
-
-  if (!utterances || utterances.length === 0) {
-    container.innerHTML = '<p class="text-muted">Keine Utterances verfügbar</p>';
-    return;
-  }
-
-  // Build word lookup map if words are available
-  // Map: wordText_startMs -> { start, end, text }
-  const wordMap = new Map();
-  if (words && words.length > 0) {
-    words.forEach(w => {
-      // Key by start time for lookup
-      wordMap.set(w.start, w);
-    });
-  }
-
-  utterances.forEach((utterance, index) => {
-    const div = document.createElement('div');
-    div.className = 'utterance';
-    div.dataset.index = index;
-    div.dataset.startMs = utterance.start;
-
-    const timeStr = formatTime(utterance.start);
-
-    // If we have words, render text with clickable words
-    let textHtml = utterance.text;
-    if (words && words.length > 0) {
-      // Find words that belong to this utterance (between start and end)
-      const utteranceWords = words.filter(w =>
-        w.start >= utterance.start && w.end <= utterance.end
-      );
-
-      if (utteranceWords.length > 0) {
-        // Render each word as clickable span
-        textHtml = utteranceWords.map(w =>
-          `<span class="clickable-word" data-start="${w.start}" title="[${formatTime(w.start)}]">${w.text}</span>`
-        ).join(' ');
-      }
-    }
-
-    div.innerHTML = `
-      <div class="utterance-header">
-        <span class="utterance-time" data-time-ms="${utterance.start}">[${timeStr}]</span>
-        <span class="utterance-speaker">${utterance.speaker || 'Sprecher'}</span>
-      </div>
-      <div class="utterance-text">${textHtml}</div>
-    `;
-
-    // Click on time to jump to audio position
-    const timeEl = div.querySelector('.utterance-time');
-    timeEl.addEventListener('click', (e) => {
-      e.stopPropagation();
-      jumpToTime(utterance.start);
-    });
-
-    // Click on words to jump to their position
-    div.querySelectorAll('.clickable-word').forEach(wordEl => {
-      wordEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const startMs = parseInt(wordEl.dataset.start);
-        jumpToTime(startMs);
-      });
-    });
-
-    container.appendChild(div);
-  });
-}
-
-// Setup audio player
-async function setupAudioPlayer(audioPath) {
-  const audio = document.getElementById('transcriptAudio');
-  const playBtn = document.getElementById('audioPlayBtn');
-  const progressBar = document.getElementById('audioProgressBar');
-  const progress = document.getElementById('audioProgress');
-  const currentTimeEl = document.getElementById('audioCurrentTime');
-  const durationEl = document.getElementById('audioDuration');
-
-  // Load audio as base64
-  const result = await ipcRenderer.invoke('get-transcript-audio', audioPath);
-  if (!result.success) {
-    console.error('Failed to load audio:', result.error);
-    return;
-  }
-
-  audio.src = `data:${result.mimeType};base64,${result.data}`;
-
-  // Play/Pause button
-  playBtn.onclick = () => {
-    if (audio.paused) {
-      audio.play();
-      playBtn.classList.add('playing');
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-        <rect x="6" y="4" width="4" height="16"/>
-        <rect x="14" y="4" width="4" height="16"/>
-      </svg>`;
-    } else {
-      audio.pause();
-      playBtn.classList.remove('playing');
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-        <polygon points="5 3 19 12 5 21 5 3"/>
-      </svg>`;
-    }
-  };
-
-  // Update progress bar
-  audio.ontimeupdate = () => {
-    if (audio.duration) {
-      const percent = (audio.currentTime / audio.duration) * 100;
-      progressBar.style.width = `${percent}%`;
-      currentTimeEl.textContent = formatTime(audio.currentTime * 1000);
-    }
-  };
-
-  // Update duration when loaded
-  audio.onloadedmetadata = () => {
-    durationEl.textContent = formatTime(audio.duration * 1000);
-  };
-
-  // Reset when audio ends
-  audio.onended = () => {
-    playBtn.classList.remove('playing');
-    playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-      <polygon points="5 3 19 12 5 21 5 3"/>
-    </svg>`;
-  };
-
-  // Click on progress bar to seek
-  progress.onclick = (e) => {
-    const rect = progress.getBoundingClientRect();
-    const percent = (e.clientX - rect.left) / rect.width;
-    audio.currentTime = percent * audio.duration;
-  };
-}
-
-// Jump to specific time in audio
-function jumpToTime(ms) {
-  const audio = document.getElementById('transcriptAudio');
-  if (audio && audio.src) {
-    audio.currentTime = ms / 1000;
-    if (audio.paused) {
-      audio.play();
-      const playBtn = document.getElementById('audioPlayBtn');
-      playBtn.classList.add('playing');
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-        <rect x="6" y="4" width="4" height="16"/>
-        <rect x="14" y="4" width="4" height="16"/>
-      </svg>`;
-    }
-  }
-}
-
-// ===== Topic Tags Functions =====
-
-// Store topic segments for popup access
-let currentTopicSegments = null;
-
-// Render topic tags from extracted segments
-function renderTopicTags(topicSegments) {
-  const section = document.getElementById('topicSection');
-  const container = document.getElementById('topicTags');
-
-  if (!topicSegments || topicSegments.length === 0) {
-    section.style.display = 'none';
-    return;
-  }
-
-  currentTopicSegments = topicSegments;
-  section.style.display = 'block';
-  container.innerHTML = '';
-
-  // Group segments by name
-  const groupedTopics = {};
-  topicSegments.forEach(segment => {
-    const key = segment.name;
-    if (!groupedTopics[key]) {
-      groupedTopics[key] = {
-        name: segment.name,
-        type: segment.type,
-        segments: []
-      };
-    }
-    groupedTopics[key].segments.push(segment);
-  });
-
-  // Create tags for each topic
-  Object.values(groupedTopics).forEach(topic => {
-    const tag = document.createElement('div');
-    tag.className = 'topic-tag';
-    tag.dataset.type = topic.type;
-    tag.dataset.name = topic.name;
-
-    const count = topic.segments.length;
-    tag.innerHTML = `
-      <span class="topic-name">${topic.name}</span>
-      ${count > 1 ? `<span class="topic-count">${count}x</span>` : ''}
-    `;
-
-    tag.addEventListener('click', () => {
-      showTopicPopup(topic.name, topic.segments);
-    });
-
-    container.appendChild(tag);
-  });
-}
-
-// Show popup with all segments for a topic
-function showTopicPopup(topicName, segments) {
-  const popup = document.getElementById('topicPopup');
-  const title = document.getElementById('topicPopupTitle');
-  const segmentsContainer = document.getElementById('topicPopupSegments');
-
-  title.textContent = `${topicName} - ${segments.length} ${segments.length === 1 ? 'Stelle' : 'Stellen'}`;
-  segmentsContainer.innerHTML = '';
-
-  segments.forEach((segment, index) => {
-    const segmentEl = document.createElement('div');
-    segmentEl.className = 'topic-segment';
-    segmentEl.dataset.startMs = segment.startMs;
-    segmentEl.dataset.endMs = segment.endMs;
-
-    const startTime = formatTime(segment.startMs);
-    const endTime = formatTime(segment.endMs);
-
-    segmentEl.innerHTML = `
-      <div class="topic-segment-play">
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-      </div>
-      <div class="topic-segment-info">
-        <div class="topic-segment-time">[${startTime} - ${endTime}]</div>
-        <div class="topic-segment-summary">${segment.summary || 'Klicken zum Anhoeren'}</div>
-      </div>
-    `;
-
-    segmentEl.addEventListener('click', () => {
-      playSegment(segment.startMs, segment.endMs);
-    });
-
-    segmentsContainer.appendChild(segmentEl);
-  });
-
-  popup.style.display = 'flex';
-}
-
-// Close topic popup
-function closeTopicPopup() {
-  document.getElementById('topicPopup').style.display = 'none';
-}
-
-// ===== Clickable Documentation Terms =====
-// Render documentation/summary with clickable terms that link to audio
-
-/**
- * Escape HTML special characters
- */
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-/**
- * NEUER PASSAGEN-BASIERTER ANSATZ
- *
- * Render documentation text with clickable passage links.
- * Each link connects documentation text to semantic audio passages (15-40 sec clips).
- *
- * @param {string} documentation - The documentation text
- * @param {Array} docLinks - Array of doc links: { docText, positions, passages }
- * @returns {string} HTML with clickable spans for passage links
- */
-function renderDocumentationWithPassageLinks(documentation, docLinks) {
-  if (!docLinks || docLinks.length === 0 || !documentation) {
-    return escapeHtml(documentation || '');
-  }
-
-  // Collect all positions with their passage data
-  const allPositions = [];
-  docLinks.forEach(link => {
-    if (!link.positions || !link.passages || link.passages.length === 0) return;
-    link.positions.forEach(pos => {
-      // Validate position is within bounds
-      if (pos.start >= 0 && pos.end <= documentation.length && pos.start < pos.end) {
-        allPositions.push({
-          start: pos.start,
-          end: pos.end,
-          docText: link.docText,
-          passages: link.passages
-        });
-      }
-    });
-  });
-
-  // Sort by start position (ascending) to process in order
-  allPositions.sort((a, b) => a.start - b.start);
-
-  // Remove overlapping positions (keep first occurrence)
-  const nonOverlapping = [];
-  let lastEnd = 0;
-  allPositions.forEach(pos => {
-    if (pos.start >= lastEnd) {
-      nonOverlapping.push(pos);
-      lastEnd = pos.end;
-    }
-  });
-
-  // Build result string by replacing positions with clickable spans
-  let result = '';
-  let currentIndex = 0;
-
-  nonOverlapping.forEach(pos => {
-    // Add text before this position (escaped)
-    if (pos.start > currentIndex) {
-      result += escapeHtml(documentation.slice(currentIndex, pos.start));
-    }
-
-    // Add the linked text as a clickable span
-    const linkText = documentation.slice(pos.start, pos.end);
-    const passagesJson = JSON.stringify(pos.passages).replace(/"/g, '&quot;');
-    // Determine type from first passage's topic for styling
-    const topic = pos.passages[0]?.topic || 'Sonstiges';
-    result += `<span class="doc-audio-link" data-topic="${topic}" data-text="${escapeHtml(pos.docText)}" data-passages="${passagesJson}">${escapeHtml(linkText)}</span>`;
-
-    currentIndex = pos.end;
-  });
-
-  // Add remaining text (escaped)
-  if (currentIndex < documentation.length) {
-    result += escapeHtml(documentation.slice(currentIndex));
-  }
-
-  // Convert newlines to <br> for proper display
-  result = result.replace(/\n/g, '<br>');
-
-  return result;
-}
-
-/**
- * Show popup for a clicked documentation link with its audio passages.
- * Each passage is a semantic audio clip (15-40 seconds) about a specific topic.
- */
-function showPassagePopup(linkText, passages, clickEvent) {
-  const popup = document.getElementById('topicPopup');
-  const title = document.getElementById('topicPopupTitle');
-  const segmentsContainer = document.getElementById('topicPopupSegments');
-
-  title.textContent = `"${linkText}" - ${passages.length} ${passages.length === 1 ? 'Audio-Passage' : 'Audio-Passagen'}`;
-  segmentsContainer.innerHTML = '';
-
-  passages.forEach((passage, index) => {
-    const segmentEl = document.createElement('div');
-    segmentEl.className = 'topic-segment';
-    segmentEl.dataset.startMs = passage.startMs;
-    segmentEl.dataset.endMs = passage.endMs;
-
-    const startTime = formatTime(passage.startMs);
-    const endTime = formatTime(passage.endMs);
-    const durationSec = Math.round((passage.endMs - passage.startMs) / 1000);
-
-    segmentEl.innerHTML = `
-      <div class="topic-segment-play">
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-      </div>
-      <div class="topic-segment-info">
-        <div class="topic-segment-time">[${startTime} - ${endTime}] (${durationSec}s)</div>
-        <div class="topic-segment-topic">${passage.topic || 'Sonstiges'}</div>
-        <div class="topic-segment-summary">${passage.summary || passage.text?.substring(0, 100) + '...' || 'Klicken zum Anhoeren'}</div>
-      </div>
-    `;
-
-    segmentEl.addEventListener('click', () => {
-      playSegment(passage.startMs, passage.endMs);
-    });
-
-    segmentsContainer.appendChild(segmentEl);
-  });
-
-  popup.style.display = 'flex';
-}
-
-/**
- * Attach click handlers to passage links in documentation
- */
-function attachPassageLinkHandlers(container) {
-  container.querySelectorAll('.doc-audio-link').forEach(link => {
-    link.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const text = link.dataset.text;
-      const passagesJson = link.dataset.passages;
-      try {
-        const passages = JSON.parse(passagesJson);
-        if (passages && passages.length > 0) {
-          showPassagePopup(text, passages, e);
-        }
-      } catch (err) {
-        console.error('Failed to parse passages JSON:', err);
-      }
-    });
-  });
-}
-
-// Legacy functions for backwards compatibility
-function renderDocumentationWithLinks(documentation, linkedTerms) {
-  return renderDocumentationWithPassageLinks(documentation, linkedTerms);
-}
-
-function showDocTermPopup(termName, segments, clickEvent) {
-  // Convert old segment format to passage format
-  const passages = segments.map(seg => ({
-    id: 'legacy',
-    topic: 'Sonstiges',
-    startMs: seg.startMs,
-    endMs: seg.endMs,
-    text: seg.preview || '',
-    summary: seg.preview || ''
-  }));
-  showPassagePopup(termName, passages, clickEvent);
-}
-
-function attachDocLinkHandlers(container) {
-  attachPassageLinkHandlers(container);
-}
-
-// Play a specific audio segment
-function playSegment(startMs, endMs) {
-  const audio = document.getElementById('transcriptAudio');
-  if (!audio || !audio.src) return;
-
-  // Jump to start time
-  audio.currentTime = startMs / 1000;
-
-  // Start playing
-  audio.play();
-  const playBtn = document.getElementById('audioPlayBtn');
-  playBtn.classList.add('playing');
-  playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-    <rect x="6" y="4" width="4" height="16"/>
-    <rect x="14" y="4" width="4" height="16"/>
-  </svg>`;
-
-  // Optional: Auto-stop at end of segment
-  // Uncomment if you want audio to stop at endMs
-  /*
-  const checkEnd = setInterval(() => {
-    if (audio.currentTime >= endMs / 1000) {
-      audio.pause();
-      playBtn.classList.remove('playing');
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-        <polygon points="5 3 19 12 5 21 5 3"/>
-      </svg>`;
-      clearInterval(checkEnd);
-    }
-  }, 100);
-  */
-
-  // Close popup after starting playback
-  closeTopicPopup();
-}
-
-// Event listeners for topic popup
-document.getElementById('topicPopupClose')?.addEventListener('click', closeTopicPopup);
-
-// Close popup when clicking outside
-document.getElementById('topicPopup')?.addEventListener('click', (e) => {
-  if (e.target.id === 'topicPopup') {
-    closeTopicPopup();
-  }
-});
-
-// Event listeners for transcript view
-document.getElementById('transcriptSearch')?.addEventListener('input', (e) => {
-  filterTranscripts(e.target.value);
-});
-
-// Date filter chips
-document.querySelectorAll('.date-chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    setDateFilter(chip.dataset.filter);
-  });
-});
-
-// Date range picker buttons
-document.getElementById('dateRangeClose')?.addEventListener('click', closeDateRangePicker);
-document.getElementById('dateRangeClear')?.addEventListener('click', clearDateRange);
-document.getElementById('dateRangeApply')?.addEventListener('click', applyDateRange);
-
-// Close date picker when clicking outside
-document.addEventListener('click', (e) => {
-  const picker = document.getElementById('dateRangePicker');
-  const customBtn = document.getElementById('customDateBtn');
-  if (picker?.style.display === 'block' && !picker.contains(e.target) && !customBtn?.contains(e.target)) {
-    closeDateRangePicker();
-  }
-});
-
-document.getElementById('transcriptModalClose')?.addEventListener('click', closeTranscriptModal);
-
-document.getElementById('transcriptModal')?.addEventListener('click', (e) => {
-  if (e.target.id === 'transcriptModal') {
-    closeTranscriptModal();
-  }
-});
+// Initialize transcript modal module (extracted to transcript-modal.js)
+transcriptModal.initTranscriptModal();
 
 // Load transcripts when view becomes active
 const navTranscripts = document.getElementById('nav-transcripts');
@@ -4350,4 +3832,202 @@ if (navTranscripts) {
     loadTranscripts();
   });
 }
+
+// ============================================
+// Support Chat Modal
+// ============================================
+
+function openSupportModal() {
+  const modal = document.getElementById('supportPanel');
+  const btn = document.getElementById('supportBtn');
+  const navBtn = document.getElementById('nav-livechat');
+  const badge = document.getElementById('chatBadge');
+  const fabBadge = document.getElementById('fabBadge');
+  if (modal) {
+    modal.classList.add('active');
+    btn?.classList.add('active');
+    btn?.classList.remove('has-message');
+    navBtn?.classList.add('chat-open');
+    // Reset badges when opening chat
+    if (badge) {
+      badge.style.display = 'none';
+      badge.textContent = '0';
+    }
+    if (fabBadge) {
+      fabBadge.style.display = 'none';
+      fabBadge.textContent = '0';
+    }
+    unreadChatMessages = 0;
+  }
+}
+
+function closeSupportModal() {
+  const modal = document.getElementById('supportPanel');
+  const btn = document.getElementById('supportBtn');
+  const navBtn = document.getElementById('nav-livechat');
+  if (modal?.classList.contains('active')) {
+    modal.classList.remove('active');
+    btn?.classList.remove('active');
+    navBtn?.classList.remove('chat-open');
+  }
+}
+
+// Track unread messages
+let unreadChatMessages = 0;
+
+function toggleSupportModal() {
+  const modal = document.getElementById('supportPanel');
+  if (modal?.classList.contains('active')) {
+    closeSupportModal();
+  } else {
+    openSupportModal();
+  }
+}
+
+// Help button click (FAB)
+document.getElementById('supportBtn')?.addEventListener('click', toggleSupportModal);
+
+// Live Chat nav button click
+document.getElementById('nav-livechat')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  toggleSupportModal();
+});
+
+// Escape closes panel
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeSupportModal();
+  }
+});
+
+// Initialize tawk.to webview with user data
+async function initTawkWebview() {
+  const webview = document.getElementById('tawkWebview');
+  if (!webview) return;
+
+  // Get user data, app info, and support context
+  let user = null;
+  let appVersion = '';
+  let supportContext = {};
+  try {
+    user = await ipcRenderer.invoke('get-user');
+    appVersion = await ipcRenderer.invoke('get-app-version');
+    supportContext = await ipcRenderer.invoke('get-support-context');
+  } catch (err) {
+    console.log('Could not get data for tawk.to:', err);
+  }
+
+  // Wait for webview to load, then inject user data
+  webview.addEventListener('did-finish-load', () => {
+    if (user && user.email) {
+      // Prepare data (escape single quotes for JS injection)
+      const escape = (str) => (str || '').toString().replace(/'/g, "\\'").replace(/\n/g, ' ');
+
+      const userData = {
+        // User info
+        name: escape(user.name || user.email),
+        email: escape(user.email),
+        userId: escape(user.id),
+        // App info
+        appVersion: escape(appVersion),
+        platform: 'Windows',
+        // Subscription
+        planTier: escape(user.planTier || 'unknown'),
+        subscriptionStatus: escape(user.subscriptionStatus || 'unknown'),
+        minutesRemaining: user.minutesRemaining || 0,
+        maxDevices: user.maxDevices || 1,
+        // Settings
+        shortcut: escape(supportContext.shortcut || 'F9'),
+        theme: escape(supportContext.theme || 'dark'),
+        vadEnabled: supportContext.vadEnabled !== false ? 'Ja' : 'Nein',
+        microphoneName: escape(supportContext.microphoneName || 'Default'),
+        microphoneSource: escape(supportContext.microphoneSource || 'desktop'),
+        // Stats
+        todayRecordings: supportContext.todayRecordings || 0,
+        lastDocumentation: escape(supportContext.lastDocumentation || 'Noch keine'),
+        // Last error
+        lastError: escape(supportContext.lastError || 'Keine Fehler')
+      };
+
+      const script = `
+        (function() {
+          // Wait for Tawk_API to be ready
+          function setupTawk() {
+            if (typeof Tawk_API !== 'undefined') {
+              // Set user attributes
+              if (Tawk_API.setAttributes) {
+                Tawk_API.setAttributes({
+                  name: '${userData.name}',
+                  email: '${userData.email}',
+                  userId: '${userData.userId}',
+                  appVersion: '${userData.appVersion}',
+                  platform: '${userData.platform}',
+                  planTier: '${userData.planTier}',
+                  subscriptionStatus: '${userData.subscriptionStatus}',
+                  minutesRemaining: '${userData.minutesRemaining}',
+                  maxDevices: '${userData.maxDevices}',
+                  shortcut: '${userData.shortcut}',
+                  theme: '${userData.theme}',
+                  vadEnabled: '${userData.vadEnabled}',
+                  microphoneName: '${userData.microphoneName}',
+                  microphoneSource: '${userData.microphoneSource}',
+                  todayRecordings: '${userData.todayRecordings}',
+                  lastDocumentation: '${userData.lastDocumentation}',
+                  lastError: '${userData.lastError}'
+                }, function(error) {
+                  if (error) console.log('Tawk setAttributes error:', error);
+                });
+              }
+
+              // Listen for agent messages (notify parent via console.log marker)
+              Tawk_API.onChatMessageAgent = function(message) {
+                console.log('DENTDOC_TAWK_NEW_MESSAGE');
+              };
+            } else {
+              setTimeout(setupTawk, 500);
+            }
+          }
+          setupTawk();
+        })();
+      `;
+      webview.executeJavaScript(script).catch(err => {
+        console.log('Could not inject user data into tawk.to:', err);
+      });
+    }
+  });
+
+  // Listen for console messages from webview (for new message notifications)
+  webview.addEventListener('console-message', (e) => {
+    if (e.message === 'DENTDOC_TAWK_NEW_MESSAGE') {
+      // Check if chat panel is closed
+      const modal = document.getElementById('supportPanel');
+      if (!modal?.classList.contains('active')) {
+        unreadChatMessages++;
+        const countText = unreadChatMessages > 9 ? '9+' : unreadChatMessages.toString();
+
+        // Update sidebar badge
+        const badge = document.getElementById('chatBadge');
+        if (badge) {
+          badge.textContent = countText;
+          badge.style.display = 'flex';
+        }
+
+        // Update FAB badge
+        const fabBadge = document.getElementById('fabBadge');
+        if (fabBadge) {
+          fabBadge.textContent = countText;
+          fabBadge.style.display = 'flex';
+        }
+
+        // Pulse the FAB button
+        const fab = document.getElementById('supportBtn');
+        fab?.classList.add('has-message');
+      }
+    }
+  });
+}
+
+// Initialize on DOMContentLoaded
+document.addEventListener('DOMContentLoaded', initTawkWebview);
+
 

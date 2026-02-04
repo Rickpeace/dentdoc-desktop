@@ -322,7 +322,7 @@
           </form>
 
           <div class="info">
-            <p>Noch kein Konto? <a href="https://dentdoc.app" target="_blank">Jetzt registrieren</a></p>
+            <p>Noch kein Konto? <a href="#" id="registerLink">Jetzt registrieren</a></p>
           </div>
         </div>
       </div>
@@ -339,6 +339,13 @@
 
     document.getElementById('closeBtn').addEventListener('click', () => {
       ipcRenderer.send('close-window');
+    });
+
+    // Register link - opens website
+    document.getElementById('registerLink').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const websiteUrl = await ipcRenderer.invoke('get-website-url');
+      require('electron').shell.openExternal(websiteUrl);
     });
 
     const form = document.getElementById('loginForm');
@@ -418,7 +425,7 @@
             element: '#loginForm',
             popover: {
               title: 'Anmeldung mit Website-Konto',
-              description: 'Verwenden Sie hier <strong>dieselben Anmeldedaten</strong> wie auf der DentDoc-Website. Haben Sie noch kein Konto? Registrieren Sie sich zuerst auf dentdoc.app',
+              description: 'Verwenden Sie hier <strong>dieselben Anmeldedaten</strong> wie auf der DentDoc-Website. Haben Sie noch kein Konto? Registrieren Sie sich zuerst auf www.dentdoc.de',
               side: 'top',
               align: 'center'
             }

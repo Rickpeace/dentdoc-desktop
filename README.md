@@ -29,9 +29,9 @@ pnpm install
 
 2. API-URL konfigurieren:
    - Kopiere `.env.example` zu `.env`
-   - Setze `API_URL` auf deine deployed Vercel URL:
+   - Setze `API_URL` auf die DentDoc URL:
    ```
-   API_URL=https://your-dentdoc-app.vercel.app
+   API_URL=https://dentdoc.de
    ```
 
 3. Icons erstellen (siehe `assets/ICONS-NEEDED.txt`):
@@ -124,7 +124,7 @@ const API_BASE_URL = process.env.API_URL || 'http://localhost:3000';
 
 Produktions-URL setzen:
 ```bash
-set API_URL=https://your-dentdoc-app.vercel.app
+set API_URL=https://dentdoc.de
 npm start
 ```
 

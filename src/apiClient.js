@@ -41,12 +41,15 @@ function isAlreadyOptimized(filePath) {
   }
 }
 
-// DentDoc Vercel API URL
-const API_BASE_URL = process.env.API_URL || 'https://dentdoc-app.vercel.app/';
+// DentDoc API URL
+const API_BASE_URL = process.env.API_URL || 'https://dentdoc.de/';
 
 // Railway Upload-Proxy URL (API-Key bleibt auf Railway, nicht im Desktop!)
 const UPLOAD_PROXY_URL = process.env.UPLOAD_PROXY_URL || 'https://dentdoc-upload-proxy.up.railway.app';
 const UPLOAD_PROXY_TOKEN = process.env.UPLOAD_PROXY_TOKEN;
+
+// Public website URL (for user-facing links, not API calls)
+const WEBSITE_URL = 'https://dentdoc.de';
 
 /**
  * Get or create a unique device ID for this installation
@@ -511,6 +514,7 @@ async function getDocumentationAgentV2_1(transcriptionId, token) {
     return {
       documentation: response.data.documentation,
       kzvDocumentation: response.data.kzvDocumentation || null,
+      zDocumentation: response.data.zDocumentation || null,
       transcript: response.data.transcript || null,
       reconstructedTranscript: response.data.reconstructedTranscript || null,
       transcriptWithSpeakers: response.data.transcriptWithSpeakers || null,
@@ -624,6 +628,10 @@ async function getTranscriptionStatus(transcriptionId, token) {
 
 function getBaseUrl() {
   return API_BASE_URL;
+}
+
+function getWebsiteUrl() {
+  return WEBSITE_URL;
 }
 
 async function submitFeedback(token, category, message) {
@@ -837,12 +845,23 @@ async function extractTopicSegments(token, transcriptText, words) {
  * @param {Object} store - electron-store instance
  * @param {string} logs - The log content to upload
  * @param {string} appVersion - App version
+ * @param {string} context - Upload context (e.g., 'startup', 'manual', 'toggle-pause-error')
  * @returns {Promise<Object>} { success: boolean, debugLogId: number }
  */
-async function uploadDebugLogs(token, store, logs, appVersion) {
+async function uploadDebugLogs(token, store, logs, appVersion, context = 'unknown') {
   try {
     const deviceId = getDeviceId(store);
     const deviceInfo = getDeviceInfo();
+
+    // Derive uploadReason from context
+    let uploadReason = 'unknown';
+    if (context === 'startup') {
+      uploadReason = 'startup';
+    } else if (context === 'manual') {
+      uploadReason = 'manual';
+    } else if (context.includes('error') || context.includes('timeout') || context.includes('warning')) {
+      uploadReason = 'error';
+    }
 
     const response = await axios.post(
       `${API_BASE_URL}api/debug-logs`,
@@ -851,6 +870,7 @@ async function uploadDebugLogs(token, store, logs, appVersion) {
         hostname: deviceInfo.hostname,
         appVersion,
         logs,
+        uploadReason,
       },
       {
         headers: {
@@ -880,6 +900,7 @@ module.exports = {
   getTranscription,
   getTranscriptionStatus,
   getBaseUrl,
+  getWebsiteUrl,
   submitFeedback,
   getDeviceId,
   getDeviceInfo,

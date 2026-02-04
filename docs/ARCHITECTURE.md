@@ -46,7 +46,7 @@
 | `dotenv` | Umgebungsvariablen |
 
 ### Externe Services
-- **Backend:** https://dentdoc-app.vercel.app/
+- **Backend:** https://dentdoc.de/
 - **Transkription:** AssemblyAI (via Backend)
 - **Dokumentation:** OpenAI GPT-5 (via Backend, Agent V2.1)
 
@@ -87,9 +87,9 @@ dentdoc-desktop/
 │   ├── scripts/
 │   │   ├── dashboard.js         # Dashboard UI Logik
 │   │   ├── setup-wizard.js      # Einrichtungsassistent
+│   │   ├── audio-utils.js       # SHARED: Mic-Test, Monitoring, Matching
 │   │   ├── tooth-chart.js       # Zahnschema
-│   │   ├── tooth-shapes.js      # Zahn-Grafiken
-│   │   └── audio-utils.js       # Audio Hilfsfunktionen
+│   │   └── tooth-shapes.js      # Zahn-Grafiken
 │   │
 │   ├── dashboard.html           # Hauptfenster
 │   ├── login.html               # Login-Dialog
@@ -142,13 +142,18 @@ dentdoc-desktop/
 │  │ dashboard.js │  │ setup-wizard │  │ status-overlay.html  │   │
 │  │ Home, Archiv │  │ Einrichtung  │  │ Recording-Status     │   │
 │  │ Settings     │  │ Mikrofon     │  │ Progress, Fehler     │   │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘   │
+│  └──────┬───────┘  └──────┬───────┘  └──────────────────────┘   │
+│         │                 │                                      │
+│         └────────┬────────┘                                      │
+│          ┌───────┴────────┐                                      │
+│          │ audio-utils.js │  ← Shared: Mic matching, testing     │
+│          └────────────────┘                                      │
 └─────────────────────────────────────────────────────────────────┘
                               │ HTTPS
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                         BACKEND                                  │
-│  dentdoc-app.vercel.app                                         │
+│  dentdoc.de                                                     │
 │  ├─ /api/transcriptions     - Transkription starten/abrufen     │
 │  ├─ /api/transcriptions/[id]/generate-doc-agent-v2  - Doku      │
 │  ├─ /api/auth/*             - Login, Register, Session          │
@@ -257,7 +262,7 @@ Details: [main-process.md](main-process.md)
 
 ```env
 # .env (Produktion)
-VITE_API_URL=https://dentdoc-app.vercel.app
+VITE_API_URL=https://dentdoc.de
 
 # .env.local (Entwicklung)
 VITE_API_URL=http://localhost:3000

@@ -469,7 +469,13 @@ async function identifySpeakersFromUtterances(audioFilePath, utterances) {
 
       console.log(`[Speaker ${speaker}] Comparing against ${profiles.length} profiles:`);
       for (const profile of profiles) {
-        const similarity = cosineSimilarity(embedding, profile.embedding);
+        // Skip profiles without a usable embedding (pending-only profiles)
+        if (!profile.embedding && !profile.centroid) {
+          console.log(`    [SKIP] "${profile.name}" - no embedding yet (pending only)`);
+          continue;
+        }
+        const profileEmbedding = profile.embedding || profile.centroid;
+        const similarity = cosineSimilarity(embedding, profileEmbedding);
         const pct = (similarity * 100).toFixed(1);
         const marker = similarity >= 0.7 ? '✓' : ' ';
         console.log(`  ${marker} "${profile.name}" (${profile.role}): ${pct}%`);

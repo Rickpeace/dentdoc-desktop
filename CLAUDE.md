@@ -8,7 +8,7 @@ Windows Electron app for automatic dental documentation. Records doctor-patient 
 - **Main process**: `main.js` (~4800 lines) + extracted modules in `src/`
 - **Renderer**: Vanilla HTML/JS (no framework)
 - **Audio**: FFmpeg for recording, Sherpa-ONNX for local speaker recognition
-- **Backend**: https://dentdoc-app.vercel.app (auth, transcription, documentation)
+- **Backend**: https://dentdoc.de (auth, transcription, documentation)
 
 ## Commands
 
@@ -51,6 +51,7 @@ Detailed docs are in `docs/` - read these when working on specific areas:
 | [api-integration.md](docs/api-integration.md) | Backend calls, auth, endpoints |
 | [audio-recording.md](docs/audio-recording.md) | Recording, VAD, speaker recognition |
 | [documentation-flow.md](docs/documentation-flow.md) | Agent V2.1, doc generation |
+| [support-chat.md](docs/support-chat.md) | tawk.to integration, Live Chat |
 
 ## Notes
 

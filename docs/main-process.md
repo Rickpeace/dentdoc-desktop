@@ -476,44 +476,88 @@ try {
 
 Debug-Logs werden automatisch hochgeladen bei:
 - App-Start (nach erfolgreicher Token-Validierung)
-- Fehlern in Recording/Processing-Funktionen
+- Fehlern in Recording/Processing-Funktionen (Pause/Resume, Timeout, etc.)
 
 ```javascript
 // main.js
-async function autoUploadDebugLogs(context) {
-  const token = store.get('authToken');
-  if (!token) return;
+function autoUploadDebugLogs(context = 'unknown') {
+  // Fire-and-forget (don't await)
+  (async () => {
+    const token = store.get('authToken');
+    if (!token) return;
 
-  try {
-    const debugLogPath = path.join(os.tmpdir(), 'dentdoc-main-debug.log');
-    if (!fs.existsSync(debugLogPath)) return;
+    let logs = fs.readFileSync(DEBUG_LOG, 'utf8');
+    // Limit to last 500KB
+    if (logs.length > 500 * 1024) {
+      logs = logs.slice(-500 * 1024);
+    }
 
-    const logContent = fs.readFileSync(debugLogPath, 'utf8');
-    const last50KB = logContent.slice(-50000);  // Nur letzte 50KB
+    // Add context marker
+    const contextMarker = `\n[AUTO-UPLOAD] Context: ${context} at ${new Date().toISOString()}\n`;
+    logs = logs + contextMarker;
 
-    await apiClient.uploadDebugLog(token, {
-      context,
-      timestamp: new Date().toISOString(),
-      appVersion: app.getVersion(),
-      logs: last50KB
-    });
-    console.log(`[AUTO-UPLOAD] Context: ${context} at ${new Date().toISOString()}`);
-  } catch (err) {
-    // Fire-and-forget, keine Fehlerbehandlung nötig
-  }
+    // apiClient derives uploadReason from context:
+    // 'startup' → 'startup', 'manual' → 'manual'
+    // contains 'error/timeout/warning' → 'error', else → 'unknown'
+    await apiClient.uploadDebugLogs(token, store, logs, appVersion, context);
+  })();
 }
 ```
+
+**Upload-Reason Mapping (apiClient.js):**
+
+| Context | uploadReason |
+|---------|--------------|
+| `'startup'` | `'startup'` |
+| `'manual'` | `'manual'` |
+| Enthält `'error'`, `'timeout'`, `'warning'` | `'error'` |
+| Alles andere | `'unknown'` |
 
 **Verwendung:**
 ```javascript
 // Bei App-Start
-autoUploadDebugLogs('app-startup');
+autoUploadDebugLogs('startup');
 
 // Bei Fehlern
-catch (error) {
-  autoUploadDebugLogs('stopRecordingWithVAD-error');
+} catch (error) {
+  autoUploadDebugLogs('toggle-pause-error');
 }
+
+// Bei Timeouts
+autoUploadDebugLogs('recording-timeout');
 ```
+
+**Alle Auto-Upload Kontexte:**
+
+| Kontext | Auslöser |
+|---------|----------|
+| `startup` | App-Start nach Token-Validierung |
+| `folder-access-warning` | Keine Schreibrechte auf Export-Ordner |
+| `speakerRecognition-error` | Fehler bei Sprechererkennung |
+| `processAudioFile-error` | Fehler beim Audio-Processing |
+| `processFileWithVAD-error` | Fehler beim VAD-Processing |
+| `startRecordingWithIphone-error` | Fehler beim iPhone-Aufnahmestart |
+| `startRecordingWithVAD-error` | Fehler beim VAD-Aufnahmestart |
+| `startRecording-error` | Allgemeiner Aufnahme-Startfehler |
+| `processing-timeout` | Timeout beim Processing |
+| `stopRecordingWithVAD-error` | Fehler beim VAD-Aufnahmestopp |
+| `stopRecordingWithIphone-error` | Fehler beim iPhone-Aufnahmestopp |
+| `stopRecording-error` | Allgemeiner Aufnahmestopp-Fehler |
+| `toggle-pause-error` | Fehler beim Pause/Resume |
+| `voice-enrollment-start-error` | Fehler beim Start der Stimmregistrierung |
+| `voice-enrollment-stop-error` | Fehler beim Stopp der Stimmregistrierung |
+| `voice-enrollment-cancel-error` | Fehler beim Abbruch der Stimmregistrierung |
+| `iphone-connection-error` | Fehler beim iPhone-Verbindungstest |
+
+**Zusätzliche debugLog-Kontexte (nur lokale Protokollierung):**
+
+| Kontext | Auslöser |
+|---------|----------|
+| `[iPhone] WebSocket send STOP failed...` | WebSocket-Fehler während Cleanup |
+| `[iPhone] Reconnect write/invalid message` | Fehler bei Reconnect-Handling |
+| `[iPhone] Pair/Get status failed` | iPhone-Pairing Status-Abfrage fehlgeschlagen |
+| `[iPhone] Connection test failed` | iPhone-Verbindungstest fehlgeschlagen |
+| `[Subscription] API fetch failed` | Abonnement-Daten konnten nicht geladen werden |
 
 ---
 

@@ -8,7 +8,7 @@ const { app, BrowserWindow, Menu, globalShortcut, ipcMain, clipboard, dialog, sh
 if (process.platform === 'win32') {
   app.setAppUserModelId('DentDoc');
 }
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
@@ -59,6 +59,50 @@ function validateDocMode(mode) {
   return VALID_DOC_MODES.includes(mode) ? mode : 'agent-v2.1';
 }
 
+/**
+ * Helper: Normalize device name for comparison
+ * Removes: USB IDs, number prefixes, parentheses, "Mikrofon"
+ */
+function normalizeMicName(name) {
+  return name
+    .replace(/\([0-9a-f]{4}:[0-9a-f]{4}\)/gi, '')  // Remove USB IDs
+    .replace(/\d+-\s*/g, '')                        // Remove number prefixes like "2- "
+    .replace(/[()]/g, '')                           // Remove parentheses
+    .replace(/mikrofon/gi, '')                      // Remove "Mikrofon"
+    .replace(/\s+/g, ' ')                           // Normalize whitespace
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Check if the saved microphone is available in the device list
+ * Uses multiple matching strategies: exact, vendor ID, and normalized name
+ *
+ * @param {string} microphoneName - The saved microphone name from settings
+ * @param {Array} availableDevices - List of devices from audioRecorder.listAudioDevices()
+ * @returns {boolean} - True if microphone is found
+ */
+function isMicrophoneAvailable(microphoneName, availableDevices) {
+  if (!microphoneName) return true; // No specific mic configured, will use default
+
+  const savedVendorId = microphoneName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+  const savedNormalized = normalizeMicName(microphoneName);
+
+  return availableDevices.some(d => {
+    // 1. Exact match
+    if (d.name === microphoneName) return true;
+    // 2. Vendor ID match (if both have vendor IDs)
+    if (savedVendorId) {
+      const currentVendorId = d.name.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
+      if (currentVendorId && currentVendorId === savedVendorId) return true;
+    }
+    // 3. Normalized name match (fallback for FFmpeg names without vendor ID)
+    const currentNormalized = normalizeMicName(d.name);
+    if (savedNormalized && currentNormalized && savedNormalized === currentNormalized) return true;
+    return false;
+  });
+}
+
 // Override console methods to also write to debug log
 const originalConsoleLog = console.log;
 const originalConsoleWarn = console.warn;
@@ -74,9 +118,17 @@ console.warn = (...args) => {
   debugLog('[WARN] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
 };
 
+// Store last error for support context
+let lastErrorMessage = null;
+let lastErrorTime = null;
+
 console.error = (...args) => {
   originalConsoleError.apply(console, args);
-  debugLog('[ERROR] ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '));
+  const errorMsg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  debugLog('[ERROR] ' + errorMsg);
+  // Store for support (truncate to 200 chars)
+  lastErrorMessage = errorMsg.substring(0, 200);
+  lastErrorTime = new Date().toISOString();
 };
 
 // Rotate log if too large (> 5MB) - keep last session's logs
@@ -236,6 +288,13 @@ let lastDetection = null;
 let lastStatus01 = null;
 let lastStatusPA = null;
 let lastKzvDocumentation = null;
+let lastZDocumentation = null;
+
+// Pause state for recording
+let isPaused = false;
+let pausedTime = 0;        // Accumulated pause time in ms
+let pauseStartTime = null; // When current pause started
+let pauseToggleInProgress = false; // Lock to prevent concurrent toggles
 
 // Single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -334,7 +393,7 @@ function autoUploadDebugLogs(context = 'unknown') {
       logs = logs + contextMarker;
 
       const appVersion = app.getVersion();
-      await apiClient.uploadDebugLogs(token, store, logs, appVersion);
+      await apiClient.uploadDebugLogs(token, store, logs, appVersion, context);
       debugLog(`[AutoUpload] Success - uploaded logs (context: ${context})`);
     } catch (error) {
       // Silent fail - don't let upload errors affect the app
@@ -375,7 +434,8 @@ function createDashboardWindow() {
       nodeIntegration: true,
       contextIsolation: false,
       nodeIntegrationInWorker: true,  // Required for VAD Worker (Sherpa-ONNX)
-      backgroundThrottling: false  // Keep renderer running when hidden (for F9 audio monitoring)
+      backgroundThrottling: false,  // Keep renderer running when hidden (for F9 audio monitoring)
+      webviewTag: true  // Required for tawk.to support chat webview
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     resizable: true,
@@ -728,7 +788,7 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {boolean} options.saveAudio - Whether to save audio
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, utterances = null, words = null, topicSegments = null, passages = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, kzvDocumentation = null } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, utterances = null, words = null, topicSegments = null, passages = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, kzvDocumentation = null, zDocumentation = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -782,6 +842,19 @@ ${kzvDocumentation}
 `;
   }
 
+  // Build Z-Doku section if available (Agent V2.1 - Agent 4)
+  let zDokuSection = '';
+  if (zDocumentation) {
+    zDokuSection = `
+
+────────────────────────────────────────────────────────────────────
+  Z-DOKUMENTATION (CHEF-ZUSAMMENFASSUNG)
+────────────────────────────────────────────────────────────────────
+
+${zDocumentation}
+`;
+  }
+
   // Build normalized transcript section if available (Agent V2)
   let normalizedSection = '';
   if (reconstructedTranscript) {
@@ -816,7 +889,7 @@ ${recognizedSpeakersLine}
 ────────────────────────────────────────────────────────────────────
 
 ${summary}
-${kzvSection}${normalizedSection}
+${kzvSection}${zDokuSection}${normalizedSection}
 
 ────────────────────────────────────────────────────────────────────
   TRANSKRIPT MIT SPRECHERN
@@ -889,6 +962,8 @@ ${finalTranscriptText}
           })),
           words: words || null, // Word-level timestamps for precise audio navigation
           summary: summary,
+          kzvDocumentation: kzvDocumentation || null, // KZV-Dokumentation (Agent V2.1)
+          zDocumentation: zDocumentation || null, // Z-Dokumentation / Chef-Zusammenfassung
           topicSegments: topicSegments || null, // KI-extracted topic segments for audio navigation
           passages: passages || null, // Semantic audio passages (15-40 sec thematic clips)
           status01: status01 || null, // Strukturierter 01-Befund (Zahnstatus)
@@ -1234,6 +1309,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     const status01 = result.status01 || null;
     const statusPA = result.statusPA || null;
     const kzvDocumentation = result.kzvDocumentation || null;
+    const zDocumentation = result.zDocumentation || null;
 
     // Store for "show last result"
     lastDocumentation = documentation;
@@ -1245,6 +1321,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     lastStatus01 = status01;
     lastStatusPA = statusPA;
     lastKzvDocumentation = kzvDocumentation;
+    lastZDocumentation = zDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard (with HTML formatting for rich text apps like Z1)
@@ -1256,7 +1333,7 @@ async function processAudioFile(audioFilePath, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, kzvDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, kzvDocumentation, zDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Reset processing state immediately so user knows it's done
@@ -1326,7 +1403,8 @@ async function processAudioFile(audioFilePath, options = {}) {
             recognizedSpeakers: recognizedSpeakers,
             status01: status01,
             statusPA: statusPA,
-            kzvDocumentation: kzvDocumentation
+            kzvDocumentation: kzvDocumentation,
+            zDocumentation: zDocumentation
           });
           debugLog('[Background] Files saved successfully');
         } catch (error) {
@@ -1621,6 +1699,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const status01 = docResponse.status01 || null;
     const statusPA = docResponse.statusPA || null;
     const kzvDocumentation = docResponse.kzvDocumentation || null;
+    const zDocumentation = docResponse.zDocumentation || null;
 
     // Store for potential retry/copy
     lastDocumentation = documentation;
@@ -1632,6 +1711,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     lastStatus01 = status01;
     lastStatusPA = statusPA;
     lastKzvDocumentation = kzvDocumentation;
+    lastZDocumentation = zDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
     // Copy to clipboard (with HTML formatting for rich text apps like Z1)
@@ -1651,7 +1731,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, kzvDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, kzvDocumentation, zDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Increment today's recording count
@@ -1733,7 +1813,8 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
             recognizedSpeakers: recognizedSpeakers,
             status01: status01,
             statusPA: statusPA,
-            kzvDocumentation: kzvDocumentation
+            kzvDocumentation: kzvDocumentation,
+            zDocumentation: zDocumentation
           });
           console.log('  [Background] Dateien gespeichert!');
         } catch (error) {
@@ -1861,6 +1942,7 @@ async function startRecording() {
   // keepAudio: false (default) = delete recordings, true = keep them
   const keepAudio = store.get('keepAudio', true);
   const deleteAudio = !keepAudio;
+  const microphoneName = store.get('microphoneName') || null;
   console.log('keepAudio setting:', keepAudio, '-> deleteAudio:', deleteAudio);
   debugLog(`keepAudio setting: ${keepAudio} -> deleteAudio: ${deleteAudio}`);
 
@@ -1882,6 +1964,9 @@ async function startRecording() {
 
     // Recording started successfully - now update UI
     isRecording = true;
+    isPaused = false;
+    pausedTime = 0;
+    pauseStartTime = null;
     trayModule.updateTrayMenu();
 
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
@@ -1934,6 +2019,9 @@ async function startRecordingWithIphone() {
   try {
     isRecording = true;
     isIphoneSession = true;
+    isPaused = false;
+    pausedTime = 0;
+    pauseStartTime = null;
     trayModule.updateTrayMenu();
 
     // Change tray icon to recording state
@@ -1989,7 +2077,7 @@ async function startRecordingWithIphone() {
           'Warte auf Smartphone...',
           'Bitte öffnen Sie die Mikrofon-Seite auf Ihrem Smartphone',
           'waiting-iphone',
-          { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+          { micUrl: 'https://dentdoc.de/mic' }
         );
 
         // Start heartbeat to keep connection alive
@@ -2098,7 +2186,9 @@ async function startRecordingWithIphone() {
         if (iphoneRelayWs.readyState === 1) {
           iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
         }
-      } catch (e) {}
+      } catch (e) {
+        debugLog(`[iPhone] WebSocket send STOP failed during error cleanup: ${e.message}`);
+      }
       iphoneRelayWs.close();
       iphoneRelayWs = null;
     }
@@ -2132,7 +2222,7 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
         'Smartphone verbindet...',
         'Warte auf Mikrofon-Bereitschaft',
         'waiting-iphone',
-        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+        { micUrl: 'https://dentdoc.de/mic' }
       );
     } else {
       console.log('[iPhone] iPhone connected, sending START');
@@ -2159,7 +2249,7 @@ function handleIphoneControlMessage(msg, timeout, resolve) {
         'Smartphone im Hintergrund',
         'Bitte Browser öffnen oder QR-Code scannen',
         'waiting-iphone',
-        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+        { micUrl: 'https://dentdoc.de/mic' }
       );
     }
   }
@@ -2247,7 +2337,7 @@ function reconnectToRelay(deviceId, token, relayUrl, timeout, resolve) {
         'Smartphone getrennt',
         'QR-Code scannen oder Browser öffnen',
         'waiting-iphone',
-        { micUrl: 'https://dentdoc-app.vercel.app/mic' }
+        { micUrl: 'https://dentdoc.de/mic' }
       );
 
       // Restart heartbeat
@@ -2289,13 +2379,18 @@ function reconnectToRelay(deviceId, token, relayUrl, timeout, resolve) {
                 statusOverlay.webContents.send('iphone-audio-level', rms);
               }
             }
-          } catch (e) {}
+          } catch (e) {
+            // Ignore write errors during shutdown
+            console.warn('[iPhone] Reconnect write error:', e.message);
+          }
         }
       } else if (typeof data === 'string') {
         try {
           const msg = JSON.parse(data);
           handleIphoneControlMessage(msg, timeout, resolve);
-        } catch (e) {}
+        } catch (e) {
+          console.warn('[iPhone] Reconnect invalid message:', data?.substring?.(0, 100));
+        }
       }
     });
 
@@ -2407,7 +2502,9 @@ async function stopRecordingWithIphone() {
         if (iphoneRelayWs.readyState === 1) {
           iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
         }
-      } catch (e) {}
+      } catch (e) {
+        debugLog(`[iPhone] WebSocket send STOP failed during stop cleanup: ${e.message}`);
+      }
       iphoneRelayWs.close();
       iphoneRelayWs = null;
     }
@@ -2436,45 +2533,9 @@ async function startRecordingWithVAD() {
     // Check if selected microphone is available BEFORE starting
     if (microphoneName) {
       const availableDevices = await audioRecorder.listAudioDevices();
+      const selectedMicAvailable = isMicrophoneAvailable(microphoneName, availableDevices);
 
-      // Extract vendor:product ID from saved name (e.g., "046d:0aba")
-      // This is the most reliable way to identify USB devices across port changes
-      const savedVendorId = microphoneName.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
-
-      // Helper: normalize device name for comparison (fallback only)
-      // Removes: USB IDs, number prefixes, parentheses, "Mikrofon"
-      const normalizeName = (name) => {
-        return name
-          .replace(/\([0-9a-f]{4}:[0-9a-f]{4}\)/gi, '')  // Remove USB IDs
-          .replace(/\d+-\s*/g, '')                        // Remove number prefixes like "2- "
-          .replace(/[()]/g, '')                           // Remove parentheses
-          .replace(/mikrofon/gi, '')                      // Remove "Mikrofon"
-          .replace(/\s+/g, ' ')                           // Normalize whitespace
-          .toLowerCase()
-          .trim();
-      };
-
-      const savedNormalized = normalizeName(microphoneName);
-
-      const selectedMicAvailable = availableDevices.some(d => {
-        // 1. Exact match
-        if (d.name === microphoneName) return true;
-
-        // 2. Vendor:product ID match (handles USB port changes like "2- Logitech" -> "4- Logitech")
-        // This is the same logic used in audio-utils.js and dashboard.js
-        if (savedVendorId) {
-          const currentVendorId = d.name.match(/\(([0-9a-f]{4}:[0-9a-f]{4})\)/i)?.[1]?.toLowerCase();
-          if (currentVendorId && currentVendorId === savedVendorId) return true;
-        }
-
-        // 3. Normalized name match (fallback for FFmpeg names without vendor ID)
-        const currentNormalized = normalizeName(d.name);
-        if (savedNormalized && currentNormalized && savedNormalized === currentNormalized) return true;
-
-        return false;
-      });
-
-      console.log('[VAD] Mic check - selected:', microphoneName, '| vendorId:', savedVendorId, '| normalized:', savedNormalized);
+      console.log('[VAD] Mic check - selected:', microphoneName);
       console.log('[VAD] Mic check - available:', availableDevices.map(d => d.name));
       console.log('[VAD] Mic check - found:', selectedMicAvailable);
 
@@ -2497,6 +2558,9 @@ async function startRecordingWithVAD() {
     // Recording started successfully - now update UI
     isRecording = true;
     isVadSession = true;
+    isPaused = false;
+    pausedTime = 0;
+    pauseStartTime = null;
     trayModule.updateTrayMenu();
 
     const recordingIconPath = path.join(__dirname, 'assets', 'tray-icon-recording.png');
@@ -2559,19 +2623,22 @@ async function stopRecordingWithVAD() {
     const recorderState = audioRecorder.getState();
     console.log('[VAD] Recorder state before stop:', recorderState);
 
-    if (recorderState !== 'recording') {
-      console.warn('[VAD] Recorder not in recording state - checking for existing file');
-      // Try to use existing file if available
-      if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
-        console.log('[VAD] Found existing recording file:', currentRecordingPath);
-      } else {
-        throw new Error(`Keine aktive Aufnahme (Recorder-Status: ${recorderState})`);
-      }
-    } else {
-      // Stop FFmpeg recording
+    if (recorderState === 'recording' || recorderState === 'paused') {
+      // Stop FFmpeg recording (handles both recording and paused states)
+      // When paused, this will concatenate segments
       const ffmpegStopStart = Date.now();
-      await audioRecorder.stopRecording();
-      console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s - path: ${currentRecordingPath}`);
+      const finalPath = await audioRecorder.stopRecording();
+      console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s - path: ${finalPath}`);
+      // Update path in case segments were concatenated
+      if (finalPath && finalPath !== currentRecordingPath) {
+        console.log('[VAD] Using concatenated file:', finalPath);
+        currentRecordingPath = finalPath;
+      }
+    } else if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
+      console.warn('[VAD] Recorder not in recording/paused state - using existing file');
+      console.log('[VAD] Found existing recording file:', currentRecordingPath);
+    } else {
+      throw new Error(`Keine aktive Aufnahme (Recorder-Status: ${recorderState})`);
     }
 
     // IMMEDIATELY transition to processing state (before downsampling)
@@ -2579,6 +2646,10 @@ async function stopRecordingWithVAD() {
     isRecording = false;
     isVadSession = false;
     isProcessing = true;
+    isPaused = false;  // Reset pause state
+    pausedTime = 0;
+    pauseStartTime = null;
+    pauseToggleInProgress = false;  // Reset lock
     trayModule.updateTrayMenu();
 
     // Safety timeout: auto-reset isProcessing after 10 minutes in case of unexpected hang
@@ -2703,6 +2774,9 @@ async function stopRecording() {
     }
 
     isRecording = false;
+    isPaused = false;
+    pausedTime = 0;
+    pauseStartTime = null;
     trayModule.updateTrayMenu();
 
     // Reset tray icon
@@ -2722,6 +2796,7 @@ async function stopRecording() {
     // Reset state on error
     isRecording = false;
     isProcessing = false;
+    isPaused = false;
     trayModule.updateTrayMenu();
 
     // Reset tray icon
@@ -2790,6 +2865,7 @@ function getOverlaySizeForState(type, extra = {}) {
   switch (type) {
     case 'recording':
     case 'starting':  // Same size as recording
+    case 'paused':    // Same size as recording
       return { width: 402, height: 96 };
 
     case 'processing':
@@ -3004,6 +3080,7 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     uploadProgress: extra.uploadProgress,
     documentation: extra.documentation || null,
     kzvDocumentation: extra.kzvDocumentation || null,
+    zDocumentation: extra.zDocumentation || null,
     transcript: extra.transcript || null,
     micUrl: extra.micUrl || null,
     reconstructedTranscript: extra.reconstructedTranscript || null,
@@ -3072,6 +3149,7 @@ function showLastResult() {
     {
       documentation: lastDocumentation,
       kzvDocumentation: lastKzvDocumentation,
+      zDocumentation: lastZDocumentation,
       transcript: lastTranscript,
       reconstructedTranscript: lastReconstructedTranscript,
       transcriptWithSpeakers: lastTranscriptWithSpeakers,
@@ -3198,14 +3276,18 @@ ipcMain.on('cancel-recording', async () => {
             iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
           }
           iphoneRelayWs.close();
-        } catch (e) {}
+        } catch (e) {
+          debugLog(`[iPhone] WebSocket cleanup error during cancel: ${e.message}`);
+        }
         iphoneRelayWs = null;
       }
       if (iphoneFfmpegProcess) {
         try {
           iphoneFfmpegProcess.stdin.end();
           iphoneFfmpegProcess.kill();
-        } catch (e) {}
+        } catch (e) {
+          debugLog(`[iPhone] FFmpeg cleanup error during cancel: ${e.message}`);
+        }
         iphoneFfmpegProcess = null;
       }
       isIphoneSession = false;
@@ -3226,6 +3308,10 @@ ipcMain.on('cancel-recording', async () => {
     isRecording = false;
     isVadSession = false;  // Reset VAD session flag
     isProcessing = false;
+    isPaused = false;      // Reset pause state
+    pausedTime = 0;
+    pauseStartTime = null;
+    pauseToggleInProgress = false;  // Reset lock
     currentRecordingPath = null;
 
     // Reset tray icon
@@ -3429,6 +3515,27 @@ ipcMain.handle('get-user', () => {
   return store.get('user', null);
 });
 
+// Get support context for tawk.to (settings, stats, last error)
+ipcMain.handle('get-support-context', () => {
+  const todayRecordings = store.get('todayRecordings', { date: null, count: 0 });
+  const today = new Date().toISOString().split('T')[0];
+
+  return {
+    // Settings
+    shortcut: store.get('shortcut', 'F9'),
+    theme: store.get('theme', 'dark'),
+    vadEnabled: store.get('vadEnabled', true),
+    microphoneName: store.get('microphoneName', 'Default'),
+    microphoneSource: store.get('microphoneSource', 'desktop'),
+    // Stats
+    todayRecordings: todayRecordings.date === today ? todayRecordings.count : 0,
+    lastDocumentation: store.get('lastDocumentationTime', null),
+    // Last error (truncated, no sensitive data)
+    lastError: lastErrorMessage,
+    lastErrorTime: lastErrorTime
+  };
+});
+
 // Get subscription status for dashboard sidebar (same logic as tray menu)
 ipcMain.handle('get-subscription-status', () => {
   const user = store.get('user');
@@ -3546,6 +3653,7 @@ ipcMain.handle('get-subscription-details', async () => {
 
   } catch (error) {
     console.error('Error fetching subscription data:', error.message);
+    debugLog(`[Subscription] API fetch failed: ${error.message}`);
     // Fall back to user data
     activeDevices = 1; // At least this device
   }
@@ -3595,6 +3703,11 @@ ipcMain.handle('get-base-url', () => {
   return apiClient.getBaseUrl().replace(/\/$/, '');
 });
 
+// Get website URL for user-facing links (www.dentdoc.de)
+ipcMain.handle('get-website-url', () => {
+  return apiClient.getWebsiteUrl();
+});
+
 // Open external URL
 ipcMain.handle('open-external-url', (event, url) => {
   shell.openExternal(url);
@@ -3629,6 +3742,64 @@ ipcMain.handle('toggle-recording', async () => {
 ipcMain.handle('get-recording-state', () => {
   return { isRecording, isProcessing };
 });
+
+// Pause/Resume recording - stops/restarts FFmpeg to avoid recording private conversations
+ipcMain.handle('toggle-pause', async () => {
+  if (!isRecording) return { success: false };
+
+  // Prevent concurrent toggles (spam clicks)
+  if (pauseToggleInProgress) {
+    console.log('[Pause] Toggle already in progress, ignoring');
+    return { success: false, reason: 'in_progress' };
+  }
+  pauseToggleInProgress = true;
+
+  const shortcut = store.get('shortcut') || 'F9';
+
+  try {
+    if (isPaused) {
+      // Resume - show "starting" state immediately for instant feedback
+      updateStatusOverlay('Fortsetzen...', 'Einen Moment...', 'starting');
+
+      try {
+        await audioRecorder.resumeRecording();
+        console.log('[Pause] Resumed - now recording segment', audioRecorder.getSegmentsCount() + 1);
+      } catch (err) {
+        console.error('[Pause] Failed to resume recording:', err.message);
+        autoUploadDebugLogs('toggle-pause-error');
+        updateStatusOverlay('Fehler beim Fortsetzen', err.message, 'error');
+        return { success: false, error: err.message };
+      }
+      pausedTime += (Date.now() - pauseStartTime);
+      isPaused = false;
+      pauseStartTime = null;
+      updateStatusOverlay('Aufnahme läuft...', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
+      console.log('[Pause] Total paused time:', pausedTime, 'ms');
+    } else {
+      // Pause - show "Pausing..." state first, then await FFmpeg stop
+      updateStatusOverlay('Pausiere...', 'Einen Moment...', 'starting');
+
+      // Wait for FFmpeg to actually stop
+      try {
+        await audioRecorder.pauseRecording();
+        console.log('[Pause] Recording paused - total segments:', audioRecorder.getSegmentsCount());
+      } catch (err) {
+        console.error('[Pause] Failed to pause recording:', err.message);
+        autoUploadDebugLogs('toggle-pause-error');
+      }
+
+      // Now show paused state
+      isPaused = true;
+      pauseStartTime = Date.now();
+      updateStatusOverlay('Pausiert', 'Klicken zum Fortsetzen', 'paused');
+    }
+    return { success: true, isPaused };
+  } finally {
+    pauseToggleInProgress = false;
+  }
+});
+
+ipcMain.handle('get-pause-state', () => ({ isPaused, pausedTime }));
 
 // Onboarding tour handlers (supports multiple tours: 'login', 'settings', etc.)
 ipcMain.handle('check-first-run', (event, tourId = 'general') => {
@@ -4064,6 +4235,7 @@ ipcMain.handle('iphone-pair-status', async (event, pairingId) => {
     return status;
   } catch (error) {
     console.error('[iPhone] Status check error:', error);
+    debugLog(`[iPhone] Pair status check failed: ${error.message}`);
     return { paired: false, error: error.message };
   }
 });
@@ -4104,6 +4276,7 @@ ipcMain.handle('iphone-get-status', async () => {
     return status;
   } catch (error) {
     console.error('[iPhone] Status check error:', error);
+    debugLog(`[iPhone] Get status failed: ${error.message}`);
     return { paired: false, error: error.message };
   }
 });
@@ -4201,6 +4374,8 @@ ipcMain.handle('iphone-test-connection', async () => {
     }
   } catch (err) {
     console.error('[iPhone] Status check error:', err.message);
+    debugLog(`[iPhone] Connection test failed: ${err.message}`);
+    autoUploadDebugLogs('iphone-connection-error');
 
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
       return { connected: false, error: 'Relay antwortet nicht (Timeout)' };
@@ -4318,7 +4493,9 @@ ipcMain.handle('iphone-audio-test', async (event) => {
         try {
           testWs.send(JSON.stringify({ type: 'TEST_STOP' }));
           testWs.close();
-        } catch (e) {}
+        } catch (e) {
+          debugLog(`[iPhone Test] WebSocket cleanup error: ${e.message}`);
+        }
       }
       testWs = null;
 
@@ -4609,7 +4786,7 @@ ipcMain.handle('upload-debug-logs', async () => {
     const appVersion = app.getVersion();
 
     // Upload to backend
-    const result = await apiClient.uploadDebugLogs(token, store, logs, appVersion);
+    const result = await apiClient.uploadDebugLogs(token, store, logs, appVersion, 'manual');
     return { success: true, debugLogId: result.debugLogId };
   } catch (error) {
     console.error('Upload debug logs error:', error);
@@ -4945,12 +5122,157 @@ ipcMain.handle('delete-voice-profile', async (event, id) => {
   return voiceProfiles.deleteProfile(id);
 });
 
-ipcMain.handle('start-voice-enrollment', async (event, data) => {
-  if (isEnrolling) {
-    throw new Error('Eine Aufnahme läuft bereits');
-  }
-
+// Add utterance audio segment to voice profile (or create new profile)
+// Manual flow: embeddings go directly to confirmed (not pending) for immediate use
+ipcMain.handle('add-utterance-to-profile', async (event, {
+  audioPath,
+  startMs,
+  endMs,
+  profileId,
+  newProfileName,
+  newProfileRole,
+  force  // Force-flag for confirmation when similarity is low
+}) => {
   try {
+    console.log('[add-utterance-to-profile] Starting...');
+    console.log('[add-utterance-to-profile] Audio:', audioPath);
+    console.log('[add-utterance-to-profile] Segment:', startMs, '-', endMs, 'ms');
+    console.log('[add-utterance-to-profile] Force:', force);
+
+    // 1. Check if audio file exists
+    if (!audioPath || !fs.existsSync(audioPath)) {
+      return { success: false, error: 'Audio-Datei nicht mehr verfügbar' };
+    }
+
+    // 2. Check duration (min 1 second)
+    const durationMs = endMs - startMs;
+    if (durationMs < 1000) {
+      return { success: false, error: 'Utterance zu kurz (min. 1 Sekunde)' };
+    }
+
+    // 3. Convert to 16kHz WAV if needed
+    let wavPath = audioPath;
+    if (!audioPath.toLowerCase().endsWith('.wav') || !is16kMonoPcmWavSimple(audioPath)) {
+      console.log('[add-utterance-to-profile] Converting to 16kHz WAV...');
+      const audioConverter = require('./src/audio-converter');
+      wavPath = await audioConverter.convertToWav16k(audioPath);
+      console.log('[add-utterance-to-profile] Converted:', wavPath);
+    }
+
+    // 4. Create embedding from audio segment
+    console.log('[add-utterance-to-profile] Creating embedding...');
+    const embedding = await speakerRecognition.createEmbedding(wavPath, startMs, durationMs);
+
+    if (!embedding || embedding.length === 0) {
+      return { success: false, error: 'Embedding konnte nicht erstellt werden' };
+    }
+
+    console.log('[add-utterance-to-profile] Embedding created, length:', embedding.length);
+
+    const SIMILARITY_THRESHOLD = 0.60;
+
+    // 5. Add to profile or create new one
+    if (profileId) {
+      // === EXISTING PROFILE ===
+      const profile = voiceProfiles.getProfile(profileId);
+      if (!profile) {
+        return { success: false, error: 'Profil nicht gefunden' };
+      }
+
+      // Similarity check only if profile has centroid and force is not set
+      if (profile.centroid && !force) {
+        const similarity = voiceProfiles.cosineSimilarity(embedding, profile.centroid);
+        console.log('[add-utterance-to-profile] Similarity to centroid:', similarity.toFixed(3));
+
+        if (similarity < SIMILARITY_THRESHOLD) {
+          // Return warning, user must confirm
+          console.log('[add-utterance-to-profile] Low similarity, needs confirmation');
+          return {
+            needsConfirmation: true,
+            similarity: similarity,
+            profileName: profile.name,
+            message: `Nur ${Math.round(similarity * 100)}% Ähnlichkeit`
+          };
+        }
+      }
+
+      // Add directly to confirmed (not pending!) for immediate use
+      voiceProfiles.addConfirmedEmbedding(profileId, embedding, {
+        sourceType: 'utterance',
+        sourceDuration: durationMs,
+      });
+
+      console.log('[add-utterance-to-profile] Added to existing profile:', profile.name);
+      return { success: true, message: `Zu "${profile.name}" hinzugefügt` };
+
+    } else {
+      // === NEW PROFILE ===
+      if (!newProfileName || !newProfileName.trim()) {
+        return { success: false, error: 'Name erforderlich' };
+      }
+
+      // Create with immediate embedding (directly in confirmed, not pending)
+      const newProfile = voiceProfiles.saveProfileDirect(
+        newProfileName.trim(),
+        embedding,
+        newProfileRole || 'Arzt',
+        { sourceType: 'utterance', sourceDuration: durationMs }
+      );
+
+      console.log('[add-utterance-to-profile] Created new profile:', newProfile.name);
+      return { success: true, message: `Profil "${newProfile.name}" erstellt` };
+    }
+
+  } catch (error) {
+    console.error('[add-utterance-to-profile] Error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Simple check if file is 16kHz mono PCM WAV (for utterance-to-profile)
+function is16kMonoPcmWavSimple(filePath) {
+  try {
+    if (!filePath?.toLowerCase().endsWith('.wav')) return false;
+
+    const fd = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(64);
+    fs.readSync(fd, header, 0, 64, 0);
+    fs.closeSync(fd);
+
+    // Check RIFF/WAVE header
+    if (header.toString('ascii', 0, 4) !== 'RIFF') return false;
+    if (header.toString('ascii', 8, 12) !== 'WAVE') return false;
+
+    // Find fmt chunk
+    let pos = 12;
+    while (pos < header.length - 8) {
+      const chunkId = header.toString('ascii', pos, pos + 4);
+      const chunkSize = header.readUInt32LE(pos + 4);
+
+      if (chunkId === 'fmt ') {
+        const audioFormat = header.readUInt16LE(pos + 8);
+        const numChannels = header.readUInt16LE(pos + 10);
+        const sampleRate = header.readUInt32LE(pos + 12);
+
+        // PCM (1), mono (1), 16kHz
+        return audioFormat === 1 && numChannels === 1 && sampleRate === 16000;
+      }
+
+      pos += 8 + chunkSize;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle('start-voice-enrollment', async (event, data) => {
+  // Wrap everything in try-catch to ensure we always return
+  try {
+    if (isEnrolling) {
+      return { success: false, error: 'Eine Aufnahme läuft bereits' };
+    }
     // Check if recorder is busy (e.g., mic test or other recording running)
     const recorderState = audioRecorder.getState();
     if (recorderState !== 'idle') {
@@ -4963,28 +5285,69 @@ ipcMain.handle('start-voice-enrollment', async (event, data) => {
       }
     }
 
-    isEnrolling = true;
     // Support both old format (string) and new format ({ name, role })
+    let enrollmentName, enrollmentRole;
     if (typeof data === 'string') {
-      currentEnrollmentName = data;
-      currentEnrollmentRole = 'Arzt'; // Default role
+      enrollmentName = data;
+      enrollmentRole = 'Arzt'; // Default role
     } else {
-      currentEnrollmentName = data.name;
-      currentEnrollmentRole = data.role || 'Arzt';
+      enrollmentName = data.name;
+      enrollmentRole = data.role || 'Arzt';
     }
+
     // Get selected microphone name (FFmpeg needs device name, not browser ID)
     const microphoneName = store.get('microphoneName') || null;
+
+    // Check if microphone is connected before starting
+    if (microphoneName) {
+      const availableDevices = await audioRecorder.listAudioDevices();
+      const selectedMicAvailable = isMicrophoneAvailable(microphoneName, availableDevices);
+
+      console.log('[Voice Enrollment] Mic check - selected:', microphoneName);
+      console.log('[Voice Enrollment] Mic check - available:', availableDevices.map(d => d.name));
+      console.log('[Voice Enrollment] Mic check - found:', selectedMicAvailable);
+
+      if (!selectedMicAvailable) {
+        throw new Error(`Mikrofon nicht verbunden: ${microphoneName}`);
+      }
+    }
+
+    isEnrolling = true;
+    currentEnrollmentName = enrollmentName;
+    currentEnrollmentRole = enrollmentRole;
     currentEnrollmentPath = await audioRecorder.startRecording(false, microphoneName);
+
+    // Check if recording was cancelled or failed to start (returns null)
+    if (!currentEnrollmentPath) {
+      console.log('[Voice Enrollment] startRecording returned null - recording was cancelled');
+      isEnrolling = false;
+      return { success: false, cancelled: true };
+    }
+
+    // Check if cancelled during the async startRecording (race condition with cancel button)
+    if (!isEnrolling) {
+      // Cancel happened while we were starting - clean up and return cancelled
+      if (fs.existsSync(currentEnrollmentPath)) {
+        try { fs.unlinkSync(currentEnrollmentPath); } catch (e) {}
+      }
+      return { success: false, cancelled: true };
+    }
+
     return { success: true };
   } catch (error) {
+    console.error('[Voice Enrollment] Error:', error.message);
     isEnrolling = false;
-    throw error;
+    autoUploadDebugLogs('voice-enrollment-start-error');
+    // Return error instead of throwing to ensure IPC always gets a response
+    return { success: false, error: error.message };
   }
 });
 
 ipcMain.handle('stop-voice-enrollment', async () => {
   if (!isEnrolling) {
-    throw new Error('Keine Aufnahme aktiv');
+    // Already cancelled or not started - return gracefully instead of throwing
+    console.log('[Voice Enrollment] stop called but not enrolling - returning gracefully');
+    return { success: false, reason: 'not-recording' };
   }
 
   try {
@@ -5010,8 +5373,11 @@ ipcMain.handle('stop-voice-enrollment', async () => {
 
     return { success: true, profile };
   } catch (error) {
+    console.error('[Voice Enrollment] Stop error:', error.message);
     isEnrolling = false;
-    throw error;
+    autoUploadDebugLogs('voice-enrollment-stop-error');
+    // Return error instead of throwing to ensure IPC always gets a response
+    return { success: false, error: error.message };
   }
 });
 
@@ -5028,6 +5394,7 @@ ipcMain.handle('cancel-voice-enrollment', async () => {
     await audioRecorder.forceStop();
   } catch (error) {
     console.error('Error stopping recording during cancel:', error);
+    autoUploadDebugLogs('voice-enrollment-cancel-error');
   }
 
   // Delete the temporary recording file

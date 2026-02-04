@@ -89,6 +89,8 @@
     .icon.recording {
       background: linear-gradient(135deg, var(--error-500), #dc2626);
       box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
+      cursor: pointer;
+      -webkit-app-region: no-drag;
       /* Animation disabled - controlled by JS audio level */
     }
 
@@ -124,6 +126,19 @@
       background: linear-gradient(135deg, #6b7280, #4b5563);
       box-shadow: none;
       animation: processingPulse 1.5s ease-in-out infinite;
+    }
+
+    /* Paused state - blue, clickable to resume */
+    .icon.paused {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      box-shadow: 0 0 12px rgba(59, 130, 246, 0.35);
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+    }
+
+    /* Show emoji (pause symbol) when paused */
+    .icon.paused #iconEmoji {
+      opacity: 1;
     }
 
     .icon.processing {
@@ -775,7 +790,7 @@
         <div class="qr-instructions">
           <p><strong>Smartphone ist gekoppelt</strong>, aber die Mikrofon-Seite muss geöffnet sein.</p>
           <p>QR-Code scannen oder öffnen:</p>
-          <p class="url-hint" id="iphoneMicUrlHint">dentdoc-app.vercel.app/mic</p>
+          <p class="url-hint" id="iphoneMicUrlHint">dentdoc.de/mic</p>
         </div>
       </div>
     </div>
@@ -829,6 +844,17 @@
           <button id="copyKzvBtn" class="kzv-btn" title="KZV-taugliche Dokumentation kopieren" disabled>
             <span class="kzv-icon">📑</span>
             <span>KZV-Doku kopieren</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Z-Doku Section (Chef-Zusammenfassung) -->
+      <div id="zDokuSection" class="kzv-section">
+        <div class="kzv-label">Z-Dokumentation</div>
+        <div class="kzv-buttons">
+          <button id="copyZDokuBtn" class="kzv-btn" title="Chef-taugliche Z-Dokumentation kopieren" disabled>
+            <span class="kzv-icon">📋</span>
+            <span>Z-Doku kopieren</span>
           </button>
         </div>
       </div>
@@ -1042,6 +1068,7 @@
 
     let currentDocumentation = null;
     let currentKzvDocumentation = null;
+    let currentZDocumentation = null;
     let currentTranscript = null;
     let currentReconstructedTranscript = null;
     let currentTranscriptWithSpeakers = null;
@@ -1052,7 +1079,10 @@
     let currentState = null;
     let timerInterval = null;
     let recordingStartTime = null;
+    let totalPausedTime = 0;      // Total ms spent paused
+    let pauseStartedAt = null;    // When current pause started
     let lastClickedDoc = null; // Tracks which documentation was last clicked ('summary', 'full')
+    let pauseToggleLocked = false; // Prevents double-clicks on pause button
 
     function formatTime(seconds) {
       const mins = Math.floor(seconds / 60);
@@ -1063,15 +1093,38 @@
     function startTimer() {
       stopTimer(); // Clear any existing timer
       recordingStartTime = Date.now();
+      totalPausedTime = 0;  // Reset paused time on new recording
+      pauseStartedAt = null;
       const timerEl = document.getElementById('timer');
       if (timerEl) timerEl.textContent = '0:00';
       timerInterval = setInterval(() => {
         const timerEl = document.getElementById('timer');
         if (timerEl) {
-          const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+          const elapsed = Math.floor((Date.now() - recordingStartTime - totalPausedTime) / 1000);
           timerEl.textContent = formatTime(elapsed);
         }
       }, 1000);
+    }
+
+    function resumeTimer() {
+      // Resume from pause - don't reset recordingStartTime
+      if (pauseStartedAt) {
+        totalPausedTime += (Date.now() - pauseStartedAt);
+        pauseStartedAt = null;
+      }
+      stopTimer(); // Clear any existing interval
+      timerInterval = setInterval(() => {
+        const timerEl = document.getElementById('timer');
+        if (timerEl) {
+          const elapsed = Math.floor((Date.now() - recordingStartTime - totalPausedTime) / 1000);
+          timerEl.textContent = formatTime(elapsed);
+        }
+      }, 1000);
+    }
+
+    function pauseTimer() {
+      pauseStartedAt = Date.now();
+      stopTimer();  // Stop the interval but keep the displayed value
     }
 
     function stopTimer() {
@@ -1079,6 +1132,19 @@
         clearInterval(timerInterval);
         timerInterval = null;
       }
+    }
+
+    function getCurrentTimerValue() {
+      const timerEl = document.getElementById('timer');
+      if (timerEl && timerEl.textContent) {
+        return timerEl.textContent;
+      }
+      // Fallback: calculate from start time
+      if (recordingStartTime) {
+        const elapsed = Math.floor((Date.now() - recordingStartTime - totalPausedTime) / 1000);
+        return formatTime(elapsed);
+      }
+      return '0:00';
     }
 
     function resetSteps() {
@@ -1181,6 +1247,7 @@
     ipcRenderer.on('update-status', (event, data) => {
       title.textContent = data.title;
       const wasRecording = currentState === 'recording';
+      const wasPaused = currentState === 'paused';
       currentState = data.type;
 
       // Reset icon classes, scale, and any dynamic styles from audio level
@@ -1214,11 +1281,25 @@
         case 'recording':
           iconEmoji.textContent = '🔴';  // Hidden by CSS, waveform shows instead
           message.innerHTML = data.message + ' <span id="timer" class="timer"></span>';
-          startTimer();
+          // Check pauseStartedAt because we might come from 'starting' state (paused → starting → recording)
+          if (wasPaused || pauseStartedAt) {
+            resumeTimer();  // Resume from pause - don't reset timer
+          } else {
+            startTimer();   // Fresh start
+          }
           startWaveAnimation();  // Start waveform animation
           progressContainer.classList.remove('visible');
           actions.classList.remove('visible');
           resetSteps();
+          break;
+        case 'paused':
+          iconEmoji.textContent = '⏸';  // Pause symbol visible
+          stopWaveAnimation();           // No waveform during pause
+          // Keep timer display but stop counting (preserve current value)
+          message.innerHTML = data.message + ' <span id="timer" class="timer">' + getCurrentTimerValue() + '</span>';
+          pauseTimer();  // Stop counting but track pause duration
+          progressContainer.classList.remove('visible');
+          actions.classList.remove('visible');
           break;
         case 'processing':
           stopTimer();
@@ -1250,6 +1331,7 @@
           if (data.documentation) {
             currentDocumentation = data.documentation;
             currentKzvDocumentation = data.kzvDocumentation || null;
+            currentZDocumentation = data.zDocumentation || null;
             currentTranscript = data.transcript;
             currentReconstructedTranscript = data.reconstructedTranscript || null;
             currentTranscriptWithSpeakers = data.transcriptWithSpeakers || null;
@@ -1271,6 +1353,18 @@
             } else {
               kzvSection.classList.remove('visible');
               copyKzvBtn.disabled = true;
+            }
+
+            // Show Z-Doku section if zDocumentation available
+            const zDokuSection = document.getElementById('zDokuSection');
+            const copyZDokuBtn = document.getElementById('copyZDokuBtn');
+            if (currentZDocumentation) {
+              zDokuSection.classList.add('visible');
+              copyZDokuBtn.disabled = false;
+              copyZDokuBtn.classList.remove('copied');
+            } else {
+              zDokuSection.classList.remove('visible');
+              copyZDokuBtn.disabled = true;
             }
 
             // Show normalized transcript section if available
@@ -1353,11 +1447,24 @@
     });
 
     closeBtn.addEventListener('click', () => {
-      if (currentState === 'starting' || currentState === 'recording' || currentState === 'waiting-iphone') {
+      if (currentState === 'starting' || currentState === 'recording' || currentState === 'waiting-iphone' || currentState === 'paused') {
         // Cancel recording - don't process
         ipcRenderer.send('cancel-recording');
       }
       ipcRenderer.send('close-status-overlay');
+    });
+
+    // Icon click handler for pause/resume (with debounce lock)
+    icon.addEventListener('click', async () => {
+      if (currentState === 'recording' || currentState === 'paused') {
+        if (pauseToggleLocked) return;  // Ignore clicks while processing
+        pauseToggleLocked = true;
+        try {
+          await ipcRenderer.invoke('toggle-pause');
+        } finally {
+          pauseToggleLocked = false;
+        }
+      }
     });
 
     copySummaryBtn.addEventListener('click', () => {
@@ -1391,6 +1498,11 @@
       // 2. KZV-Dokumentation (wenn vorhanden - Agent V2.1)
       if (currentKzvDocumentation) {
         fullText += '--- KZV-Dokumentation ---\n\n' + currentKzvDocumentation + '\n\n';
+      }
+
+      // 2b. Z-Dokumentation (wenn vorhanden - Agent V2.1)
+      if (currentZDocumentation) {
+        fullText += '--- Z-Dokumentation ---\n\n' + currentZDocumentation + '\n\n';
       }
 
       // 3. Normalisiertes Transkript (wenn vorhanden - Agent V2)
@@ -1447,6 +1559,16 @@
         ipcRenderer.invoke('copy-to-clipboard', currentKzvDocumentation);
         showCopied(document.getElementById('copyKzvBtn'));
         lastClickedDoc = 'kzv';
+        saveLastClickedDoc();
+      }
+    });
+
+    // Copy Z-Doku button
+    document.getElementById('copyZDokuBtn').addEventListener('click', () => {
+      if (currentZDocumentation) {
+        ipcRenderer.invoke('copy-to-clipboard', currentZDocumentation);
+        showCopied(document.getElementById('copyZDokuBtn'));
+        lastClickedDoc = 'zdoku';
         saveLastClickedDoc();
       }
     });
@@ -1522,6 +1644,8 @@
           if (currentDocumentation) fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
           // 2. KZV-Dokumentation (wenn vorhanden - Agent V2.1)
           if (currentKzvDocumentation) fullText += '--- KZV-Dokumentation ---\n\n' + currentKzvDocumentation + '\n\n';
+          // 2b. Z-Dokumentation (wenn vorhanden - Agent V2.1)
+          if (currentZDocumentation) fullText += '--- Z-Dokumentation ---\n\n' + currentZDocumentation + '\n\n';
           // 3. Normalisiertes Transkript (wenn vorhanden - Agent V2)
           if (currentReconstructedTranscript) fullText += '--- Normalisiertes Transkript ---\n\n' + currentReconstructedTranscript + '\n\n';
           // 4. Transkript mit Sprechern
@@ -1536,6 +1660,10 @@
         case 'kzv':
           textToCopy = currentKzvDocumentation;
           btnToHighlight = document.getElementById('copyKzvBtn');
+          break;
+        case 'zdoku':
+          textToCopy = currentZDocumentation;
+          btnToHighlight = document.getElementById('copyZDokuBtn');
           break;
         case 'normalized':
           textToCopy = currentReconstructedTranscript;

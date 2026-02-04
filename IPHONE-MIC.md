@@ -140,7 +140,7 @@ const fastify = Fastify({ logger: true });
 
 // Environment
 const PORT = process.env.PORT || 3001;
-const DENTDOC_API_URL = process.env.DENTDOC_API_URL || 'https://dentdoc-app.vercel.app';
+const DENTDOC_API_URL = process.env.DENTDOC_API_URL || 'https://dentdoc.de';
 
 // Connection registry: Map<iphoneDeviceId, { iphone: WebSocket, desktop: WebSocket, deviceId: string }>
 const connections = new Map();
@@ -398,7 +398,7 @@ function generatePairingId(): string {
  * Starts the iPhone pairing process by generating a pairing code.
  * Desktop calls this, then displays QR code with the URL.
  *
- * Response: { pairingId: "AB7K9Q", pairingUrl: "https://dentdoc-app.vercel.app/mic/AB7K9Q" }
+ * Response: { pairingId: "AB7K9Q", pairingUrl: "https://dentdoc.de/mic/AB7K9Q" }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -469,7 +469,7 @@ export async function POST(request: NextRequest) {
       expiresAt,
     });
 
-    const baseUrl = 'https://dentdoc-app.vercel.app';
+    const baseUrl = 'https://dentdoc.de';
     const pairingUrl = `${baseUrl}/mic/${pairingId}`;
 
     return NextResponse.json({
@@ -1417,9 +1417,9 @@ const relayUrl = process.env.AUDIO_RELAY_URL || 'wss://dentdoc-desktop-productio
 
 ### 5. QR-Code zeigte falsche URL
 
-**Problem:** Mehrere Stellen hatten hardcoded `dentdoc.app` statt `dentdoc-app.vercel.app`.
+**Problem:** Mehrere Stellen hatten hardcoded URLs.
 
-**Lösung:** Alle URLs auf `https://dentdoc-app.vercel.app` vereinheitlicht.
+**Lösung:** Alle URLs auf `https://dentdoc.de` vereinheitlicht.
 
 ### 6. electron-store `Use delete() to clear values`
 
@@ -1692,7 +1692,7 @@ AUDIO_RELAY_URL=wss://dentdoc-desktop-production-a7a1.up.railway.app
 ### Railway
 ```
 PORT=3001
-DENTDOC_API_URL=https://dentdoc-app.vercel.app
+DENTDOC_API_URL=https://dentdoc.de
 ```
 
 ---

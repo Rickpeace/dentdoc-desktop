@@ -244,6 +244,67 @@ handleShortcutKeydown(e) {
 
 ---
 
+## Shared Utilities (scripts/audio-utils.js)
+
+### Übersicht
+
+Gemeinsam genutzte Audio-Funktionen für dashboard.js und setup-wizard.js.
+
+**Import:**
+```javascript
+// In dashboard.js
+const audioUtils = require('./scripts/audio-utils');
+
+// In setup-wizard.js
+const wizardAudioUtils = require('./scripts/audio-utils');
+```
+
+### Exports
+
+| Export | Typ | Beschreibung |
+|--------|-----|--------------|
+| `AudioMonitor` | Klasse | Echtzeit Audio-Level Monitoring |
+| `MicTester` | Klasse | Mikrofon-Test mit Aufnahme & Wiedergabe |
+| `loadMicrophones()` | async function | Mikrofon-Dropdown befüllen (mit smartem Matching) |
+| `getSelectedMicrophone()` | function | Ausgewähltes Mikrofon aus Dropdown abrufen |
+| `isMicrophoneMatch()` | function | Prüft ob zwei Mic-Namen zusammengehören |
+| `isMicrophoneAvailable()` | async function | Prüft ob Mikrofon in Geräteliste verfügbar ist |
+
+### Mikrofon-Matching
+
+Windows benennt USB-Geräte manchmal um (z.B. "Jabra" → "Jabra (2)" nach Reconnect).
+
+Die Funktionen `isMicrophoneMatch()` und `isMicrophoneAvailable()` lösen das Problem:
+- Zuerst: Exakter Name-Vergleich
+- Falls nicht: Vergleich der Vendor:Product ID (z.B. "046d:0aba")
+
+```javascript
+// Beispiel: Mic wurde reconnected mit anderem Namen
+const savedMic = "Jabra Link 370 (0b0e:245d)";
+const currentMic = "2- Jabra Link 370 (0b0e:245d)";
+
+audioUtils.isMicrophoneMatch(savedMic, currentMic); // true (gleiche Vendor ID)
+
+// Async Check gegen aktuelle Geräteliste
+const available = await audioUtils.isMicrophoneAvailable(savedMic); // true
+```
+
+### Verwendung
+
+**devicechange Listener (dashboard.js & setup-wizard.js):**
+```javascript
+navigator.mediaDevices?.addEventListener('devicechange', async () => {
+  const settings = await ipcRenderer.invoke('get-settings');
+  const micAvailable = await audioUtils.isMicrophoneAvailable(settings?.microphoneName);
+
+  if (micAvailable) {
+    // Mikrofon wieder verbunden
+  }
+});
+```
+
+---
+
 ## Status Overlay (status-overlay.html)
 
 ### Zweck
@@ -347,11 +408,11 @@ document.getElementById('loginForm').onsubmit = async (e) => {
 
 ### Registrierung
 
-Öffnet Web-Browser zur Registration auf dentdoc-app.vercel.app:
+Öffnet Web-Browser zur Registration auf dentdoc.de:
 
 ```javascript
 document.getElementById('register').onclick = () => {
-  ipcRenderer.invoke('open-external-url', 'https://dentdoc-app.vercel.app/register');
+  ipcRenderer.invoke('open-external-url', 'https://dentdoc.de/register');
 };
 ```
 

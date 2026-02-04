@@ -61,10 +61,15 @@ function getFFmpegPath() {
 // ============================================================================
 // STATE MACHINE - ensures only ONE recording at a time
 // ============================================================================
-// States: 'idle' | 'starting' | 'recording' | 'stopping'
+// States: 'idle' | 'starting' | 'recording' | 'stopping' | 'paused'
 let recordingState = 'idle';
 let ffmpegProcess = null;
 let currentFilePath = null;
+
+// Segment tracking for pause/resume functionality
+let recordingSegments = [];  // Array of segment file paths
+let segmentCounter = 0;      // Counter for unique segment names
+let currentDeviceName = null; // Store device name for resuming
 
 // Store the current audio backend for the session
 let currentAudioBackend = 'dshow';  // Default to DirectShow
@@ -436,6 +441,13 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
       // Transition to 'starting' state
       recordingState = 'starting';
 
+      // Reset segment tracking for new recording session
+      recordingSegments = [];
+      segmentCounter = 0;
+
+      // Store device name for pause/resume functionality
+      currentDeviceName = deviceName;
+
       // Create temp directory if it doesn't exist
       const tempDir = path.join(app.getPath('temp'), 'dentdoc');
       if (!fs.existsSync(tempDir)) {
@@ -461,6 +473,9 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
         const timestamp = Date.now();
         currentFilePath = path.join(tempDir, `recording-${timestamp}.wav`);
       }
+
+      // Set transitional state to detect if forceStop is called during async startup
+      recordingState = 'starting';
 
       // Detect mic type for optimal recording strategy
       const micType = detectMicType(deviceName);
@@ -579,6 +594,19 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
       }
 
       // Recording started successfully
+      // But first check if we were cancelled during async startup (forceStop was called)
+      // forceStop sets state to 'stopping' or 'idle', so if we're not still in 'starting', abort
+      if (recordingState !== 'starting' || !currentFilePath) {
+        console.log('[Recorder] Startup completed but was cancelled (state:', recordingState, ') - not setting recording state');
+        if (result.process) {
+          try { result.process.kill('SIGTERM'); } catch (e) {}
+        }
+        // IMPORTANT: Use resolve() not return! We're inside Promise executor.
+        // "return null" doesn't resolve the promise - it just returns from the async function.
+        resolve(null);  // Signal that recording didn't actually start
+        return;
+      }
+
       ffmpegProcess = result.process;
       recordingState = 'recording';
       console.log('[Recorder] Recording started:', currentFilePath);
@@ -620,7 +648,9 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
           }
         }
 
-        if (recordingState !== 'idle') {
+        // Only reset to idle if we crashed during active recording
+        // Don't reset if we're in 'stopping' or 'paused' - those states are managed elsewhere
+        if (recordingState === 'recording') {
           recordingState = 'idle';
         }
       });
@@ -644,11 +674,11 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
  * @returns {Promise<string>} Path to the recorded WAV file
  */
 function stopRecording() {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     // ========================================================================
-    // STATE GUARD - Only stop if recording
+    // STATE GUARD - Only stop if recording OR paused
     // ========================================================================
-    if (recordingState !== 'recording') {
+    if (recordingState !== 'recording' && recordingState !== 'paused') {
       console.warn('stopRecording IGNORED - state is:', recordingState);
 
       // Special case: If there's a file from a previous recording, return it
@@ -662,12 +692,43 @@ function stopRecording() {
       return;
     }
 
+    const wasPaused = recordingState === 'paused';
+
     // Transition to 'stopping' state
     recordingState = 'stopping';
-    // Stopping recording...
+    console.log('[Recorder] Stopping recording... (was paused:', wasPaused, ')');
 
     const filePath = currentFilePath;
     const process = ffmpegProcess;
+
+    // ========================================================================
+    // CASE 1: Was paused - no FFmpeg to stop, just concatenate segments
+    // ========================================================================
+    if (wasPaused || !process) {
+      recordingState = 'idle';
+
+      // If we have segments, concatenate them
+      if (recordingSegments.length > 0) {
+        try {
+          const tempDir = path.join(app.getPath('temp'), 'dentdoc');
+          const finalPath = path.join(tempDir, `recording-${Date.now()}-final.wav`);
+          const result = await concatenateSegments(recordingSegments, finalPath);
+          recordingSegments = [];
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        }
+        return;
+      }
+
+      // No segments and was paused - nothing to return
+      reject(new Error('Keine Aufnahme vorhanden'));
+      return;
+    }
+
+    // ========================================================================
+    // CASE 2: Was recording - stop FFmpeg, then concatenate
+    // ========================================================================
     let timeoutId = null;
     let secondTimeoutId = null;
     let resolved = false;
@@ -677,12 +738,42 @@ function stopRecording() {
       if (secondTimeoutId) clearTimeout(secondTimeoutId);
     };
 
-    const resolveOnce = (result) => {
+    const finalizeRecording = async (lastSegmentPath) => {
       if (resolved) return;
       resolved = true;
       cleanup();
-      // Note: state transition to 'idle' happens in 'close' event
-      resolve(result);
+
+      // Add the last segment to the list
+      if (lastSegmentPath && fs.existsSync(lastSegmentPath) && fs.statSync(lastSegmentPath).size > 0) {
+        recordingSegments.push(lastSegmentPath);
+      }
+
+      // If we have multiple segments, concatenate them
+      if (recordingSegments.length > 1) {
+        try {
+          const tempDir = path.join(app.getPath('temp'), 'dentdoc');
+          const finalPath = path.join(tempDir, `recording-${Date.now()}-final.wav`);
+          const result = await concatenateSegments(recordingSegments, finalPath);
+          recordingSegments = [];
+          recordingState = 'idle';
+          resolve(result);
+        } catch (err) {
+          recordingState = 'idle';
+          reject(err);
+        }
+      } else if (recordingSegments.length === 1) {
+        // Only one segment - use it directly
+        recordingState = 'idle';
+        resolve(recordingSegments[0]);
+        recordingSegments = [];
+      } else if (lastSegmentPath) {
+        // No segments but have a file
+        recordingState = 'idle';
+        resolve(lastSegmentPath);
+      } else {
+        recordingState = 'idle';
+        reject(new Error('Aufnahme-Datei nicht gefunden'));
+      }
     };
 
     const rejectOnce = (error) => {
@@ -690,7 +781,6 @@ function stopRecording() {
       resolved = true;
       cleanup();
       recordingState = 'idle';
-      // Stop failed
       reject(error);
     };
 
@@ -725,11 +815,9 @@ function stopRecording() {
               // Ignore
             }
 
-            // Force resolve with file if it exists
-            recordingState = 'idle';
-
+            // Force finalize with file if it exists
             if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
-              resolveOnce(filePath);
+              finalizeRecording(filePath);
             } else {
               rejectOnce(new Error('Aufnahme fehlgeschlagen'));
             }
@@ -743,16 +831,15 @@ function stopRecording() {
     // ========================================================================
     process.once('close', () => {
       ffmpegProcess = null;
-      recordingState = 'idle';
 
       // Verify the file exists and has content
       if (fs.existsSync(filePath)) {
         const stats = fs.statSync(filePath);
         const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-        console.log(`[Recorder] Recording saved: ${sizeMB} MB`);
+        console.log(`[Recorder] Last segment saved: ${sizeMB} MB`);
 
         if (stats.size > 0) {
-          resolveOnce(filePath);
+          finalizeRecording(filePath);
         } else {
           rejectOnce(new Error('Aufnahme ist leer - bitte Mikrofon überprüfen'));
         }
@@ -780,7 +867,14 @@ function stopRecording() {
 async function forceStop() {
   console.log('[Recorder] FORCE STOP called - cancelling recording');
 
+  // If already idle, nothing to do
+  if (recordingState === 'idle') {
+    console.log('[Recorder] Force stop called but already idle');
+    return;
+  }
+
   // Set state BEFORE killing so close handler knows it's intentional (not a crash)
+  // This also signals to any in-progress startRecording that it should abort
   recordingState = 'stopping';
 
   if (ffmpegProcess) {
@@ -817,8 +911,34 @@ async function forceStop() {
     ffmpegProcess = null;
   }
 
+  // Clean up segment files (recording was cancelled, not stopped normally)
+  const filesToDelete = [...recordingSegments];
+
+  // Also add currentFilePath if it's not already in segments (active recording when cancelled)
+  if (currentFilePath && !filesToDelete.includes(currentFilePath)) {
+    filesToDelete.push(currentFilePath);
+  }
+
+  if (filesToDelete.length > 0) {
+    console.log('[Recorder] Cleaning up', filesToDelete.length, 'segment files...');
+    for (const segmentPath of filesToDelete) {
+      try {
+        if (fs.existsSync(segmentPath)) {
+          fs.unlinkSync(segmentPath);
+          console.log('[Recorder] Deleted segment:', segmentPath);
+        }
+      } catch (e) {
+        console.warn('[Recorder] Failed to delete segment:', segmentPath, e.message);
+      }
+    }
+  }
+
+  recordingSegments = [];
+  segmentCounter = 0;
+  currentFilePath = null;
+
   recordingState = 'idle';
-  // Force stop complete
+  console.log('[Recorder] Force stop complete - state reset to idle');
 }
 
 /**
@@ -829,14 +949,300 @@ function isRecording() {
   return recordingState === 'recording';
 }
 
+/**
+ * Check if currently paused
+ * @returns {boolean}
+ */
+function isPaused() {
+  return recordingState === 'paused';
+}
+
+/**
+ * Pause the current recording
+ * Stops FFmpeg and saves the current segment. Call resumeRecording() to continue.
+ * @returns {Promise<void>}
+ */
+async function pauseRecording() {
+  if (recordingState !== 'recording') {
+    console.warn('[Recorder] pauseRecording IGNORED - state is:', recordingState);
+    return;
+  }
+
+  console.log('[Recorder] Pausing recording...');
+
+  // Save reference to current segment before stopping
+  const segmentPath = currentFilePath;
+
+  // Stop FFmpeg gracefully (similar to stopRecording but without concatenation)
+  const process = ffmpegProcess;
+
+  if (process) {
+    // Set state to stopping temporarily
+    recordingState = 'stopping';
+
+    // Send quit command to FFmpeg
+    try {
+      process.stdin.write('q');
+    } catch (e) {
+      // stdin might be closed, try kill directly
+    }
+
+    // Wait for process to close with timeout
+    await new Promise((resolve) => {
+      let resolved = false;
+
+      const done = () => {
+        if (resolved) return;
+        resolved = true;
+        ffmpegProcess = null;
+        resolve();
+      };
+
+      process.once('close', done);
+
+      // Timeout: force kill if not closed after 1 second
+      setTimeout(() => {
+        if (!resolved) {
+          console.log('[Recorder] FFmpeg not responding to quit, force killing...');
+          try { process.kill('SIGKILL'); } catch (e) {}
+          // Give it a moment to actually die
+          setTimeout(done, 200);
+        }
+      }, 1000);
+    });
+
+    console.log('[Recorder] FFmpeg process terminated');
+
+    // Small delay for Windows to release the audio device
+    await new Promise(r => setTimeout(r, 150));
+  }
+
+  // Check if we were cancelled during async operations (forceStop called)
+  if (recordingState === 'idle') {
+    console.log('[Recorder] pauseRecording aborted - recording was cancelled');
+    return;
+  }
+
+  // Add segment to list if file exists and has content
+  if (segmentPath && fs.existsSync(segmentPath)) {
+    const stats = fs.statSync(segmentPath);
+    if (stats.size > 0) {
+      recordingSegments.push(segmentPath);
+      console.log('[Recorder] Segment saved:', segmentPath, '| Total segments:', recordingSegments.length);
+    }
+  }
+
+  recordingState = 'paused';
+  console.log('[Recorder] Recording paused');
+}
+
+/**
+ * Resume a paused recording
+ * Starts a new FFmpeg process for the next segment
+ * @returns {Promise<string>} Path to the new segment file
+ */
+async function resumeRecording() {
+  if (recordingState !== 'paused') {
+    console.warn('[Recorder] resumeRecording IGNORED - state is:', recordingState);
+    throw new Error('Keine pausierte Aufnahme');
+  }
+
+  console.log('[Recorder] Resuming recording...');
+
+  // Generate new segment filename
+  segmentCounter++;
+  const tempDir = path.join(app.getPath('temp'), 'dentdoc');
+  const timestamp = Date.now();
+  currentFilePath = path.join(tempDir, `recording-${timestamp}-seg${segmentCounter}.wav`);
+
+  // Start new FFmpeg process using the stored device name
+  recordingState = 'starting';
+
+  try {
+    // Small delay for device to become available (no warmup needed - mic was just active)
+    await new Promise(r => setTimeout(r, 100));
+
+    // Check if we were cancelled during the delay
+    if (recordingState === 'idle') {
+      console.log('[Recorder] resumeRecording aborted - recording was cancelled');
+      throw new Error('Aufnahme wurde abgebrochen');
+    }
+
+    // Try to start recording with the same device
+    let result;
+
+    // Clean device name (same logic as startRecording)
+    let cleanDeviceName = currentDeviceName ? currentDeviceName.replace(/^Default - /i, '') : null;
+    if (cleanDeviceName) {
+      cleanDeviceName = cleanDeviceName.replace(/\s+\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, '');
+    }
+
+    if (!cleanDeviceName) {
+      result = await tryRecordWithBackend('wasapi', 'default', currentFilePath);
+    } else {
+      const micType = detectMicType(currentDeviceName);
+      if (micType === 'laptop' || micType === 'unknown') {
+        // Try WASAPI first, then DirectShow as fallback (same as startRecording)
+        result = await tryRecordWithBackend('wasapi', 'default', currentFilePath);
+        if (!result.success && cleanDeviceName) {
+          console.log('[Recorder] Resume fallback: DirectShow with explicit name');
+          result = await tryRecordWithBackend('dshow', cleanDeviceName, currentFilePath);
+        }
+      } else {
+        result = await tryRecordWithBackend('dshow', cleanDeviceName, currentFilePath);
+        if (!result.success) {
+          result = await tryRecordWithBackend('wasapi', 'default', currentFilePath);
+        }
+      }
+    }
+
+    if (!result || !result.success) {
+      recordingState = 'paused';
+      throw new Error('Mikrofon nicht verfügbar');
+    }
+
+    ffmpegProcess = result.process;
+    recordingState = 'recording';
+
+    // Setup error handling
+    ffmpegProcess.once('close', (code, signal) => {
+      if (recordingState === 'recording') {
+        console.error('[Recorder] FFmpeg closed unexpectedly during resumed recording');
+      }
+      ffmpegProcess = null;
+      if (recordingState !== 'idle' && recordingState !== 'paused' && recordingState !== 'stopping') {
+        recordingState = 'idle';
+      }
+    });
+
+    console.log('[Recorder] Recording resumed, new segment:', currentFilePath);
+    return currentFilePath;
+
+  } catch (error) {
+    console.error('[Recorder] Resume failed:', error);
+    recordingState = 'paused';
+    throw error;
+  }
+}
+
+/**
+ * Concatenate multiple audio segments into a single file
+ * @param {string[]} segments - Array of segment file paths
+ * @param {string} outputPath - Path for the final merged file
+ * @returns {Promise<string>} Path to the merged file
+ */
+async function concatenateSegments(segments, outputPath) {
+  if (segments.length === 0) {
+    throw new Error('No segments to concatenate');
+  }
+
+  if (segments.length === 1) {
+    // Only one segment - just rename it
+    const stats = fs.statSync(segments[0]);
+    console.log('[Concat] Single segment, renaming:', path.basename(segments[0]), '|', (stats.size / 1024 / 1024).toFixed(2), 'MB');
+    fs.renameSync(segments[0], outputPath);
+    return outputPath;
+  }
+
+  // Log details about each segment
+  console.log('[Concat] ========== CONCATENATING', segments.length, 'SEGMENTS ==========');
+  let totalSize = 0;
+  for (let i = 0; i < segments.length; i++) {
+    try {
+      const stats = fs.statSync(segments[i]);
+      const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+      totalSize += stats.size;
+      console.log(`[Concat] Segment ${i + 1}: ${path.basename(segments[i])} | ${sizeMB} MB`);
+    } catch (e) {
+      console.error(`[Concat] Segment ${i + 1}: ${segments[i]} - FILE NOT FOUND!`);
+    }
+  }
+  console.log(`[Concat] Total input size: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
+
+  // Create a concat list file for FFmpeg
+  const tempDir = path.dirname(outputPath);
+  const listFile = path.join(tempDir, `concat-${Date.now()}.txt`);
+
+  // Write the file list (FFmpeg concat demuxer format)
+  const listContent = segments.map(s => `file '${s.replace(/\\/g, '/')}'`).join('\n');
+  fs.writeFileSync(listFile, listContent);
+
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', listFile,
+      '-c', 'copy',
+      '-y',
+      outputPath
+    ];
+
+    const proc = spawn(getFFmpegPath(), args);
+    let stderr = '';
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      // Clean up list file
+      try { fs.unlinkSync(listFile); } catch (e) {}
+
+      if (code === 0 && fs.existsSync(outputPath)) {
+        // Clean up segment files
+        for (const seg of segments) {
+          try { fs.unlinkSync(seg); } catch (e) {}
+        }
+
+        const stats = fs.statSync(outputPath);
+        const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
+        console.log(`[Concat] ✓ SUCCESS: ${path.basename(outputPath)} | ${sizeMB} MB`);
+        console.log('[Concat] ===========================================');
+        resolve(outputPath);
+      } else {
+        console.error('[Concat] ✗ FAILED! Exit code:', code);
+        console.error('[Concat] FFmpeg stderr:', stderr.slice(-500));
+        reject(new Error('Zusammenfügen der Aufnahme fehlgeschlagen'));
+      }
+    });
+
+    proc.on('error', (err) => {
+      try { fs.unlinkSync(listFile); } catch (e) {}
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Get current segments count
+ * @returns {number}
+ */
+function getSegmentsCount() {
+  return recordingSegments.length;
+}
+
+/**
+ * Reset segment tracking (called at start of new recording)
+ */
+function resetSegments() {
+  recordingSegments = [];
+  segmentCounter = 0;
+}
+
 module.exports = {
   listAudioDevices,
   startRecording,
   stopRecording,
   forceStop,
   isRecording,
+  isPaused,
+  pauseRecording,
+  resumeRecording,
   getState,
   getFFmpegPath,
-  downsampleTo16k,  // Downsample 48kHz recording to 16kHz for VAD/transcription
-  detectMicType     // Detect mic type (usb/laptop/unknown) for debugging
+  downsampleTo16k,
+  detectMicType,
+  concatenateSegments,
+  getSegmentsCount,
+  resetSegments
 };

@@ -25,7 +25,7 @@ const fastify = Fastify({ logger: true });
 
 // Environment
 const PORT = process.env.PORT || 3001;
-const DENTDOC_API_URL = process.env.DENTDOC_API_URL || 'https://dentdoc-app.vercel.app';
+const DENTDOC_API_URL = process.env.DENTDOC_API_URL || 'https://dentdoc.de';
 
 // Connection registry: Map<iphoneDeviceId, { iphone: WebSocket, desktop: WebSocket, deviceId: string }>
 const connections = new Map();
