@@ -1,0 +1,340 @@
+# DentDoc Hilfe & Support
+
+DentDoc ist eine Windows-Anwendung für Zahnärzte, die automatisch Arzt-Patienten-Gespräche aufzeichnet, transkribiert und strukturierte Dokumentationen erstellt.
+
+---
+
+# HÄUFIG GESTELLTE FRAGEN (FAQ)
+
+## Was ist DentDoc?
+DentDoc ist eine Windows-Anwendung für Zahnärzte, die automatisch Arzt-Patienten-Gespräche aufzeichnet, transkribiert und strukturierte Dokumentationen erstellt. So sparen Sie Zeit bei der Dokumentation und können sich voll auf Ihre Patienten konzentrieren.
+
+## Wie funktioniert DentDoc?
+1. Sie starten eine Aufnahme mit der F9-Taste
+2. DentDoc zeichnet das Gespräch auf
+3. Nach dem Stoppen wird das Audio transkribiert
+4. Eine KI erstellt automatisch die strukturierte Dokumentation
+5. Sie können die Dokumentation überprüfen und in Ihr Praxissystem übernehmen
+
+## Welche Systemvoraussetzungen hat DentDoc?
+- Windows 10 oder höher
+- Mikrofon (eingebaut oder extern)
+- Internetverbindung für Transkription und Dokumentation
+- Mindestens 4 GB RAM empfohlen
+
+## Wie starte ich eine Aufnahme?
+Drücken Sie die F9-Taste auf Ihrer Tastatur. Sie können auch auf das DentDoc-Symbol im System Tray klicken und "Aufnahme starten" wählen.
+
+## Wie stoppe ich eine Aufnahme?
+Drücken Sie erneut die F9-Taste. Die Aufnahme wird gestoppt und automatisch verarbeitet.
+
+## Kann ich den Hotkey ändern?
+Ja, in den Einstellungen können Sie einen anderen Hotkey festlegen.
+
+## Wie lange kann eine Aufnahme sein?
+Es gibt keine feste Obergrenze, aber für optimale Ergebnisse empfehlen wir Aufnahmen bis zu 30 Minuten. Längere Behandlungen können in mehrere Aufnahmen aufgeteilt werden.
+
+## Was ist die Sprechererkennung?
+DentDoc kann automatisch zwischen Arzt und Patient unterscheiden. So wird in der Dokumentation klar, wer was gesagt hat.
+
+## Wie richte ich die Sprechererkennung ein?
+1. Öffnen Sie die Einstellungen
+2. Gehen Sie zu "Sprechererkennung"
+3. Nehmen Sie eine kurze Sprachprobe von sich auf (ca. 10 Sekunden)
+4. Die App lernt Ihre Stimme und kann Sie zukünftig erkennen
+
+## Muss jeder Arzt in der Praxis registriert werden?
+Ja, für optimale Ergebnisse sollte jeder Arzt, der DentDoc nutzt, seine Stimme einmalig registrieren.
+
+## Wie wird die Dokumentation erstellt?
+Nach der Transkription analysiert eine KI das Gespräch und erstellt eine strukturierte Dokumentation mit Anamnese, Befund, Diagnose, Therapie und weiterem Vorgehen.
+
+## Kann ich die Dokumentation bearbeiten?
+Ja, die erstellte Dokumentation ist ein Vorschlag. Sie können sie jederzeit anpassen, bevor Sie sie in Ihr Praxissystem übernehmen.
+
+## Wie übertrage ich die Dokumentation in mein Praxissystem?
+Klicken Sie auf "In Zwischenablage kopieren" und fügen Sie den Text in Ihr Praxissystem ein (Strg+V).
+
+## Wie melde ich mich an?
+Beim ersten Start werden Sie zur Anmeldung aufgefordert. Geben Sie Ihre E-Mail und Ihr Passwort ein.
+
+## Ich habe mein Passwort vergessen
+Klicken Sie auf "Passwort vergessen" auf der Anmeldeseite. Sie erhalten eine E-Mail mit einem Link zum Zurücksetzen.
+
+## Wo werden meine Daten gespeichert?
+Die Audiodateien und Dokumentationen werden sicher auf deutschen/europäischen Servern verarbeitet und gespeichert.
+
+## Ist DentDoc DSGVO-konform?
+Ja, DentDoc erfüllt alle Anforderungen der DSGVO.
+
+---
+
+# PROBLEMLÖSUNGEN
+
+## Schnelle Lösungen bei Problemen
+Bevor Sie weiterlesen, probieren Sie diese Schritte:
+1. App neu starten: Schließen Sie DentDoc komplett (auch im System Tray) und starten Sie es neu
+2. Computer neu starten: Viele Probleme lösen sich durch einen Neustart
+3. Internetverbindung prüfen: DentDoc benötigt Internet für Transkription und Dokumentation
+4. Als Administrator starten: Rechtsklick auf DentDoc → "Als Administrator ausführen"
+
+## Die App startet nicht
+Lösungen:
+1. Prüfen Sie, ob die App bereits läuft (System Tray unten rechts prüfen)
+2. Als Administrator starten (Rechtsklick → "Als Administrator ausführen")
+3. Antivirenprogramm prüfen - fügen Sie DentDoc als Ausnahme hinzu
+4. Neu installieren - deinstallieren und neueste Version herunterladen
+
+## F9-Taste reagiert nicht
+Mögliche Ursachen: App läuft nicht im Hintergrund, Hotkey von anderer Software belegt, App hat keinen Fokus.
+
+Lösungen:
+1. Prüfen Sie, ob DentDoc im System Tray aktiv ist
+2. Klicken Sie einmal auf das DentDoc-Fenster und versuchen Sie es erneut
+3. Ändern Sie den Hotkey in den Einstellungen
+4. Schließen Sie andere Programme, die F9 verwenden könnten
+
+## Aufnahme startet, aber kein Audio
+Mögliche Ursachen: Falsches Mikrofon ausgewählt, Mikrofon stumm geschaltet, Mikrofon nicht richtig angeschlossen.
+
+Lösungen:
+1. Öffnen Sie die DentDoc-Einstellungen → Mikrofon
+2. Wählen Sie das richtige Mikrofon aus der Liste
+3. Machen Sie einen Mikrofontest in den Einstellungen
+4. Prüfen Sie die Windows-Soundeinstellungen
+
+## "Ungültige Anmeldedaten" beim Login
+Lösungen:
+1. Prüfen Sie E-Mail und Passwort auf Tippfehler
+2. Achten Sie auf Groß-/Kleinschreibung beim Passwort
+3. Nutzen Sie "Passwort vergessen" zum Zurücksetzen
+
+## "Keine Internetverbindung"
+Lösungen:
+1. Prüfen Sie Ihre Internetverbindung (öffnen Sie eine Webseite im Browser)
+2. Prüfen Sie, ob eine Firewall DentDoc blockiert
+3. Versuchen Sie es mit einem anderen Netzwerk (z.B. Handy-Hotspot)
+
+## Anmeldung läuft ewig / hängt
+Lösungen:
+1. Warten Sie bis zu 30 Sekunden
+2. Brechen Sie ab und versuchen Sie es erneut
+3. Starten Sie die App neu
+4. Prüfen Sie Ihre Internetgeschwindigkeit
+
+## Transkription dauert sehr lange
+Normal: Eine 10-minütige Aufnahme braucht ca. 1-2 Minuten zur Verarbeitung.
+Bei längerer Wartezeit:
+1. Prüfen Sie Ihre Internetverbindung
+2. Schauen Sie im Dashboard, ob die Aufnahme verarbeitet wird
+3. Bei sehr langen Aufnahmen (>30 Min) kann es länger dauern
+
+## Transkription ist ungenau
+Tipps für bessere Ergebnisse:
+1. Sprechen Sie deutlich und nicht zu schnell
+2. Vermeiden Sie Hintergrundgeräusche
+3. Halten Sie das Mikrofon nah am Mund (30-50 cm)
+4. Nutzen Sie ein externes Mikrofon für bessere Qualität
+
+## Arzt wird als Patient erkannt (oder umgekehrt)
+Lösungen:
+1. Registrieren Sie Ihre Stimme neu in den Einstellungen
+2. Sprechen Sie bei der Registrierung in normalem Tonfall
+3. Nehmen Sie eine längere Sprachprobe auf (15-20 Sekunden)
+
+## App ist langsam oder hängt
+Lösungen:
+1. Schließen Sie andere Programme, um Ressourcen freizugeben
+2. Starten Sie die App neu
+3. Starten Sie den Computer neu
+4. Prüfen Sie, ob Windows-Updates ausstehen
+
+---
+
+# AUDIO- UND MIKROFON-FEHLER
+
+## "Kein Mikrofon gefunden"
+Ursachen: Kein Mikrofon angeschlossen, Mikrofon von Windows nicht erkannt, falscher Audioeingang ausgewählt.
+
+Lösungen:
+1. Ist ein Mikrofon angeschlossen? Bei Headsets: Ist der Stecker richtig eingesteckt?
+2. Windows-Einstellungen prüfen: Rechtsklick auf Lautsprecher-Symbol → Sounds → Tab "Aufnahme"
+3. In DentDoc Einstellungen → Mikrofon das richtige Gerät auswählen
+4. Treiber aktualisieren über den Geräte-Manager
+
+## "Mikrofon wird verwendet"
+Ursachen: Ein anderes Programm nutzt das Mikrofon exklusiv, Videocall-Software (Teams, Zoom) ist aktiv.
+
+Lösungen:
+1. Andere Programme schließen (Videocall-Software, Browser-Tabs mit Mikrofon-Zugriff)
+2. DentDoc neu starten
+3. Computer neu starten
+
+## Audio-Qualität ist schlecht
+Lösungen:
+1. Mikrofon-Position verbessern (30-50 cm Abstand zum Mund)
+2. Hintergrundgeräusche reduzieren (Fenster schließen, Radio aus)
+3. Besseres Mikrofon verwenden (USB-Mikrofon oder Headset)
+4. Mikrofon-Pegel anpassen (nicht zu hoch, nicht zu niedrig)
+
+## "Aufnahme fehlgeschlagen"
+Lösungen:
+1. Erneut versuchen nach einigen Sekunden
+2. DentDoc neu starten
+3. Speicherplatz prüfen (mindestens 1 GB frei)
+4. Als Administrator starten
+
+---
+
+# VERBINDUNGS- UND NETZWERK-FEHLER
+
+## "Keine Internetverbindung" - aber Browser funktioniert
+Lösungen:
+1. Firewall prüfen: Windows-Suche → "Firewall" → DentDoc als Ausnahme hinzufügen
+2. Antivirensoftware prüfen und DentDoc als Ausnahme hinzufügen
+3. IT-Administrator fragen, ob Proxy-Einstellungen nötig sind
+
+## "Verbindung zum Server fehlgeschlagen"
+Lösungen:
+1. Erneut versuchen nach 10-30 Sekunden
+2. DentDoc neu starten
+3. Internetverbindung testen
+4. Bei Server-Wartung: In 15-30 Minuten erneut versuchen
+
+## "Upload fehlgeschlagen"
+Lösungen:
+1. Internetverbindung prüfen
+2. Erneut versuchen (App versucht automatisch erneut)
+3. Bei langsamer Verbindung warten - große Aufnahmen brauchen Zeit
+4. Firewall/Proxy prüfen
+
+Hinweis: Aufnahmen werden lokal zwischengespeichert und können später hochgeladen werden.
+
+## "Sitzung abgelaufen"
+Die Anmeldung ist nach längerer Inaktivität abgelaufen. Melden Sie sich einfach erneut an. Ihre Daten sind nicht verloren.
+
+---
+
+# ALLGEMEINE FEHLERMELDUNGEN
+
+## "Ein Fehler ist aufgetreten"
+Lösungen:
+1. Aktion wiederholen nach 5-10 Sekunden
+2. App neu starten
+3. Computer neu starten
+4. Update prüfen - möglicherweise ist eine neue Version verfügbar
+
+## App reagiert nicht / hängt
+Bei kurzem Hängen (<30 Sekunden): Normal bei intensiven Operationen, abwarten.
+Bei längerem Hängen:
+1. Noch etwas warten
+2. Task-Manager nutzen (Strg + Shift + Esc), DentDoc beenden
+3. App neu starten
+
+## "Update erforderlich"
+Eine neue Version ist verfügbar. Klicken Sie auf "Jetzt aktualisieren" oder laden Sie die neueste Version von der Webseite herunter.
+
+## "Nicht genügend Speicherplatz"
+Lösungen:
+1. Speicherplatz prüfen (mindestens 1 GB sollte frei sein)
+2. Papierkorb leeren, alte Dateien löschen, Downloads aufräumen
+
+## "Zugriff verweigert"
+Lösungen:
+1. Als Administrator ausführen
+2. Andere Programme schließen
+3. Antivirensoftware prüfen
+
+## "Transkription fehlgeschlagen"
+Mögliche Ursachen: Aufnahme enthält keine Sprache, zu kurz (<5 Sekunden), Audioqualität zu schlecht.
+Lösungen:
+1. Aufnahme prüfen - war Sprache vorhanden?
+2. Erneut versuchen
+3. Bei wiederholtem Fehler: Support kontaktieren
+
+## "Dokumentation konnte nicht erstellt werden"
+Lösungen:
+1. Transkription prüfen - ist sie verständlich?
+2. Erneut versuchen
+3. Längere Aufnahmen machen (>1 Minute)
+
+---
+
+# AUFNAHME-FUNKTION - DETAILS
+
+## Aufnahme starten
+- Mit Tastatur (empfohlen): F9-Taste drücken
+- Über System Tray: DentDoc-Symbol klicken → "Aufnahme starten"
+- Über Dashboard: Aufnahme-Button klicken
+
+## Aufnahme stoppen
+Erneut F9 drücken. Danach wird automatisch hochgeladen, transkribiert und dokumentiert.
+
+## Aufnahme-Anzeige
+Während einer Aufnahme: Rotes Symbol im System Tray, Overlay-Fenster mit Aufnahmezeit, Audiopegelanzeige.
+
+## Tipps für gute Aufnahmen
+- Mikrofon 30-50 cm vom Mund entfernt
+- Hintergrundgeräusche vermeiden
+- Deutlich sprechen, nicht zu schnell
+- Kurze Pausen zwischen Sprecher-Wechseln
+
+## Aufnahme-Länge
+- Empfohlen: 5-30 Minuten pro Aufnahme
+- Minimum: 1 Minute für sinnvolle Dokumentation
+- Maximum: Technisch unbegrenzt
+
+---
+
+# SPRECHERERKENNUNG - DETAILS
+
+## Einrichtung
+1. Einstellungen öffnen
+2. "Sprechererkennung" oder "Stimmprofil" wählen
+3. "Stimme registrieren" klicken
+4. 10-15 Sekunden in normalem Tonfall sprechen
+5. Speichern
+
+## Tipps für gute Erkennung
+- Normalen Tonfall verwenden (wie bei Patienten)
+- Gleiches Mikrofon wie bei Aufnahmen nutzen
+- Ruhige Umgebung, mindestens 10 Sekunden sprechen
+
+## Genauigkeit
+Funktioniert am besten bei:
+- Nur zwei Personen (Arzt und Patient)
+- Guter Audioqualität
+- Keine gleichzeitiges Sprechen
+
+## Stimmprofil aktualisieren
+Jederzeit neu aufnehmen möglich in den Einstellungen. Empfohlen bei neuem Mikrofon oder wenn Erkennung ungenau ist.
+
+---
+
+# EINSTELLUNGEN
+
+## Mikrofon auswählen
+In Einstellungen → Mikrofon das gewünschte Gerät wählen und testen.
+
+## Hotkey ändern
+In Einstellungen → Hotkey, gewünschte Taste drücken, speichern.
+Empfohlene Alternativen: F8, F10, Strg+Shift+R
+
+## Benachrichtigungen
+Aktivieren/deaktivieren für: Aufnahme Start/Stopp, Transkription fertig, Dokumentation bereit.
+
+## Autostart
+Wenn aktiviert, startet DentDoc automatisch mit Windows.
+
+## Abmelden
+Meldet Sie aus DentDoc ab. Ihre Daten bleiben erhalten.
+
+---
+
+# KONTAKT & SUPPORT
+
+Bei weiteren Fragen oder Problemen:
+- Live-Chat in der App (Sprechblase unten rechts)
+- E-Mail: support@dentdoc.de
+
+Wir helfen Ihnen gerne weiter!
