@@ -3833,6 +3833,13 @@ if (navTranscripts) {
   });
 }
 
+// Initialize date filter chips
+document.querySelectorAll('.date-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    setDateFilter(chip.dataset.filter);
+  });
+});
+
 // ============================================
 // Support Chat Modal
 // ============================================
@@ -3858,6 +3865,13 @@ function openSupportModal() {
       fabBadge.textContent = '0';
     }
     unreadChatMessages = 0;
+
+    // Maximize tawk chat to skip menu screen
+    const webview = document.getElementById('tawkWebview');
+    if (webview) {
+      webview.executeJavaScript('if (typeof Tawk_API !== "undefined" && Tawk_API.maximize) Tawk_API.maximize();')
+        .catch(() => {}); // Ignore errors if Tawk not ready
+    }
   }
 }
 

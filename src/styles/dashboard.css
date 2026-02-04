@@ -5034,11 +5034,12 @@ input.input-error:focus {
 .search-box {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 100px;
-  padding: 6px 12px;
+  padding: 0 10px;
+  height: 28px;
   width: 180px;
   transition: border-color 0.2s ease;
 }
@@ -5301,12 +5302,21 @@ input.input-error:focus {
   font-size: 0.875rem;
 }
 
+/* Transcripts view - prevent double scrollbar */
+#view-transcripts.view.active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
 .transcripts-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   overflow-y: auto;
-  max-height: calc(100vh - 280px);
+  flex: 1;
+  min-height: 0;
   padding: var(--space-2);
 }
 
@@ -6592,7 +6602,8 @@ input.input-error:focus {
   width: 220px;
   margin-left: 12px;
   flex-shrink: 0;
-  padding: 4px 10px;
+  padding: 0 8px;
+  height: 26px;
 }
 
 .transcript-modal-search .search-count {
