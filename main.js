@@ -2123,8 +2123,8 @@ async function startRecordingWithIphone() {
                   sum += int16[i] * int16[i];
                 }
                 const rawRms = Math.sqrt(sum / int16.length) / 32768; // Normalize to 0-1
-                // Boost RMS for better visual feedback (speech is typically 0.01-0.1)
-                const rms = Math.min(1, rawRms * 4);
+                // Boost RMS for better visual feedback (iPhone is further from mouth, typically 0.01-0.05)
+                const rms = Math.min(1, rawRms * 8);
 
                 // Send to status overlay window (not mainWindow!)
                 if (statusOverlay && !statusOverlay.isDestroyed()) {
@@ -2374,7 +2374,7 @@ function reconnectToRelay(deviceId, token, relayUrl, timeout, resolve) {
               let sum = 0;
               for (let i = 0; i < int16.length; i++) sum += int16[i] * int16[i];
               const rawRms = Math.sqrt(sum / int16.length) / 32768;
-              const rms = Math.min(1, rawRms * 4);
+              const rms = Math.min(1, rawRms * 8);
               if (statusOverlay && !statusOverlay.isDestroyed()) {
                 statusOverlay.webContents.send('iphone-audio-level', rms);
               }
