@@ -2229,6 +2229,69 @@ input.input-error:focus {
   border-color: var(--error-500);
 }
 
+/* Profile actions container */
+.profile-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.profile-item .btn-edit {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-item .btn-edit:hover {
+  opacity: 1;
+  color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.profile-item .btn-edit svg {
+  width: 14px;
+  height: 14px;
+}
+
+.profile-item .btn-delete {
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-item .btn-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Inline edit input */
+.profile-name-input {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--primary-500);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  outline: none;
+  width: 100%;
+  max-width: 200px;
+}
+
+[data-theme="light"] .profile-name-input {
+  background: white;
+  border-color: var(--primary-500);
+}
+
 .empty-state-small {
   text-align: center;
   padding: var(--space-6) var(--space-5);

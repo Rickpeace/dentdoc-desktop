@@ -5122,6 +5122,10 @@ ipcMain.handle('delete-voice-profile', async (event, id) => {
   return voiceProfiles.deleteProfile(id);
 });
 
+ipcMain.handle('rename-voice-profile', async (event, { id, newName }) => {
+  return voiceProfiles.updateProfile(id, { name: newName });
+});
+
 // Add utterance audio segment to voice profile (or create new profile)
 // Manual flow: embeddings go directly to confirmed (not pending) for immediate use
 ipcMain.handle('add-utterance-to-profile', async (event, {

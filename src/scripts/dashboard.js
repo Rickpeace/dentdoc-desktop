@@ -2226,12 +2226,25 @@ async function loadProfiles() {
         </div>
         <ul class="profile-list">
           ${roleProfiles.map(profile => `
-            <li class="profile-item">
-              <div>
-                <div class="profile-name">${profile.name}</div>
+            <li class="profile-item" data-profile-id="${profile.id}">
+              <div class="profile-info">
+                <div class="profile-name" data-name="${profile.name}">${profile.name}</div>
                 <div class="profile-date">${new Date(profile.createdAt).toLocaleDateString('de-DE')}</div>
               </div>
-              <button class="btn-delete" data-profile-id="${profile.id}">Löschen</button>
+              <div class="profile-actions">
+                <button class="btn-edit" data-profile-id="${profile.id}" title="Umbenennen">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                </button>
+                <button class="btn-delete" data-profile-id="${profile.id}" title="Löschen">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                </button>
+              </div>
             </li>
           `).join('')}
         </ul>
@@ -2263,6 +2276,60 @@ async function loadProfiles() {
       } catch (error) {
         profilesShowStatus('Fehler beim Löschen: ' + error.message, 'error');
       }
+    });
+  });
+
+  // Add edit (rename) handlers
+  profileContainer.querySelectorAll('.btn-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.profileId;
+      const item = btn.closest('.profile-item');
+      const nameEl = item.querySelector('.profile-name');
+      const currentName = nameEl.dataset.name;
+
+      // Replace name with input field
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'profile-name-input';
+      input.value = currentName;
+      nameEl.replaceWith(input);
+      input.focus();
+      input.select();
+
+      // Save on Enter or blur
+      const saveEdit = async () => {
+        const newName = input.value.trim();
+        if (newName && newName !== currentName) {
+          try {
+            await ipcRenderer.invoke('rename-voice-profile', { id, newName });
+            profilesShowStatus('Profil umbenannt', 'success');
+            setTimeout(() => {
+              document.getElementById('profilesStatusMessage').innerHTML = '';
+            }, 3000);
+          } catch (error) {
+            profilesShowStatus('Fehler beim Umbenennen: ' + error.message, 'error');
+          }
+        }
+        loadProfiles(); // Refresh list
+      };
+
+      let saved = false;
+      input.addEventListener('blur', () => {
+        if (!saved) {
+          saved = true;
+          saveEdit();
+        }
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saved = true;
+          saveEdit();
+        } else if (e.key === 'Escape') {
+          saved = true;
+          loadProfiles(); // Cancel - just refresh
+        }
+      });
     });
   });
 }

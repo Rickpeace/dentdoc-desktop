@@ -44,11 +44,18 @@ einrichtung stimmprofuil updaten ??? man sieht noch keine vorhanden nach ordenr 
 ------
 cleanup tsten für audio
 ------
-sprecherprofile
-kann man nicht unbennenn
+
+
+app läuft -- nochmal die verknüpgung drücken was passiert ?
 -----
-app läuft -- nochmal die verknüpgung drücken was passiert ? 
------
+
+------------------------
+UPLOAD PROXY: STREAMING STATT BUFFERING (Priorität: Mittel)
+Problem: Railway Upload Proxy hält gesamte Audio-Datei im RAM (~25MB/Upload)
+Lösung: Node.js Streams - chunk-weise durchpipen statt komplett buffern
+Datei: railway-upload-proxy/
+Effekt: RAM ~25MB/Upload → ~64KB/Upload, skaliert besser bei vielen gleichzeitigen Uploads
+------------------------
 
 ------------------------
 DSGVO
