@@ -1007,7 +1007,7 @@ async function loadSettingsView() {
   document.getElementById('settingsAutoCloseCheckbox').checked = settings.autoClose || false;
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
   document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
-  document.getElementById('settingsVadEnabled').checked = settings.vadEnabled !== false;
+  document.getElementById('settingsVadEnabled').checked = true; // VAD always enabled
 
   // iPhone microphone settings
   const microphoneSource = settings.microphoneSource || 'desktop';
@@ -1162,7 +1162,7 @@ function settingsCheckForChanges() {
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
     docMode: document.getElementById('settingsDocModeSelect').value,
     // Note: theme is excluded - it saves immediately on change
-    vadEnabled: document.getElementById('settingsVadEnabled').checked
+    vadEnabled: true // VAD always enabled
   };
 
   settingsHasUnsavedChanges = JSON.stringify(currentSettings) !== JSON.stringify(settingsInitialSettings);
@@ -2091,7 +2091,7 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
     docMode: document.getElementById('settingsDocModeSelect').value,
     // theme: document.getElementById('settingsThemeSelect').value,  // DISABLED: dark mode default
-    vadEnabled: document.getElementById('settingsVadEnabled').checked
+    vadEnabled: true // VAD always enabled
   };
 
   try {
