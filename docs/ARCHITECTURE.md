@@ -1,7 +1,7 @@
 # DentDoc Desktop - Architektur & Dokumentation
 
-> **Letzte Aktualisierung:** Januar 2026
-> **Version:** 1.6.x
+> **Letzte Aktualisierung:** Februar 2026
+> **Version:** 1.6.17
 
 ## Übersicht
 
@@ -25,6 +25,7 @@
 | [audio-recording.md](audio-recording.md) | Aufnahme, VAD, Speaker Recognition |
 | [documentation-flow.md](documentation-flow.md) | Agent V2.1, Transkription → Dokumentation |
 | [data-storage.md](data-storage.md) | electron-store, Dateipfade, Export |
+| [support-chat.md](support-chat.md) | tawk.to Live Chat Integration |
 
 ---
 
@@ -56,7 +57,7 @@
 
 ```
 dentdoc-desktop/
-├── main.js                      # Electron Hauptprozess (~4800 Zeilen)
+├── main.js                      # Electron Hauptprozess (~6300 Zeilen)
 ├── package.json                 # App-Konfiguration
 ├── .env / .env.local            # API URLs
 │
@@ -69,6 +70,7 @@ dentdoc-desktop/
 │   ├── audioRecorderFFmpeg.js   # Mikrofon-Aufnahme mit FFmpeg
 │   ├── audio-converter.js       # WAV-Konvertierung
 │   ├── vad-controller.js        # VAD Steuerung
+│   ├── utterance-profile-modal.js # Stimmprofil-Zuordnung UI
 │   │
 │   ├── speaker-recognition/
 │   │   ├── index.js             # Sherpa-ONNX Integration
@@ -81,13 +83,15 @@ dentdoc-desktop/
 │   │
 │   ├── pipeline/
 │   │   ├── index.js             # VAD Pipeline
-│   │   ├── offlineVad.js        # Offline-VAD für Uploads
-│   │   └── speechRenderer.js    # VAD → Speech-Only Audio
+│   │   ├── offlineVad.js        # Offline-VAD Orchestrierung (Worker + Fallback)
+│   │   ├── offlineVadWorker.js  # VAD Worker Thread (Streaming, kein UI-Freeze)
+│   │   └── speechRenderer.js    # VAD → Speech-Only Audio (Batch FFmpeg)
 │   │
 │   ├── scripts/
 │   │   ├── dashboard.js         # Dashboard UI Logik
 │   │   ├── setup-wizard.js      # Einrichtungsassistent
 │   │   ├── audio-utils.js       # SHARED: Mic-Test, Monitoring, Matching
+│   │   ├── transcript-modal.js  # Transkript-Ansicht/Bearbeitung
 │   │   ├── tooth-chart.js       # Zahnschema
 │   │   └── tooth-shapes.js      # Zahn-Grafiken
 │   │
@@ -121,7 +125,7 @@ dentdoc-desktop/
 │  │ main.js                                                   │   │
 │  │  ├─ State: isRecording, isProcessing, lastDocumentation  │   │
 │  │  ├─ Windows: dashboard, login, statusOverlay             │   │
-│  │  └─ IPC Handlers: ~50 ipcMain.handle/on                  │   │
+│  │  └─ IPC Handlers: ~80+ ipcMain.handle/on                 │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │           │              │              │              │         │
 │  ┌────────┴───┐  ┌───────┴───┐  ┌──────┴────┐  ┌──────┴────┐   │
@@ -155,7 +159,7 @@ dentdoc-desktop/
 │                         BACKEND                                  │
 │  dentdoc.de                                                     │
 │  ├─ /api/transcriptions     - Transkription starten/abrufen     │
-│  ├─ /api/transcriptions/[id]/generate-doc-agent-v2  - Doku      │
+│  ├─ /api/transcriptions/[id]/generate-doc-agent-v2.1  - Doku    │
 │  ├─ /api/auth/*             - Login, Register, Session          │
 │  └─ /api/devices/*          - Geräteverwaltung                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -211,16 +215,17 @@ Details: [main-process.md](main-process.md)
 ```
 1. User drückt F9 (oder Tray-Menü)
 2. startRecording() prüft Subscription
-3. audioRecorderFFmpeg startet FFmpeg-Prozess
+3. audioRecorderFFmpeg startet FFmpeg-Prozess (direkt 16kHz mono)
 4. Status-Overlay zeigt "Aufnahme läuft"
 5. User drückt F9 erneut
 6. stopRecording() beendet FFmpeg
 7. processAudioFile() startet:
-   a. VAD: Stille aus Audio entfernen (lokal)
-   b. Upload zu Backend
-   c. Backend: AssemblyAI Transkription
-   d. Lokal: Sprechererkennung (optional)
-   e. Backend: Agent V2.1 Dokumentation
+   a. VAD: Stille aus Audio entfernen (Worker Thread, Streaming)
+   b. Speech Renderer: Sprach-Segmente extrahieren (FFmpeg filter_complex)
+   c. Upload zu Backend
+   d. Backend: AssemblyAI Transkription
+   e. Lokal: Sprechererkennung (optional)
+   f. Backend: Agent V2.1 Dokumentation
 8. Dokumentation in Zwischenablage
 9. Status-Overlay zeigt Ergebnis
 ```
@@ -272,6 +277,15 @@ VITE_API_URL=http://localhost:3000
 
 ## Changelog
 
+### Version 1.6.17 (Februar 2026)
+- **16kHz Live-Recording:** FFmpeg nimmt direkt mit 16kHz auf, Downsample-Schritt entfällt (~7 Min gespart bei 100+ Min Aufnahmen)
+- **Worker Thread VAD:** Offline-VAD läuft in separatem Thread mit Streaming (~128KB RAM statt 555MB), kein UI-Freeze mehr
+- **FFmpeg Batch-Extraktion:** `filter_complex` statt N einzelne FFmpeg-Spawns für Segment-Extraktion
+- **Fortschrittsbalken:** 5-Phasen-Anzeige im Status-Overlay (Analyse → Upload → Transkription → Sprecher → Dokumentation)
+
+### Version 1.6.16 (Februar 2026)
+- Vorherige Version
+
 ### Version 1.6.0 (Januar 2026)
 - Vereinfachung auf Agent V2.1 (einziger Dokumentations-Modus)
 - Entfernung von Bausteine/Textbausteine System
@@ -288,3 +302,4 @@ VITE_API_URL=http://localhost:3000
 - [audio-recording.md](audio-recording.md) - Audio-Pipeline
 - [documentation-flow.md](documentation-flow.md) - Dokumentations-Generierung
 - [data-storage.md](data-storage.md) - Datenspeicherung
+- [support-chat.md](support-chat.md) - tawk.to Live Chat

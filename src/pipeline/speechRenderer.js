@@ -130,6 +130,8 @@ async function renderSpeechOnly(segments, outputPath) {
 
 /**
  * Extract segments from full recording and concatenate
+ * Uses filter_complex for batch extraction (1 FFmpeg call instead of N)
+ * Falls back to sequential extraction if filter_complex fails
  */
 async function extractAndConcatenate(segments, fullRecordingPath, outputPath) {
   const ffmpegPath = getFFmpegPath();
@@ -147,10 +149,111 @@ async function extractAndConcatenate(segments, fullRecordingPath, outputPath) {
     return;
   }
 
-  // Multiple segments - extract each, then concatenate
-  const tempFiles = [];
-
   console.log(`  [TEMP] Extrahiere ${segments.length} Segmente...`);
+
+  // Try batch extraction with filter_complex
+  try {
+    await extractBatchFilterComplex(segments, fullRecordingPath, outputPath, tempDir);
+    return;
+  } catch (batchErr) {
+    console.warn(`  [TEMP] filter_complex failed (${batchErr.message}), using sequential fallback`);
+  }
+
+  // Fallback: sequential extraction (old method)
+  await extractSequential(segments, fullRecordingPath, outputPath, tempDir);
+}
+
+/**
+ * Batch extract using FFmpeg filter_complex (1 spawn instead of N)
+ * Splits into chunks if command line would exceed Windows limit (~32k chars)
+ */
+async function extractBatchFilterComplex(segments, fullRecordingPath, outputPath, tempDir) {
+  const ffmpegPath = getFFmpegPath();
+  const CMD_LENGTH_LIMIT = 28000; // Windows ~32k, use 28k with safety margin
+
+  // Build filter_complex for a batch of segments
+  function buildFilterArgs(segs, inputPath, outPath) {
+    const trimFilters = segs.map((seg, i) => {
+      const start = seg.startMs / 1000;
+      const end = seg.endMs / 1000;
+      return `[0:a]atrim=${start.toFixed(3)}:${end.toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`;
+    }).join(';');
+
+    const concatInput = segs.map((_, i) => `[a${i}]`).join('');
+    const filterComplex = `${trimFilters};${concatInput}concat=n=${segs.length}:v=0:a=1[out]`;
+
+    return [
+      '-i', inputPath,
+      '-filter_complex', filterComplex,
+      '-map', '[out]',
+      '-acodec', 'pcm_s16le',
+      '-y',
+      outPath
+    ];
+  }
+
+  // Check if all segments fit in one command
+  const testArgs = buildFilterArgs(segments, fullRecordingPath, outputPath);
+  const cmdLength = ['ffmpeg', ...testArgs].join(' ').length;
+
+  if (cmdLength <= CMD_LENGTH_LIMIT) {
+    // All segments fit in one command
+    console.log(`  [BATCH] Single pass (${segments.length} segments, cmd: ${cmdLength} chars)`);
+    await runFFmpeg(ffmpegPath, testArgs);
+    return;
+  }
+
+  // Need chunking - split segments into groups that fit command length
+  console.log(`  [BATCH] Command too long (${cmdLength} chars), chunking...`);
+
+  const chunkFiles = [];
+  let chunkStart = 0;
+
+  while (chunkStart < segments.length) {
+    // Binary search for max chunk size that fits
+    let chunkEnd = Math.min(chunkStart + 100, segments.length); // Start with 100
+
+    while (chunkEnd > chunkStart + 1) {
+      const testSegs = segments.slice(chunkStart, chunkEnd);
+      const testA = buildFilterArgs(testSegs, fullRecordingPath, 'test.wav');
+      const testLen = ['ffmpeg', ...testA].join(' ').length;
+
+      if (testLen <= CMD_LENGTH_LIMIT) break;
+      chunkEnd = Math.floor(chunkStart + (chunkEnd - chunkStart) * 0.7);
+    }
+
+    // At minimum process 2 segments per chunk
+    if (chunkEnd <= chunkStart) chunkEnd = chunkStart + 2;
+    if (chunkEnd > segments.length) chunkEnd = segments.length;
+
+    const chunkSegs = segments.slice(chunkStart, chunkEnd);
+    const chunkPath = path.join(tempDir, `batch_chunk_${Date.now()}_${chunkFiles.length}.wav`);
+    const chunkArgs = buildFilterArgs(chunkSegs, fullRecordingPath, chunkPath);
+
+    console.log(`  [BATCH] Chunk ${chunkFiles.length + 1}: segments ${chunkStart}-${chunkEnd - 1}`);
+    await runFFmpeg(ffmpegPath, chunkArgs);
+    chunkFiles.push(chunkPath);
+
+    chunkStart = chunkEnd;
+  }
+
+  // Concatenate chunk files
+  if (chunkFiles.length === 1) {
+    fs.renameSync(chunkFiles[0], outputPath);
+  } else {
+    await concatenateFiles(chunkFiles, outputPath);
+    // Clean up chunk files
+    for (const f of chunkFiles) {
+      try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {}
+    }
+  }
+}
+
+/**
+ * Sequential extraction fallback (old method)
+ */
+async function extractSequential(segments, fullRecordingPath, outputPath, tempDir) {
+  const tempFiles = [];
 
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
@@ -161,10 +264,8 @@ async function extractAndConcatenate(segments, fullRecordingPath, outputPath) {
     tempFiles.push(tempFile);
   }
 
-  // Concatenate all temp files
   await concatenateFiles(tempFiles, outputPath);
 
-  // Clean up temp files
   let cleanedCount = 0;
   for (const f of tempFiles) {
     try {
@@ -172,11 +273,33 @@ async function extractAndConcatenate(segments, fullRecordingPath, outputPath) {
         fs.unlinkSync(f);
         cleanedCount++;
       }
-    } catch (e) {
-      // Ignore cleanup errors
-    }
+    } catch (e) {}
   }
   console.log(`  [TEMP] Geloescht: ${cleanedCount} Segment-Dateien`);
+}
+
+/**
+ * Run FFmpeg with given args and return promise
+ */
+function runFFmpeg(ffmpegPath, args) {
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn(ffmpegPath, args);
+    let stderr = '';
+
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`FFmpeg failed (code ${code}): ${stderr.slice(-300)}`));
+      }
+    });
+
+    ffmpeg.on('error', reject);
+  });
 }
 
 /**

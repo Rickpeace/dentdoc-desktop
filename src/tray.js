@@ -151,7 +151,12 @@ function buildTrayMenu() {
 
   // Build status label for trial/subscription (matching web app)
   let statusLabel;
-  if (hasActiveSubscription) {
+  if (hasActiveSubscription && user?.cancelAtPeriodEnd) {
+    const endDate = user?.currentPeriodEnd
+      ? new Date(user.currentPeriodEnd).toLocaleDateString('de-DE')
+      : '';
+    statusLabel = `⚠️ Abo gekündigt (bis ${endDate})`;
+  } else if (hasActiveSubscription) {
     statusLabel = `✓ DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`;
   } else if (isRealTrial) {
     statusLabel = `Testphase: ${minutesRemaining} Min übrig`;

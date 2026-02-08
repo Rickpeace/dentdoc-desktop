@@ -99,7 +99,7 @@ async function refreshUserData() {
       if (callbacks.updateTrayMenu) callbacks.updateTrayMenu();
     }
   } catch (e) {
-    console.log('Could not refresh user data:', e.message);
+    console.error('[Session] Could not refresh user data:', e.message);
   }
 }
 

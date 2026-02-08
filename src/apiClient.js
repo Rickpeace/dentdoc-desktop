@@ -100,6 +100,7 @@ async function login(email, password, store) {
     return response.data;
   } catch (error) {
     const errorData = error.response?.data;
+    console.error('[Login] Fehler:', error.response?.status, errorData || error.message);
 
     // Handle max devices reached error
     if (errorData?.error === 'max_devices_reached') {

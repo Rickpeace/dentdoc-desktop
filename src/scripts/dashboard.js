@@ -164,6 +164,9 @@ async function loadHomeStats() {
     // Load onboarding card
     await loadOnboardingCard(shortcut || 'F9');
 
+    // Load upgrade banner for trial/free users
+    await loadUpgradeBanner();
+
     // Load iPhone dashboard section if iPhone is selected
     await loadIphoneDashboardSection(shortcut || 'F9');
 
@@ -258,6 +261,7 @@ ipcRenderer.on('recording-completed', async () => {
   console.log('Recording completed, refreshing dashboard...');
   await loadHomeStats();
   await loadSubscriptionStatus(); // Refresh trial minutes in sidebar
+  await loadUpgradeTopBar(); // Refresh top bar (trial minutes may have changed)
 });
 
 // ===== F9 Recording Audio Monitoring =====
@@ -671,6 +675,8 @@ function stopVADIntegration() {
 ipcRenderer.on('refresh-subscription-status', async () => {
   console.log('Window focused, refreshing subscription status...');
   await loadSubscriptionStatus();
+  await loadUpgradeTopBar();
+  await loadUpgradeBanner();
 });
 
 // Listen for view switch requests from main process
@@ -747,6 +753,127 @@ async function loadSubscriptionStatus() {
 
 // Load subscription status on init
 loadSubscriptionStatus();
+
+// ===== Upgrade Top Bar (all views) =====
+async function loadUpgradeTopBar() {
+  try {
+    const status = await ipcRenderer.invoke('get-subscription-status');
+    const topBar = document.getElementById('upgradeTopBar');
+    if (!topBar) return;
+
+    // Hide for active paid subscribers
+    if (status.type === 'success') {
+      topBar.style.display = 'none';
+      return;
+    }
+
+    topBar.style.display = 'block';
+    topBar.classList.remove('upgrade-top-bar-expired', 'upgrade-top-bar-inactive');
+
+    const textEl = document.getElementById('upgradeTopBarText');
+    const linkEl = document.getElementById('upgradeTopBarLink');
+
+    if (status.type === 'trial') {
+      textEl.textContent = status.label.replace('Testphase:', 'Testphase:').replace('Min', 'Min verbleibend');
+      linkEl.textContent = 'Jetzt upgraden \u2192';
+    } else {
+      const isExpiredTrial = status.label.includes('TESTPHASE') || status.label.includes('Testphase beendet');
+      if (isExpiredTrial) {
+        topBar.classList.add('upgrade-top-bar-expired');
+        textEl.textContent = 'Ihre kostenlosen Testminuten sind aufgebraucht';
+        linkEl.textContent = 'Jetzt Abo aktivieren \u2192';
+      } else {
+        topBar.classList.add('upgrade-top-bar-inactive');
+        textEl.textContent = 'Kein aktives Abonnement';
+        linkEl.textContent = 'Jetzt abonnieren \u2192';
+      }
+    }
+  } catch (error) {
+    console.error('Error loading upgrade top bar:', error);
+  }
+}
+
+// ===== Upgrade Banner Card (Übersicht) =====
+async function loadUpgradeBanner() {
+  try {
+    const status = await ipcRenderer.invoke('get-subscription-status');
+    const banner = document.getElementById('upgradeBanner');
+    if (!banner) return;
+
+    // Hide for active paid subscribers
+    if (status.type === 'success') {
+      banner.style.display = 'none';
+      return;
+    }
+
+    banner.style.display = 'block';
+    banner.classList.remove('upgrade-expired', 'upgrade-inactive');
+
+    const title = document.getElementById('upgradeBannerTitle');
+    const subtitle = document.getElementById('upgradeBannerSubtitle');
+    const progressSection = document.getElementById('upgradeBannerProgress');
+    const progressFill = document.getElementById('upgradeBannerProgressFill');
+    const progressText = document.getElementById('upgradeBannerProgressText');
+    const btnText = document.getElementById('upgradeBannerBtnText');
+
+    if (status.type === 'trial') {
+      title.textContent = 'Testphase aktiv';
+      subtitle.textContent = status.label;
+      btnText.textContent = 'Jetzt DentDoc Pro holen';
+      progressSection.style.display = 'block';
+
+      const minutesMatch = status.label.match(/(\d+)/);
+      const minutesRemaining = minutesMatch ? parseInt(minutesMatch[1]) : 0;
+      const totalMinutes = 60;
+      const usedMinutes = totalMinutes - minutesRemaining;
+      const percentUsed = Math.min(100, (usedMinutes / totalMinutes) * 100);
+
+      progressFill.style.width = percentUsed + '%';
+      progressText.textContent = `${usedMinutes} / ${totalMinutes} Min verbraucht`;
+
+      if (minutesRemaining <= 10) {
+        progressFill.classList.add('urgent');
+      } else {
+        progressFill.classList.remove('urgent');
+      }
+    } else {
+      progressSection.style.display = 'none';
+      const isExpiredTrial = status.label.includes('TESTPHASE') || status.label.includes('Testphase beendet');
+
+      if (isExpiredTrial) {
+        banner.classList.add('upgrade-expired');
+        title.textContent = 'Testphase beendet';
+        subtitle.textContent = 'Ihre kostenlosen 60 Minuten sind aufgebraucht';
+        btnText.textContent = 'Jetzt Abo aktivieren';
+      } else {
+        banner.classList.add('upgrade-inactive');
+        title.textContent = 'Kein aktives Abonnement';
+        subtitle.textContent = 'Ihr DentDoc Pro Abo ist nicht mehr aktiv';
+        btnText.textContent = 'Abo reaktivieren';
+      }
+    }
+  } catch (error) {
+    console.error('Error loading upgrade banner:', error);
+  }
+}
+
+// Upgrade top bar & banner click handlers
+async function openSubscriptionPage() {
+  const baseUrl = await ipcRenderer.invoke('get-base-url');
+  await ipcRenderer.invoke('open-external-url', baseUrl + '/dashboard/subscription');
+}
+
+document.getElementById('upgradeTopBarLink')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  openSubscriptionPage();
+});
+
+document.getElementById('upgradeBannerBtn')?.addEventListener('click', () => {
+  openSubscriptionPage();
+});
+
+// Load upgrade top bar on init (applies to all views)
+loadUpgradeTopBar();
 
 // ===== Sidebar Links =====
 async function initSidebarLinks() {
@@ -2354,6 +2481,7 @@ document.getElementById('profilesCancelBtn').addEventListener('click', async () 
 });
 
 async function profilesStartAudioMonitoring() {
+  profilesStopAudioMonitoring(); // Clean up previous AudioContext if still open
   try {
     // Use selected microphone from settings (like setup wizard does)
     const settings = await ipcRenderer.invoke('get-settings');

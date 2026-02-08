@@ -142,6 +142,21 @@
 
     <!-- Main Content Area -->
     <main class="main-content" id="mainContent">
+      <!-- Upgrade Top Bar - shown for trial/expired users across all views -->
+      <div class="upgrade-top-bar" id="upgradeTopBar" style="display: none;">
+        <div class="upgrade-top-bar-content">
+          <span class="upgrade-top-bar-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </span>
+          <span class="upgrade-top-bar-text" id="upgradeTopBarText">Testphase: 60 Min verbleibend</span>
+          <a href="#" class="upgrade-top-bar-link" id="upgradeTopBarLink">Jetzt upgraden &rarr;</a>
+        </div>
+      </div>
+
+      <div class="views-wrapper">
       <!-- Support FAB Button -->
       <button class="support-fab" id="supportBtn" title="Support Chat">
         <svg class="icon-chat" viewBox="0 0 24 24" fill="currentColor">
@@ -236,6 +251,55 @@
               </svg>
               Verstanden!
             </button>
+          </div>
+        </div>
+
+        <!-- Upgrade Banner Card - shown for trial/expired users on Übersicht -->
+        <div class="upgrade-banner" id="upgradeBanner" style="display: none;">
+          <div class="upgrade-banner-header" id="upgradeBannerHeader">
+            <div class="upgrade-banner-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </div>
+            <div class="upgrade-banner-title">
+              <h3 id="upgradeBannerTitle">Testphase aktiv</h3>
+              <p id="upgradeBannerSubtitle">60 Minuten verbleibend</p>
+            </div>
+          </div>
+          <div class="upgrade-banner-content">
+            <div class="upgrade-banner-progress" id="upgradeBannerProgress">
+              <div class="upgrade-progress-bar">
+                <div class="upgrade-progress-fill" id="upgradeBannerProgressFill"></div>
+              </div>
+              <span class="upgrade-progress-text" id="upgradeBannerProgressText">0 / 60 Min verbraucht</span>
+            </div>
+            <div class="upgrade-banner-features">
+              <div class="upgrade-feature">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Unbegrenzte Behandlungen</span>
+              </div>
+              <div class="upgrade-feature">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Sprechererkennung (Arzt, ZFA, Patient)</span>
+              </div>
+              <div class="upgrade-feature">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Alle Updates &amp; E-Mail Support</span>
+              </div>
+            </div>
+            <div class="upgrade-banner-cta">
+              <button class="btn btn-primary upgrade-banner-btn" id="upgradeBannerBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                  <polyline points="15 3 21 3 21 9"/>
+                  <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                <span id="upgradeBannerBtnText">Jetzt DentDoc Pro holen</span>
+              </button>
+              <p class="upgrade-banner-price">Ab 49 &euro; / Monat pro Arbeitsplatz, zzgl. MwSt. &middot; Monatlich k&uuml;ndbar</p>
+            </div>
           </div>
         </div>
 
@@ -1387,6 +1451,7 @@
           </div>
         </div>
       </div>
+      </div><!-- .views-wrapper -->
 
     </main>
   </div>

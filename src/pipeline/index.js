@@ -135,9 +135,22 @@ async function processFileWithVAD(audioPath, options = {}) {
   return { wavPath, speechMap, segments };
 }
 
+/**
+ * Cancel active VAD processing (worker thread)
+ */
+function cancelVAD() {
+  try {
+    const offlineVad = require('./offlineVad');
+    offlineVad.cancelVAD();
+  } catch (e) {
+    console.warn('[Pipeline] cancelVAD error:', e.message);
+  }
+}
+
 module.exports = {
   renderSpeechOnlyFromSegments,
   runOfflineVAD,
+  cancelVAD,
   processFileWithVAD,
   speechRenderer
 };

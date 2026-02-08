@@ -1,80 +1,199 @@
 /**
  * Offline VAD for uploaded files
  *
- * Processes a complete audio file and extracts speech segments.
+ * Uses a Worker Thread for VAD processing to prevent main process freeze.
+ * Falls back to synchronous main-thread processing if Worker fails.
+ *
  * Uses Sherpa-ONNX Silero VAD (same as live VAD).
  */
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { Worker } = require('worker_threads');
 const { app } = require('electron');
 
 // Configuration for OFFLINE VAD
 const CONFIG = {
   sampleRate: 16000,
-  // Speech detection timing
-  speechStartMs: 64,       // 64ms speech to start (= 1 frame bei 64ms frameMs)
-  speechStopMs: 800,       // 800ms silence to end segment (war 600 - mehr Toleranz)
-  // Padding around speech - KRITISCH für erste Buchstaben!
-  preRollMs: 1200,         // 1200ms before speech (war 800 - noch mehr Puffer für erste Buchstaben)
-  postRollMs: 500,         // 500ms after speech (war 400)
-  frameMs: 64,             // 64ms frames for offline (war 20ms - viel schneller auf alten PCs)
-  // Silero VAD parameters - weniger streng für bessere Erkennung
-  sileroThreshold: 0.25,   // War 0.4 - noch sensitiver damit weniger weggeschnitten wird
-  minSpeechDuration: 0.1,  // War 0.15 - kürzere Sprache erkennen
+  speechStartMs: 64,
+  speechStopMs: 800,
+  preRollMs: 1200,
+  postRollMs: 500,
+  frameMs: 64,
+  sileroThreshold: 0.25,
+  minSpeechDuration: 0.1,
   maxSpeechDuration: 300,
-  // Minimum speech segment duration (ms)
-  minSegmentMs: 300,       // War 400 - kürzere Segmente behalten
-  // Merge gap (ms) - segments closer than this will be merged
-  mergeGapMs: 400          // War 300 - mehr zusammenführen
+  minSegmentMs: 300,
+  mergeGapMs: 400
 };
 
 let sherpa = null;
 
-// Minimal logging - only important results
-const LOG_PREFIX = '[VAD]';
+// Track active worker for cancel support
+let activeWorker = null;
 
 /**
- * Get FFmpeg path (handle ASAR unpacking)
+ * Resolve the Sherpa-ONNX native addon path
+ * @returns {string|null} Addon path for packaged app, null for development
  */
-function getFFmpegPath() {
-  const bundledPath = path.join(__dirname, '..', '..', 'bin', 'ffmpeg.exe');
-  const bundledPathPacked = app.isPackaged
-    ? path.join(process.resourcesPath, 'bin', 'ffmpeg.exe')
-    : bundledPath;
+function resolveAddonPath() {
+  if (!app.isPackaged) return null;
 
-  if (fs.existsSync(bundledPathPacked)) {
-    return bundledPathPacked;
-  }
-  if (fs.existsSync(bundledPath)) {
-    return bundledPath;
-  }
+  const addonPath = path.join(
+    process.resourcesPath, 'app.asar.unpacked', 'node_modules',
+    'sherpa-onnx-win-x64', 'sherpa-onnx.node'
+  );
 
-  // Fallback to ffmpeg-static (handle ASAR unpacking)
-  const ffmpegStaticPath = require('ffmpeg-static');
-
-  // If we're in an ASAR archive, replace path with unpacked version
-  if (app.isPackaged && ffmpegStaticPath.includes('app.asar')) {
-    return ffmpegStaticPath.replace('app.asar', 'app.asar.unpacked');
+  if (fs.existsSync(addonPath)) {
+    return addonPath;
   }
 
-  return ffmpegStaticPath;
+  console.warn('[VAD] Addon not found at:', addonPath);
+  return null;
 }
 
 /**
- * Get model directory path
+ * Resolve the VAD model path
+ * @returns {string} Path to silero_vad.onnx
  */
-function getModelDir() {
-  // In packaged app, models are in app.asar.unpacked
+function resolveModelPath() {
   const possiblePaths = [];
 
-  // For packaged app: use resourcesPath
   if (app.isPackaged) {
     possiblePaths.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'models'));
   }
 
-  // Development paths
+  possiblePaths.push(
+    path.join(__dirname, '..', '..', 'models'),
+    path.join(process.cwd(), 'models'),
+    path.join(__dirname, '..', '..', '..', 'app.asar.unpacked', 'models')
+  );
+
+  for (const p of possiblePaths) {
+    const modelPath = path.join(p, 'silero_vad.onnx');
+    if (fs.existsSync(modelPath)) {
+      return modelPath;
+    }
+  }
+
+  // Return default path even if it doesn't exist (will error in worker)
+  return path.join(__dirname, '..', '..', 'models', 'silero_vad.onnx');
+}
+
+/**
+ * Run offline VAD using Worker Thread (non-blocking)
+ */
+async function runOfflineVAD_Worker(wavPath, onProgress) {
+  const addonPath = resolveAddonPath();
+  const modelPath = resolveModelPath();
+
+  console.log('[VAD] Using Worker Thread for processing');
+  console.log('[VAD] addonPath:', addonPath || '(development mode)');
+  console.log('[VAD] modelPath:', modelPath);
+
+  return new Promise((resolve, reject) => {
+    const workerPath = path.join(__dirname, 'offlineVadWorker.js');
+    const worker = new Worker(workerPath, {
+      workerData: { addonPath, modelPath }
+    });
+
+    activeWorker = worker;
+    let settled = false;
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      activeWorker = null;
+    };
+
+    worker.on('message', (msg) => {
+      switch (msg.type) {
+        case 'progress':
+          onProgress({ stage: 'vad', percent: msg.percent, message: msg.message });
+          break;
+
+        case 'result': {
+          settle();
+          const { segments, stats } = msg;
+
+          // Log VAD results (same format as before)
+          const fileSizeBytes = fs.statSync(wavPath).size;
+          const fileSizeMB = (fileSizeBytes / (1024 * 1024)).toFixed(2);
+          const originalDuration = (stats.durationMs / 1000).toFixed(1);
+          const speechDuration = (stats.speechDurationMs / 1000).toFixed(1);
+          const estimatedSpeechSizeMB = (fileSizeBytes * (stats.speechDurationMs / stats.durationMs) / (1024 * 1024)).toFixed(2);
+
+          console.log('');
+          console.log('///// VAD ANALYSE /////');
+          console.log(`  Original:  ${originalDuration}s (${fileSizeMB} MB)`);
+          console.log(`  Sprache:   ${speechDuration}s (~${estimatedSpeechSizeMB} MB)`);
+          console.log(`  Entfernt:  ${stats.silencePercent}% Stille`);
+          console.log(`  Segmente:  ${stats.segmentCount}`);
+          console.log(`  Padding:   ${CONFIG.preRollMs}ms vor | ${CONFIG.postRollMs}ms nach`);
+          console.log(`  Modus:     Worker Thread (streaming)`);
+          console.log('///////////////////////');
+          console.log('');
+
+          onProgress({ stage: 'vad', percent: 20, message: `${stats.segmentCount} Sprachsegmente gefunden` });
+
+          // Terminate worker after result
+          worker.terminate();
+          resolve(segments);
+          break;
+        }
+
+        case 'error':
+          settle();
+          worker.terminate();
+          reject(new Error(msg.message));
+          break;
+      }
+    });
+
+    worker.on('error', (err) => {
+      settle();
+      reject(err);
+    });
+
+    worker.on('exit', (code) => {
+      if (!settled) {
+        settle();
+        reject(new Error(`Worker exited unexpectedly with code ${code}`));
+      }
+    });
+
+    // Start processing
+    worker.postMessage({ type: 'process', wavPath });
+  });
+}
+
+/**
+ * Cancel active VAD processing
+ */
+function cancelVAD() {
+  if (activeWorker) {
+    console.log('[VAD] Cancelling active worker...');
+    activeWorker.postMessage({ type: 'cancel' });
+    // Hard kill after 3s if worker doesn't respond
+    const workerRef = activeWorker;
+    setTimeout(() => {
+      try { workerRef.terminate(); } catch (e) {}
+    }, 3000);
+    activeWorker = null;
+  }
+}
+
+// ============================================================================
+// FALLBACK: Main-thread processing (used if Worker fails)
+// ============================================================================
+
+function getModelDir() {
+  const possiblePaths = [];
+
+  if (app.isPackaged) {
+    possiblePaths.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'models'));
+  }
+
   possiblePaths.push(
     path.join(__dirname, '..', '..', 'models'),
     path.join(process.cwd(), 'models'),
@@ -96,17 +215,11 @@ function getModelDir() {
   return defaultPath;
 }
 
-/**
- * Read WAV file and return raw PCM samples
- * Assumes 16kHz mono 16-bit PCM
- */
 function readWavSamples(wavPath) {
   const buffer = fs.readFileSync(wavPath);
 
-  // Find data chunk
-  let dataOffset = 44; // Standard WAV header
+  let dataOffset = 44;
 
-  // Verify WAV header
   const riff = buffer.toString('ascii', 0, 4);
   const wave = buffer.toString('ascii', 8, 12);
 
@@ -114,15 +227,13 @@ function readWavSamples(wavPath) {
     throw new Error('Invalid WAV file format');
   }
 
-  // Find 'data' chunk (may not be at offset 44 if there are extra chunks)
   for (let i = 12; i < buffer.length - 8; i++) {
     if (buffer.toString('ascii', i, i + 4) === 'data') {
-      dataOffset = i + 8; // Skip 'data' + size (4 bytes each)
+      dataOffset = i + 8;
       break;
     }
   }
 
-  // Read 16-bit samples and convert to float32
   const numSamples = Math.floor((buffer.length - dataOffset) / 2);
   const samples = new Float32Array(numSamples);
 
@@ -134,97 +245,49 @@ function readWavSamples(wavPath) {
   return samples;
 }
 
-/**
- * Initialize Sherpa-ONNX VAD
- */
 function initializeVAD() {
-  if (sherpa) {
-    return sherpa;
-  }
+  if (sherpa) return sherpa;
 
   try {
-    console.log('[VAD] Loading sherpa-onnx-node...');
-    console.log('[VAD] app.isPackaged:', app.isPackaged);
-
-    // In packaged app, we need to load from the unpacked location
     if (app.isPackaged) {
       const unpackedPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules');
-      console.log('[VAD] Unpacked node_modules path:', unpackedPath);
-
-      // Load the native addon from unpacked location
       const addonPath = path.join(unpackedPath, 'sherpa-onnx-win-x64', 'sherpa-onnx.node');
-      console.log('[VAD] Loading native addon from:', addonPath);
 
       if (!fs.existsSync(addonPath)) {
         throw new Error(`Native addon not found at: ${addonPath}`);
       }
 
-      // Load the native addon
       const addon = require(addonPath);
 
-      // Create Vad class wrapper (same as sherpa-onnx-node/vad.js but using our addon)
       class Vad {
         constructor(config, bufferSizeInSeconds) {
           this.handle = addon.createVoiceActivityDetector(config, bufferSizeInSeconds);
           this.config = config;
         }
-
-        acceptWaveform(samples) {
-          addon.voiceActivityDetectorAcceptWaveform(this.handle, samples);
-        }
-
-        isEmpty() {
-          return addon.voiceActivityDetectorIsEmpty(this.handle);
-        }
-
-        isDetected() {
-          return addon.voiceActivityDetectorIsDetected(this.handle);
-        }
-
-        pop() {
-          addon.voiceActivityDetectorPop(this.handle);
-        }
-
-        clear() {
-          addon.voiceActivityDetectorClear(this.handle);
-        }
-
-        front(enableExternalBuffer = true) {
-          return addon.voiceActivityDetectorFront(this.handle, enableExternalBuffer);
-        }
-
-        reset() {
-          addon.voiceActivityDetectorReset(this.handle);
-        }
-
-        flush() {
-          addon.voiceActivityDetectorFlush(this.handle);
-        }
+        acceptWaveform(samples) { addon.voiceActivityDetectorAcceptWaveform(this.handle, samples); }
+        isEmpty() { return addon.voiceActivityDetectorIsEmpty(this.handle); }
+        isDetected() { return addon.voiceActivityDetectorIsDetected(this.handle); }
+        pop() { addon.voiceActivityDetectorPop(this.handle); }
+        clear() { addon.voiceActivityDetectorClear(this.handle); }
+        front(enableExternalBuffer = true) { return addon.voiceActivityDetectorFront(this.handle, enableExternalBuffer); }
+        reset() { addon.voiceActivityDetectorReset(this.handle); }
+        flush() { addon.voiceActivityDetectorFlush(this.handle); }
       }
 
       sherpa = { Vad };
-      console.log('[VAD] sherpa-onnx-node loaded from unpacked location');
     } else {
       sherpa = require('sherpa-onnx-node');
-      console.log('[VAD] sherpa-onnx-node loaded from node_modules');
     }
 
     return sherpa;
   } catch (err) {
-    console.error('[VAD] Failed to load sherpa-onnx-node:', err.message);
-    console.error('[VAD] Stack:', err.stack);
     throw new Error(`VAD initialization failed: ${err.message}`);
   }
 }
 
-/**
- * Create VAD instance
- */
 function createVAD() {
   console.log('[VAD] Creating VAD instance...');
-
   const sherpaLib = initializeVAD();
-
   const modelDir = getModelDir();
   const modelPath = path.join(modelDir, 'silero_vad.onnx');
 
@@ -233,7 +296,7 @@ function createVAD() {
   console.log('[VAD] Model exists:', fs.existsSync(modelPath));
 
   if (!fs.existsSync(modelPath)) {
-    throw new Error('Silero VAD model not found. Please run the app once to download it.');
+    throw new Error('Silero VAD model not found.');
   }
 
   const vadConfig = {
@@ -242,30 +305,20 @@ function createVAD() {
       threshold: CONFIG.sileroThreshold,
       minSpeechDuration: CONFIG.minSpeechDuration,
       maxSpeechDuration: CONFIG.maxSpeechDuration,
-      minSilenceDuration: 0.3  // Strenger: 300ms Stille = Ende (war 0.5)
+      minSilenceDuration: 0.3
     },
     sampleRate: CONFIG.sampleRate,
     bufferSizeInSeconds: 60,
     debug: false
   };
 
-  try {
-    // bufferSizeInSeconds = 60 (nicht sampleRate!)
-    const vad = new sherpaLib.Vad(vadConfig, 60);
-    console.log('[VAD] VAD instance created successfully');
-    return vad;
-  } catch (err) {
-    console.error('[VAD] Failed to create VAD instance:', err.message);
-    console.error('[VAD] Stack:', err.stack);
-    throw err;
-  }
+  const vad = new sherpaLib.Vad(vadConfig, 60);
+  console.log('[VAD] VAD instance created successfully');
+  return vad;
 }
 
-/**
- * Process audio samples and detect speech segments
- */
 function detectSpeechSegments(samples, vad) {
-  const frameSize = Math.floor(CONFIG.sampleRate * CONFIG.frameMs / 1000); // 320 samples for 20ms
+  const frameSize = Math.floor(CONFIG.sampleRate * CONFIG.frameMs / 1000);
   const markers = [];
 
   let isSpeech = false;
@@ -273,10 +326,7 @@ function detectSpeechSegments(samples, vad) {
   let silenceFrameCount = 0;
   let currentSpeechStart = null;
 
-  // Math.ceil damit der letzte Teil-Frame nicht verloren geht
   const totalFrames = Math.ceil(samples.length / frameSize);
-
-  // Pre-allocate buffer ONCE instead of every frame (major performance boost)
   const safeSamples = new Float32Array(frameSize);
 
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
@@ -284,25 +334,20 @@ function detectSpeechSegments(samples, vad) {
     const end = Math.min(start + frameSize, samples.length);
     const frameSamples = samples.subarray(start, end);
 
-    // Zero-fill für letzten Frame falls kürzer als frameSize
     if (frameSamples.length < frameSize) {
       safeSamples.fill(0);
     }
 
-    // TypedArray.set() ist viel schneller als JS for-loop
     safeSamples.set(frameSamples);
 
     vad.acceptWaveform(safeSamples);
     const detected = vad.isDetected();
 
-    // Update counters
     if (detected) {
       speechFrameCount++;
       silenceFrameCount = 0;
     } else {
       silenceFrameCount++;
-      // Wichtig: speechFrameCount zurücksetzen wenn noch nicht in Speech-Mode
-      // Sonst summieren sich zufällige Einzeldetektionen zu falschem Speech-Start
       if (!isSpeech) speechFrameCount = 0;
     }
 
@@ -310,14 +355,12 @@ function detectSpeechSegments(samples, vad) {
     const speechMs = speechFrameCount * CONFIG.frameMs;
     const silenceMs = silenceFrameCount * CONFIG.frameMs;
 
-    // Speech start
     if (!isSpeech && speechMs >= CONFIG.speechStartMs) {
       isSpeech = true;
       silenceFrameCount = 0;
       currentSpeechStart = Math.max(0, currentTimeMs - CONFIG.preRollMs);
     }
 
-    // Speech end
     if (isSpeech && silenceMs >= CONFIG.speechStopMs) {
       isSpeech = false;
       speechFrameCount = 0;
@@ -325,36 +368,24 @@ function detectSpeechSegments(samples, vad) {
       const speechEnd = currentTimeMs + CONFIG.postRollMs;
 
       if (currentSpeechStart !== null) {
-        markers.push({
-          startMs: currentSpeechStart,
-          endMs: speechEnd
-        });
+        markers.push({ startMs: currentSpeechStart, endMs: speechEnd });
       }
 
       currentSpeechStart = null;
     }
   }
 
-  // Close any open speech segment
   if (isSpeech && currentSpeechStart !== null) {
     const endMs = (samples.length / CONFIG.sampleRate) * 1000;
-    markers.push({
-      startMs: currentSpeechStart,
-      endMs: endMs
-    });
+    markers.push({ startMs: currentSpeechStart, endMs: endMs });
   }
 
   return markers;
 }
 
-/**
- * Filter and merge markers
- */
 function processMarkers(markers, durationMs) {
-  // Filter short segments
   let filtered = markers.filter(m => (m.endMs - m.startMs) >= CONFIG.minSegmentMs);
 
-  // Merge close segments
   if (filtered.length <= 1) return filtered;
 
   const sorted = [...filtered].sort((a, b) => a.startMs - b.startMs);
@@ -371,53 +402,34 @@ function processMarkers(markers, durationMs) {
     }
   }
 
-  // Clamp to duration
   return merged.map(m => ({
     startMs: Math.max(0, m.startMs),
     endMs: Math.min(durationMs, m.endMs)
   }));
 }
 
-/**
- * Run offline VAD on a WAV file
- *
- * @param {string} wavPath - Path to 16kHz mono WAV file
- * @param {Function} onProgress - Progress callback
- * @returns {Promise<Array>} Array of segments with startMs, endMs
- */
-async function runOfflineVAD(wavPath, onProgress = () => {}) {
-  onProgress({ stage: 'vad', percent: 5, message: 'Loading audio...' });
+async function runOfflineVAD_Fallback(wavPath, onProgress) {
+  console.warn('[VAD] Using FALLBACK (main thread) - UI may freeze for large files');
 
-  // Read samples
+  onProgress({ stage: 'vad', percent: 5, message: 'Loading audio...' });
   const samples = readWavSamples(wavPath);
   const durationMs = (samples.length / CONFIG.sampleRate) * 1000;
 
   onProgress({ stage: 'vad', percent: 10, message: 'Initializing VAD...' });
-
-  // Create VAD
   const vad = createVAD();
 
   onProgress({ stage: 'vad', percent: 15, message: 'Detecting speech...' });
-
-  // Detect speech
   const rawMarkers = detectSpeechSegments(samples, vad);
-
-  // Process markers
   const processedMarkers = processMarkers(rawMarkers, durationMs);
 
-  // Calculate speech vs silence
   const totalSpeechMs = processedMarkers.reduce((sum, m) => sum + (m.endMs - m.startMs), 0);
   const silencePercent = ((1 - totalSpeechMs / durationMs) * 100).toFixed(1);
 
-  // Get file size for logging
   const fileSizeBytes = fs.statSync(wavPath).size;
   const fileSizeMB = (fileSizeBytes / (1024 * 1024)).toFixed(2);
-
-  // Estimate speech-only file size (proportional to speech duration)
   const speechRatio = totalSpeechMs / durationMs;
   const estimatedSpeechSizeMB = (fileSizeBytes * speechRatio / (1024 * 1024)).toFixed(2);
 
-  // Nice formatted log
   const originalDuration = (durationMs / 1000).toFixed(1);
   const speechDuration = (totalSpeechMs / 1000).toFixed(1);
   console.log('');
@@ -427,12 +439,12 @@ async function runOfflineVAD(wavPath, onProgress = () => {}) {
   console.log(`  Entfernt:  ${silencePercent}% Stille`);
   console.log(`  Segmente:  ${processedMarkers.length}`);
   console.log(`  Padding:   ${CONFIG.preRollMs}ms vor | ${CONFIG.postRollMs}ms nach`);
+  console.log(`  Modus:     Main Thread (FALLBACK)`);
   console.log('///////////////////////');
   console.log('');
 
   onProgress({ stage: 'vad', percent: 20, message: `${processedMarkers.length} speech segments found` });
 
-  // Convert to segment format expected by pipeline
   const segments = processedMarkers.map((marker, index) => ({
     index: index,
     path: wavPath,
@@ -443,17 +455,36 @@ async function runOfflineVAD(wavPath, onProgress = () => {}) {
     endTime: marker.endMs
   }));
 
-  // Clean up VAD
-  try {
-    vad.clear();
-  } catch (e) {
-    // Ignore cleanup errors
-  }
+  try { vad.clear(); } catch (e) {}
 
   return segments;
 }
 
+// ============================================================================
+// PUBLIC API
+// ============================================================================
+
+/**
+ * Run offline VAD on a WAV file
+ *
+ * Tries Worker Thread first (non-blocking), falls back to main thread.
+ *
+ * @param {string} wavPath - Path to 16kHz mono WAV file
+ * @param {Function} onProgress - Progress callback
+ * @returns {Promise<Array>} Array of segments with startMs, endMs
+ */
+async function runOfflineVAD(wavPath, onProgress = () => {}) {
+  try {
+    return await runOfflineVAD_Worker(wavPath, onProgress);
+  } catch (workerError) {
+    console.warn('[VAD] Worker Thread failed:', workerError.message);
+    console.warn('[VAD] Falling back to main thread processing');
+    return await runOfflineVAD_Fallback(wavPath, onProgress);
+  }
+}
+
 module.exports = {
   runOfflineVAD,
+  cancelVAD,
   CONFIG
 };

@@ -154,9 +154,43 @@ async function warmupMicrophone(deviceName, durationMs = 400) {
 }
 
 /**
+ * Read and log WAV header info from a file (for support diagnostics)
+ * @param {string} wavPath - Path to WAV file
+ */
+function logWavHeader(wavPath) {
+  try {
+    const fd = fs.openSync(wavPath, 'r');
+    const header = Buffer.alloc(44);
+    fs.readSync(fd, header, 0, 44, 0);
+    fs.closeSync(fd);
+
+    const riff = header.toString('ascii', 0, 4);
+    const wave = header.toString('ascii', 8, 12);
+    if (riff !== 'RIFF' || wave !== 'WAVE') {
+      console.log('[Recorder] WAV header: not a valid WAV file');
+      return;
+    }
+
+    const channels = header.readUInt16LE(22);
+    const sampleRate = header.readUInt32LE(24);
+    const bitsPerSample = header.readUInt16LE(34);
+    const fileSize = fs.statSync(wavPath).size;
+    const dataBytes = fileSize - 44; // approximate
+
+    console.log(`[Recorder] WAV header: sampleRate=${sampleRate}, channels=${channels}, bitsPerSample=${bitsPerSample}, dataBytes=${dataBytes}, fileSize=${(fileSize / 1024 / 1024).toFixed(2)}MB`);
+
+    if (sampleRate !== 16000) {
+      console.warn(`[Recorder] WARNING: Expected 16kHz but got ${sampleRate}Hz - downsample fallback may be needed`);
+    }
+  } catch (err) {
+    console.warn('[Recorder] Could not read WAV header:', err.message);
+  }
+}
+
+/**
  * Downsample WAV file to 16kHz for VAD/transcription
- * Recording is done at 48kHz for stability, then downsampled
- * @param {string} inputPath - Path to 48kHz WAV file
+ * NOTE: Recording now uses 16kHz directly (-ar 16000), so this is only needed as fallback
+ * @param {string} inputPath - Path to WAV file
  * @returns {Promise<string>} - Path to 16kHz WAV file (same path, replaced)
  */
 async function downsampleTo16k(inputPath) {
@@ -214,7 +248,7 @@ function tryRecordWithBackend(backend, device, outputPath) {
       '-thread_queue_size', '1024',
       '-i', device,
       '-ac', '1',
-      '-ar', '48000',
+      '-ar', '16000',
       '-af', 'highpass=f=90,alimiter=limit=0.97',
       '-acodec', 'pcm_s16le',
       '-y',
@@ -223,7 +257,7 @@ function tryRecordWithBackend(backend, device, outputPath) {
       '-f', 'dshow',
       '-i', `audio=${device}`,
       '-ac', '1',
-      '-ar', '48000',
+      '-ar', '16000',
       '-af', 'highpass=f=90,alimiter=limit=0.97',
       '-acodec', 'pcm_s16le',
       '-y',
@@ -419,7 +453,7 @@ function cleanupOldRecordings(tempDir) {
  * - USB mics: DirectShow + explicit name first (works well for external mics)
  * - Automatic fallback if primary method fails
  *
- * IMPORTANT: Records at 48kHz for stability, call downsampleTo16k() after recording
+ * Records at 16kHz mono PCM (pcm_s16le) - ready for VAD/transcription without downsampling
  *
  * @param {boolean} deleteAudio - Whether to delete old recordings first
  * @param {string} deviceName - Windows audio device name (optional)
@@ -837,6 +871,7 @@ function stopRecording() {
         const stats = fs.statSync(filePath);
         const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
         console.log(`[Recorder] Last segment saved: ${sizeMB} MB`);
+        logWavHeader(filePath);
 
         if (stats.size > 0) {
           finalizeRecording(filePath);
@@ -1241,6 +1276,7 @@ module.exports = {
   getState,
   getFFmpegPath,
   downsampleTo16k,
+  logWavHeader,
   detectMicType,
   concatenateSegments,
   getSegmentsCount,

@@ -213,6 +213,9 @@ Content-Type: application/json
   // KZV-Format (wenn needsKZV)
   kzvDocumentation: "Anamnese:\n...\nBefund:\n...",
 
+  // Z-Dokumentation (Kurzfassung/Executive Summary)
+  zDocumentation: "Kurzfassung...",
+
   // Transkripte
   transcript: "Roher Text...",
   reconstructedTranscript: "Bereinigter Text...",
@@ -277,6 +280,7 @@ async function processAudioFile(audioPath) {
   lastStatus01 = result.status01;
   lastStatusPA = result.statusPA;
   lastKzvDocumentation = result.kzvDocumentation;
+  lastZDocumentation = result.zDocumentation;
 
   // 6. In Zwischenablage
   clipboard.writeText(result.documentation);

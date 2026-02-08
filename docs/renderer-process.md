@@ -498,6 +498,77 @@ class ToothChart {
 
 ---
 
+## Transcript Modal (scripts/transcript-modal.js)
+
+### Übersicht
+
+Vollständige Transkript-Detailansicht als Modal-Dialog im Archiv-Tab.
+
+### Features
+
+| Feature | Beschreibung |
+|---------|--------------|
+| Audio-Player | Play/Pause, Waveform-Visualisierung, Geschwindigkeit (1x-2x), Seekbar |
+| Utterances | Sprecher-Avatare, klickbare Zeitstempel, Word-Level Highlighting |
+| Topic Tags | Themen-Extraktion mit klickbaren Audio-Passagen |
+| Suche | Fuzzy-Matching mit Prev/Next Navigation (Enter/Shift+Enter) |
+| Befund-Tab | 01-Status Zahnschema anzeigen, JSON kopieren (01 + PA) |
+| Doc-Versionen | Umschalten zwischen Dokumentation, KZV, Z-Dokumentation |
+| Passage Links | Klickbare Links in Dokumentation → Audio-Stellen |
+| Profil-Zuordnung | "Zu Stimmprofil hinzufügen" Button pro Utterance |
+
+### Exports
+
+```javascript
+module.exports = {
+  openTranscriptModal,    // Modal öffnen mit filePath
+  closeTranscriptModal,   // Modal schließen
+  initTranscriptModal,    // Event-Listener initialisieren
+  getCurrentTranscriptData // Aktuelle Transkript-Daten abrufen
+};
+```
+
+### IPC Aufrufe
+
+- `get-transcript-detail` — Transkript laden
+- `get-transcript-audio` — Audio als Base64 laden
+- `copy-to-clipboard` — JSON kopieren
+- `open-tooth-chart` — Zahnschema öffnen
+
+---
+
+## Utterance Profile Modal (utterance-profile-modal.js)
+
+### Übersicht
+
+Modal zum Hinzufügen von Transkript-Utterances zu Stimmprofilen. Wird aus `transcript-modal.js` aufgerufen.
+
+### Funktionen
+
+- **Existierendes Profil**: Dropdown mit allen gespeicherten Profilen
+- **Neues Profil**: Name + Rolle (Zahnarzt/Assistenz) eingeben
+- **Audio-Vorschau**: Play-Button spielt den Utterance-Ausschnitt ab
+- **Similarity-Warnung**: Warnung wenn Stimme dem Profil nicht ähnlich genug ist (mit Force-Option)
+- **Erfolgs-Overlay**: Animierte Bestätigung nach erfolgreichem Hinzufügen
+
+### Exports
+
+```javascript
+module.exports = {
+  init,                        // Initialisierung mit { ipcRenderer }
+  openUtteranceProfileModal,   // Modal öffnen mit { audioPath, startMs, endMs, speakerLabel, text }
+  closeUtteranceProfileModal   // Modal schließen
+};
+```
+
+### IPC Aufrufe
+
+- `get-voice-profiles` — Profile für Dropdown laden
+- `add-utterance-to-profile` — Utterance zu Profil hinzufügen
+- `get-transcript-audio` — Audio-Vorschau laden
+
+---
+
 ## Theming
 
 ### CSS Variablen

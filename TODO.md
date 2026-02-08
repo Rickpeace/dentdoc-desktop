@@ -37,17 +37,19 @@ BIN GRAD DABEI APP ZU TESTEN .... TRIAL ASUGLAUFEN POPUPS USW ...
 
 TODO .. BAUSTEINE UND PROMPTS CHEKCEN
 BEI MULTI AGEIN WENN KEINE NAHME STEHT IM TRANSKRIPT (NULL)
----
-einrichtung stimmprofuil updaten ??? man sieht noch keine vorhanden nach ordenr wechsel....
-----
-
-------
-cleanup tsten für audio
-------
 
 
-app läuft -- nochmal die verknüpgung drücken was passiert ?
------
+
+------------------------
+POTENTIAL BUG FIXES (Feb 2025 Audit)
+------------------------
+- [ ] BUG: main.js:6141 - store.delete('hasSeenTrayHint') läuft bei jedem App-Start → setzt Tray-Hint immer zurück. TODO-Kommentar sagt "nach Testing entfernen" — vergessen.
+- [ ] SECURITY: /api/test-email Endpoint hat NULL Auth. Jeder kann Emails spammen. Löschen oder Admin-Check hinzufügen.
+- [ ] SECURITY: Admin-Routen prüfen email === 'richard@petrasch.com' statt role-Feld aus DB. Hardcoded → kein zweiter Admin möglich.
+- [ ] SECURITY: Kein Rate Limiting auf /api/auth/login → Brute Force möglich. Vercel hat Basic-Schutz aber eigener Limiter wäre besser.
+- [ ] UPGRADE: Electron 28 → mind. 33-34 (aktuell ist 40). 12 Major Versions = 12 Runden Security Patches, Node 18→24, Chromium 120→144.
+- [ ] BUG: jwt.ts catch-all in getUserFromRequest() returns null on transient DB errors (ECONNRESET) → heartbeat returns 401 → Desktop App loggt User aus. Fix: Transient errors rethrow statt null return (→500 statt 401). Zusätzlich: session.js consecutive-failure counter (2x 401 bevor Logout).
+------------------------
 
 ------------------------
 UPLOAD PROXY: STREAMING STATT BUFFERING (Priorität: Mittel)

@@ -21,6 +21,7 @@ process.on('uncaughtException', (error) => {
     fs.appendFileSync(logPath, msg);
   } catch (e) { /* ignore */ }
   console.error('Uncaught Exception:', error);
+  if (typeof autoUploadDebugLogs === 'function') autoUploadDebugLogs('uncaught-exception');
 });
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -31,6 +32,7 @@ process.on('unhandledRejection', (reason, promise) => {
     fs.appendFileSync(logPath, msg);
   } catch (e) { /* ignore */ }
   console.error('Unhandled Rejection:', reason);
+  if (typeof autoUploadDebugLogs === 'function') autoUploadDebugLogs('unhandled-rejection');
 });
 
 const Store = require('electron-store');
@@ -265,11 +267,13 @@ const store = new Store();
 let tray = null;  // Will be set after trayModule.createTray()
 let loginWindow = null;
 let dashboardWindow = null;
+let dashboardWindowResizeApplied = false;
 let statusOverlay = null;
 let statusOverlayReady = false;
 let pendingStatusUpdate = null;
 let isRecording = false;
 let isProcessing = false;
+let processingTimeoutId = null;
 let isEnrolling = false;
 let recordingStartCancelled = false;  // Flag to abort startRecording() if user cancels during startup
 let currentRecordingPath = null;
@@ -289,6 +293,9 @@ let lastStatus01 = null;
 let lastStatusPA = null;
 let lastKzvDocumentation = null;
 let lastZDocumentation = null;
+
+// Stop guard to prevent concurrent stop calls (e.g. double F9 press during long concatenation)
+let stopInProgress = false;
 
 // Pause state for recording
 let isPaused = false;
@@ -335,11 +342,18 @@ function copyToClipboardWithFormatting(text) {
   const html = `<!DOCTYPE html>\r\n<html>\r\n<head>\r\n<meta charset="utf-8">\r\n</head>\r\n<body>\r\n${htmlBody}\r\n</body>\r\n</html>`;
 
   // === RTF Format (Word-compatible with font table and codepage) ===
-  // RTF uses \par for line breaks, needs escaping for \ { }
+  // RTF uses \par for line breaks, needs escaping for \ { } and non-ASCII chars
   const escapeRtf = (str) => str
     .replace(/\\/g, '\\\\')
     .replace(/\{/g, '\\{')
-    .replace(/\}/g, '\\}');
+    .replace(/\}/g, '\\}')
+    .replace(/[^\x00-\x7F]/g, (char) => {
+      const code = char.charCodeAt(0);
+      if (code <= 255) {
+        return "\\'" + code.toString(16).padStart(2, '0');
+      }
+      return '\\u' + code + '?';
+    });
 
   const rtfEscaped = escapeRtf(text);
   // Convert line breaks: \n\n = double \par (paragraph), \n = single \par (line break)
@@ -407,10 +421,23 @@ function openWebDashboard(path = '') {
   shell.openExternal(baseUrl + '/dashboard' + path);
 }
 
+// Workaround for Windows Chromium bug: frameless windows can render content
+// offset from window bounds on first show. Force a resize to recalculate.
+function fixFramelessWindowOffset(win) {
+  if (!win || win.isDestroyed()) return;
+  const [width, height] = win.getSize();
+  win.setSize(width + 1, height);
+  setTimeout(() => win.setSize(width, height), 0);
+}
+
 function openLocalDashboard() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     dashboardWindow.show();
     dashboardWindow.focus();
+    if (!dashboardWindowResizeApplied) {
+      fixFramelessWindowOffset(dashboardWindow);
+      dashboardWindowResizeApplied = true;
+    }
     return;
   }
 
@@ -420,6 +447,10 @@ function openLocalDashboard() {
     dashboardWindow.once('ready-to-show', () => {
       dashboardWindow.show();
       dashboardWindow.focus();
+      if (!dashboardWindowResizeApplied) {
+        fixFramelessWindowOffset(dashboardWindow);
+        dashboardWindowResizeApplied = true;
+      }
     });
   }
 }
@@ -517,6 +548,7 @@ function createDashboardWindow() {
 
   dashboardWindow.on('closed', () => {
     dashboardWindow = null;
+    dashboardWindowResizeApplied = false;
     global.dashboardWindow = null;
   });
 
@@ -1023,6 +1055,13 @@ ${finalTranscriptText}
 }
 
 function createLoginWindow() {
+  // Reuse existing login window if already open
+  if (loginWindow && !loginWindow.isDestroyed()) {
+    loginWindow.show();
+    loginWindow.focus();
+    return;
+  }
+
   loginWindow = new BrowserWindow({
     width: 480,
     height: 650,
@@ -1543,7 +1582,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
   console.log(`  Quelle: ${source}`);
   console.log('');
 
-  updateStatusOverlay('Verarbeitung...', 'VAD wird gestartet...', 'processing', { step: 1 });
+  updateStatusOverlay('Verarbeitung...', 'Audio wird analysiert...', 'processing', { step: 0 });
 
   try {
     const pipeline = require('./src/pipeline');
@@ -1557,7 +1596,9 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const { wavPath } = await pipeline.processFileWithVAD(audioFilePath, {
       source,
       onProgress: (progress) => {
-        updateStatusOverlay('Verarbeitung...', progress.message, 'processing', { step: 1 });
+        // VAD + render = Analyse step (0), anything else = Upload step (1)
+        const step = (progress.stage === 'vad' || progress.stage === 'render') ? 0 : 1;
+        updateStatusOverlay('Verarbeitung...', progress.message, 'processing', { step, progressPercent: progress.percent });
       }
     });
     console.log(`[TIMING] VAD completed in ${((Date.now() - vadStart) / 1000).toFixed(2)}s`);
@@ -2601,17 +2642,11 @@ async function stopRecordingWithVAD() {
   const stopStartTime = Date.now();
   console.log('[TIMING] ========== stopRecordingWithVAD START ==========');
 
-  // Define at function scope so catch block can always access it
-  let processingTimeoutId = null;
-  const clearProcessingTimeout = () => {
-    if (processingTimeoutId) {
-      clearTimeout(processingTimeoutId);
-      processingTimeoutId = null;
-    }
-  };
-
   try {
     tray.setToolTip('DentDoc - Stoppe Aufnahme...');
+
+    // Immediate visual feedback so user knows F9 was registered
+    updateStatusOverlay('Aufnahme wird gestoppt', 'Segmente werden zusammengefügt...', 'processing');
 
     // Notify dashboard to stop audio monitoring
     console.log('[VAD] Sending recording-stopped to dashboard');
@@ -2668,16 +2703,7 @@ async function stopRecordingWithVAD() {
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(iconPath);
     tray.setToolTip('DentDoc - Verarbeitung läuft...');
-    updateStatusOverlay('Verarbeitung läuft', 'Downsampling...', 'processing');
-
-    // Downsample 48kHz to 16kHz for VAD/transcription
-    const downsampleStart = Date.now();
-    try {
-      await audioRecorder.downsampleTo16k(currentRecordingPath);
-      console.log(`[TIMING] Downsample completed in ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s`);
-    } catch (err) {
-      console.warn(`[TIMING] Downsampling failed after ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s:`, err.message);
-    }
+    // Recording is now 16kHz directly - no downsample needed
 
     // Save audio immediately (before VAD processing) - this can block on network drives!
     updateStatusOverlay('Verarbeitung läuft', 'Audio wird gespeichert...', 'processing');
@@ -2691,11 +2717,17 @@ async function stopRecordingWithVAD() {
     await processFileWithVAD(currentRecordingPath, token, { source: 'mic' });
 
     // Clear safety timeout on successful completion
-    clearProcessingTimeout();
+    if (processingTimeoutId) {
+      clearTimeout(processingTimeoutId);
+      processingTimeoutId = null;
+    }
 
   } catch (error) {
     // Clear safety timeout on error
-    clearProcessingTimeout();
+    if (processingTimeoutId) {
+      clearTimeout(processingTimeoutId);
+      processingTimeoutId = null;
+    }
 
     console.error('[VAD] Stop error:', error.message || error);
     debugLog(`[VAD] Stop error details: ${error.message}, stack: ${error.stack}`);
@@ -2720,11 +2752,14 @@ async function stopRecording() {
   const stopStartTime = Date.now();
   console.log('[TIMING] ========== stopRecording START ==========');
 
-  // Block if already processing (prevents double F9 press issues)
-  if (isProcessing) {
-    console.log('[Recording] Already processing, ignoring stop request');
+  // Block if already stopping or processing (prevents double F9 press during long concatenation)
+  if (stopInProgress || isProcessing) {
+    console.log('[Recording] Stop already in progress or processing, ignoring stop request');
     return;
   }
+  stopInProgress = true;
+
+  try {
 
   // Check if we're in iPhone mode
   if (isIphoneSession) {
@@ -2764,14 +2799,7 @@ async function stopRecording() {
     await audioRecorder.stopRecording();
     console.log(`[TIMING] FFmpeg stop completed in ${((Date.now() - ffmpegStopStart) / 1000).toFixed(2)}s`);
 
-    // Downsample 48kHz to 16kHz for transcription
-    const downsampleStart = Date.now();
-    try {
-      await audioRecorder.downsampleTo16k(currentRecordingPath);
-      console.log(`[TIMING] Downsample completed in ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s`);
-    } catch (err) {
-      console.warn(`[TIMING] Downsampling failed after ${((Date.now() - downsampleStart) / 1000).toFixed(2)}s:`, err.message);
-    }
+    // Recording is now 16kHz directly - no downsample needed
 
     isRecording = false;
     isPaused = false;
@@ -2797,6 +2825,9 @@ async function stopRecording() {
     isRecording = false;
     isProcessing = false;
     isPaused = false;
+    pausedTime = 0;
+    pauseStartTime = null;
+    pauseToggleInProgress = false;
     trayModule.updateTrayMenu();
 
     // Reset tray icon
@@ -2805,6 +2836,10 @@ async function stopRecording() {
     tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
 
     updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestoppt werden', 'error');
+  }
+
+  } finally {
+    stopInProgress = false;
   }
 }
 
@@ -3076,8 +3111,9 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     title,
     message,
     type,
-    step: extra.step || null,
+    step: extra.step != null ? extra.step : null,
     uploadProgress: extra.uploadProgress,
+    progressPercent: extra.progressPercent || null,
     documentation: extra.documentation || null,
     kzvDocumentation: extra.kzvDocumentation || null,
     zDocumentation: extra.zDocumentation || null,
@@ -3237,10 +3273,39 @@ ipcMain.on('open-tooth-chart', (event, data) => {
 
 // IPC handler for cancelling recording (X button during recording or waiting-iphone)
 ipcMain.on('cancel-recording', async () => {
-  console.log('[Cancel] Cancel requested - isRecording:', isRecording);
+  console.log('[Cancel] Cancel requested - isRecording:', isRecording, 'isProcessing:', isProcessing);
 
   // Always hide the overlay first
   hideStatusOverlay();
+
+  // Cancel during processing (after recording stopped, VAD/upload/transcription running)
+  if (!isRecording && isProcessing) {
+    console.log('[Cancel] Cancelling active processing...');
+
+    // Cancel VAD Worker (if still active)
+    try {
+      const pipeline = require('./src/pipeline');
+      pipeline.cancelVAD();
+    } catch (e) {
+      console.warn('[Cancel] cancelVAD error:', e.message);
+    }
+
+    // Reset state
+    isProcessing = false;
+    if (processingTimeoutId) {
+      clearTimeout(processingTimeoutId);
+      processingTimeoutId = null;
+    }
+    trayModule.updateTrayMenu();
+
+    // Reset tray
+    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+    tray.setImage(iconPath);
+    tray.setToolTip('DentDoc - Bereit');
+
+    console.log('[Cancel] Processing cancelled by user');
+    return;
+  }
 
   // Set flag to abort startup if recording hasn't started yet
   if (!isRecording) {
@@ -3415,6 +3480,7 @@ ipcMain.handle('get-all-transcripts', async () => {
     return { success: true, transcripts };
   } catch (error) {
     console.error('get-all-transcripts error:', error);
+    autoUploadDebugLogs('get-transcripts-error');
     return { success: false, error: error.message, transcripts: [] };
   }
 });
@@ -3459,6 +3525,7 @@ ipcMain.handle('get-transcript-detail', async (event, filePath) => {
     return { success: true, transcript: metadata };
   } catch (error) {
     console.error('get-transcript-detail error:', error);
+    autoUploadDebugLogs('get-transcript-detail-error');
     return { success: false, error: error.message };
   }
 });
@@ -3489,6 +3556,7 @@ ipcMain.handle('get-transcript-audio', async (event, audioPath) => {
     return { success: true, data: base64, mimeType };
   } catch (error) {
     console.error('get-transcript-audio error:', error);
+    autoUploadDebugLogs('get-transcript-audio-error');
     return { success: false, error: error.message };
   }
 });
@@ -3558,7 +3626,13 @@ ipcMain.handle('get-subscription-status', () => {
   let label;
   let type; // 'success', 'warning', 'error', 'trial'
 
-  if (hasActiveSubscription) {
+  if (hasActiveSubscription && user?.cancelAtPeriodEnd) {
+    const endDate = user?.currentPeriodEnd
+      ? new Date(user.currentPeriodEnd).toLocaleDateString('de-DE')
+      : '';
+    label = `Abo endet am ${endDate}`;
+    type = 'warning';
+  } else if (hasActiveSubscription) {
     label = `DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`;
     type = 'success';
   } else if (isRealTrial) {
@@ -3654,6 +3728,7 @@ ipcMain.handle('get-subscription-details', async () => {
   } catch (error) {
     console.error('Error fetching subscription data:', error.message);
     debugLog(`[Subscription] API fetch failed: ${error.message}`);
+    autoUploadDebugLogs('subscription-data-error');
     // Fall back to user data
     activeDevices = 1; // At least this device
   }
@@ -3895,6 +3970,7 @@ ipcMain.handle('submit-feedback', async (event, data) => {
     return result;
   } catch (error) {
     console.error('Failed to submit feedback:', error);
+    autoUploadDebugLogs('submit-feedback-error');
     return { success: false, error: error.message };
   }
 });
@@ -3964,7 +4040,26 @@ ipcMain.handle('login', async (event, email, password) => {
     const wasSubscriber = isCanceled || (isTrialUser && user?.stripeCustomerId);
     const trialExpired = isTrialUser && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
 
-    if (wasSubscriber && !hasActiveSubscription) {
+    if (user?.paymentFailedAt && hasActiveSubscription) {
+      // Payment failed but subscription still active (Stripe is retrying)
+      showCustomNotification(
+        'Zahlung fehlgeschlagen',
+        'Ihre letzte Zahlung konnte nicht verarbeitet werden. Bitte Zahlungsmethode prüfen.',
+        'error',
+        () => openWebDashboard('/subscription')
+      );
+    } else if (user?.cancelAtPeriodEnd && hasActiveSubscription) {
+      // Subscription pending cancellation - still active until period end
+      const endDate = user?.currentPeriodEnd
+        ? new Date(user.currentPeriodEnd).toLocaleDateString('de-DE')
+        : '';
+      showCustomNotification(
+        'Abo gekündigt',
+        `Ihr Abonnement läuft noch bis ${endDate}. Klicken Sie hier zum Reaktivieren.`,
+        'warning',
+        () => openWebDashboard('/subscription')
+      );
+    } else if (wasSubscriber && !hasActiveSubscription) {
       // Ex-subscriber - show "no active subscription" notification (no auto-redirect)
       showCustomNotification(
         'Kein aktives Abo',
@@ -4005,6 +4100,8 @@ ipcMain.handle('login', async (event, email, password) => {
 
     return { success: true };
   } catch (error) {
+    console.error('[Login] IPC error:', error.message);
+    autoUploadDebugLogs('login-error');
     // Check for max devices error
     if (error.message.startsWith('MAX_DEVICES:')) {
       const message = error.message.substring('MAX_DEVICES:'.length);
@@ -4045,6 +4142,7 @@ ipcMain.handle('get-audio-devices', async () => {
     return devices;
   } catch (error) {
     console.error('Error listing audio devices:', error);
+    autoUploadDebugLogs('get-audio-devices-error');
     return [];
   }
 });
@@ -4203,6 +4301,7 @@ ipcMain.handle('iphone-pair-start', async () => {
     }
   } catch (error) {
     console.error('[iPhone] Pairing start error:', error);
+    autoUploadDebugLogs('iphone-pair-error');
     return { success: false, error: error.message };
   }
 });
@@ -4236,6 +4335,7 @@ ipcMain.handle('iphone-pair-status', async (event, pairingId) => {
   } catch (error) {
     console.error('[iPhone] Status check error:', error);
     debugLog(`[iPhone] Pair status check failed: ${error.message}`);
+    autoUploadDebugLogs('iphone-pair-error');
     return { paired: false, error: error.message };
   }
 });
@@ -4277,6 +4377,7 @@ ipcMain.handle('iphone-get-status', async () => {
   } catch (error) {
     console.error('[iPhone] Status check error:', error);
     debugLog(`[iPhone] Get status failed: ${error.message}`);
+    autoUploadDebugLogs('iphone-status-error');
     return { paired: false, error: error.message };
   }
 });
@@ -5229,6 +5330,7 @@ ipcMain.handle('add-utterance-to-profile', async (event, {
 
   } catch (error) {
     console.error('[add-utterance-to-profile] Error:', error);
+    autoUploadDebugLogs('utterance-profile-error');
     return { success: false, error: error.message };
   }
 });
@@ -5470,6 +5572,7 @@ ipcMain.handle('vad-start-session', async (event, options = {}) => {
     return { success };
   } catch (error) {
     console.error('[VAD] Failed to start session:', error);
+    autoUploadDebugLogs('vad-session-error');
     return { success: false, error: error.message };
   }
 });
@@ -5481,6 +5584,7 @@ ipcMain.handle('vad-stop-session', async () => {
     return { success: true, segments };
   } catch (error) {
     console.error('[VAD] Failed to stop session:', error);
+    autoUploadDebugLogs('vad-session-error');
     return { success: false, error: error.message };
   }
 });
@@ -5502,6 +5606,7 @@ ipcMain.handle('vad-concatenate-segments', async (event, outputPath) => {
     return { success: true, path: result };
   } catch (error) {
     console.error('[VAD] Failed to concatenate segments:', error);
+    autoUploadDebugLogs('vad-concatenate-error');
     return { success: false, error: error.message };
   }
 });
@@ -5545,6 +5650,7 @@ ipcMain.handle('start-mic-test', async (event, deviceId) => {
     return { success: true, path: micTestPath };
   } catch (error) {
     console.error('Mic test start error:', error);
+    autoUploadDebugLogs('mic-test-error');
     return { success: false, error: error.message };
   }
 });
@@ -5561,12 +5667,7 @@ ipcMain.handle('stop-mic-test', async () => {
     const filePath = await audioRecorder.stopRecording();
     micTestPath = filePath;
 
-    // Downsample 48kHz to 16kHz for playback consistency
-    try {
-      await audioRecorder.downsampleTo16k(filePath);
-    } catch (err) {
-      console.warn('[Mic Test] Downsampling failed:', err.message);
-    }
+    // Recording is now 16kHz directly - no downsample needed
 
     return { success: true, path: filePath };
   } catch (error) {
@@ -5575,6 +5676,7 @@ ipcMain.handle('stop-mic-test', async () => {
       return { success: true, path: micTestPath };
     }
     console.error('Mic test stop error:', error);
+    autoUploadDebugLogs('mic-test-error');
     return { success: false, error: error.message };
   }
 });
@@ -5591,6 +5693,7 @@ ipcMain.handle('get-mic-test-audio', async () => {
     return { success: true, data: base64, mimeType: 'audio/wav' };
   } catch (error) {
     console.error('Get mic test audio error:', error);
+    autoUploadDebugLogs('mic-test-error');
     return { success: false, error: error.message };
   }
 });
@@ -5660,6 +5763,7 @@ ipcMain.handle('start-speaker-optimization', async (event, data) => {
     };
   } catch (error) {
     console.error('Start speaker optimization error:', error);
+    autoUploadDebugLogs('speaker-optimization-error');
     return { success: false, error: error.message };
   }
 });
@@ -5703,6 +5807,7 @@ ipcMain.handle('get-speaker-preview', async (event, speakerId) => {
     };
   } catch (error) {
     console.error('Get speaker preview error:', error);
+    autoUploadDebugLogs('speaker-optimization-error');
     return { success: false, error: error.message };
   }
 });
@@ -5798,6 +5903,7 @@ ipcMain.handle('enroll-optimized-speaker', async (event, data) => {
     throw new Error('Unbekannte Aktion');
   } catch (error) {
     console.error('Enroll optimized speaker error:', error);
+    autoUploadDebugLogs('speaker-optimization-error');
     return { success: false, error: error.message };
   }
 });
@@ -5822,6 +5928,7 @@ ipcMain.handle('cancel-speaker-optimization', async () => {
     return { success: true };
   } catch (error) {
     console.error('Cancel speaker optimization error:', error);
+    autoUploadDebugLogs('speaker-optimization-error');
     return { success: false, error: error.message };
   }
 });
@@ -5946,6 +6053,10 @@ ipcMain.on('open-speaker-optimization-modal', () => {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     dashboardWindow.show();
     dashboardWindow.focus();
+    if (!dashboardWindowResizeApplied) {
+      fixFramelessWindowOffset(dashboardWindow);
+      dashboardWindowResizeApplied = true;
+    }
 
     // Prepare data for the modal
     if (optimizationSession) {
@@ -6125,6 +6236,7 @@ ipcMain.handle('check-for-updates', async () => {
   } catch (error) {
     isManualUpdateCheck = false;
     console.error('Manual update check error:', error);
+    autoUploadDebugLogs('update-check-error');
     return { status: 'error', message: error.message };
   }
 });
@@ -6265,7 +6377,30 @@ app.whenReady().then(() => {
       const wasSubscriber = isCanceled || (isTrialUser && user?.stripeCustomerId);
       const trialExpired = isTrialUser && !wasSubscriber && minutesRemaining <= 0 && !hasActiveSubscription;
 
-      if (wasSubscriber && !hasActiveSubscription) {
+      if (user?.paymentFailedAt && hasActiveSubscription) {
+        // Payment failed but subscription still active (Stripe is retrying)
+        setTimeout(() => {
+          showCustomNotification(
+            'Zahlung fehlgeschlagen',
+            'Ihre letzte Zahlung konnte nicht verarbeitet werden. Bitte Zahlungsmethode prüfen.',
+            'error',
+            () => openWebDashboard('/subscription')
+          );
+        }, 2000);
+      } else if (user?.cancelAtPeriodEnd && hasActiveSubscription) {
+        // Subscription pending cancellation - still active until period end
+        const endDate = user?.currentPeriodEnd
+          ? new Date(user.currentPeriodEnd).toLocaleDateString('de-DE')
+          : '';
+        setTimeout(() => {
+          showCustomNotification(
+            'Abo gekündigt',
+            `Ihr Abonnement läuft noch bis ${endDate}. Klicken Sie hier zum Reaktivieren.`,
+            'warning',
+            () => openWebDashboard('/subscription')
+          );
+        }, 2000);
+      } else if (wasSubscriber && !hasActiveSubscription) {
         // Ex-subscriber - show "no active subscription" notification
         setTimeout(() => {
           showCustomNotification(

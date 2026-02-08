@@ -48,12 +48,12 @@ RECORDING (isRecording=true, isProcessing=false)
   FFmpeg stoppt
   ↓
 PROCESSING (isRecording=false, isProcessing=true)
-  │    UI: Zeigt aktuellen Schritt
+  │    UI: Zeigt aktuellen Schritt + Fortschrittsbalken
   │    F9 wird ignoriert!
   │
-  ├─ Downsampling...
   ├─ Audio wird gespeichert...
-  ├─ Stille wird entfernt (VAD)...
+  ├─ Analyse: Stille wird erkannt (VAD Worker Thread)...
+  ├─ Sprach-Segmente werden extrahiert (FFmpeg)...
   ├─ Audio wird hochgeladen...
   ├─ Transkription läuft...
   ├─ Sprecher werden erkannt...
@@ -83,21 +83,18 @@ async function stopRecording() {
 
 // In stopRecordingWithVAD() - sofortiger Status-Wechsel nach FFmpeg-Stop
 async function stopRecordingWithVAD() {
-  // FFmpeg stoppen
+  // FFmpeg stoppen (Aufnahme ist bereits 16kHz - kein Downsample nötig)
   await audioRecorder.stopRecording();
 
-  // SOFORT Status wechseln (vor Downsampling!)
+  // SOFORT Status wechseln
   isRecording = false;
   isVadSession = false;
   isProcessing = true;
 
-  // UI aktualisieren
-  updateStatusOverlay('Verarbeitung läuft', 'Downsampling...', 'processing');
+  // UI aktualisieren (Fortschrittsbalken mit "Analyse"-Phase)
+  updateStatusOverlay('Verarbeitung...', 'Audio wird analysiert...', 'processing', { step: 0 });
 
-  // Jetzt erst Downsampling (kann lange dauern bei großen Dateien)
-  await audioRecorder.downsampleTo16k(currentRecordingPath);
-
-  // Verarbeitung...
+  // Verarbeitung: VAD (Worker Thread) → Speech Render → Upload → Transkription → Doku
   await processFileWithVAD(currentRecordingPath, token, { source: 'mic' });
 }
 ```
@@ -131,12 +128,9 @@ clearProcessingTimeout();
 
 ### Warum diese Architektur?
 
-**Problem vorher:** Bei langen Aufnahmen (50+ Minuten) dauerte das Downsampling ~140 Sekunden. Wenn der User während dieser Zeit F9 drückte:
-- `isRecording` war noch `true`
-- Ein zweiter `stopRecordingWithVAD()` wurde ausgelöst
-- EBUSY-Fehler (Datei gesperrt) und FFmpeg-Crashes
+**Problem vorher:** Bei langen Aufnahmen konnte doppeltes F9-Drücken zu EBUSY-Fehlern führen.
 
-**Lösung:** `isRecording=false` und `isProcessing=true` werden SOFORT nach FFmpeg-Stop gesetzt, nicht erst nach dem Downsampling.
+**Lösung:** `isRecording=false` und `isProcessing=true` werden SOFORT nach FFmpeg-Stop gesetzt. Seit Version 1.6.17 entfällt der Downsample-Schritt komplett (Aufnahme direkt in 16kHz).
 
 ---
 
@@ -163,25 +157,43 @@ const audioPath = await audioRecorder.stopRecording();
 
 ### FFmpeg-Befehl (Windows)
 
+Aufnahme erfolgt direkt in 16kHz mono WAV (kein Downsample-Schritt nötig):
+
 ```bash
+# WASAPI (bevorzugt)
+ffmpeg -f wasapi -i default \
+  -ac 1 -ar 16000 -acodec pcm_s16le \
+  -y output.wav
+
+# DirectShow (Fallback)
 ffmpeg -f dshow -i audio="Mikrofon (Realtek)" \
-  -acodec libopus -b:a 64k \
-  -y output.webm
+  -ac 1 -ar 16000 -acodec pcm_s16le \
+  -y output.wav
 ```
 
 ### Konfiguration
 
 ```javascript
 // In audioRecorderFFmpeg.js
+// Aufnahme direkt in 16kHz mono WAV (seit v1.6.17)
 const FFMPEG_ARGS = [
-  '-f', 'dshow',                    // Windows DirectShow
-  '-i', `audio="${deviceName}"`,    // Mikrofon-Name
-  '-acodec', 'libopus',             // Opus Codec
-  '-b:a', '64k',                    // Bitrate
+  '-f', 'wasapi',                   // Windows WASAPI (oder dshow als Fallback)
+  '-i', 'default',                  // Mikrofon
+  '-ac', '1',                       // Mono
+  '-ar', '16000',                   // 16kHz direkt (kein Downsample nötig)
+  '-acodec', 'pcm_s16le',           // 16-bit PCM WAV
   '-y',                             // Überschreiben
   outputPath
 ];
 ```
+
+### WAV-Header Logging
+
+Nach jeder Aufnahme wird der WAV-Header geloggt (Support-Diagnose):
+```
+[Recorder] WAV header: sampleRate=16000, channels=1, bitsPerSample=16, dataBytes=720002, fileSize=0.69MB
+```
+Falls die Sample Rate nicht 16kHz ist, erscheint eine Warnung.
 
 ### Audio-Level Monitoring
 
@@ -291,14 +303,25 @@ VAD wird verwendet um **nach der Aufnahme** die Stille aus der Audio-Datei zu en
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ pipeline/offlineVad.js                              │
-│  - Analysiert fertige Audio-Datei                   │
-│  - Erkennt Sprach-Segmente                          │
+│ pipeline/offlineVad.js (Orchestrierung)             │
+│  - Startet Worker Thread für VAD                    │
+│  - Fallback auf Main Thread bei Worker-Fehler       │
+│  - Cancel-Support mit 3s Hard-Kill Timeout          │
+└───────────────────────┬─────────────────────────────┘
+                        │ Worker Thread
+┌───────────────────────▼─────────────────────────────┐
+│ pipeline/offlineVadWorker.js                        │
+│  - Streaming WAV-Lesen (64KB Chunks, ~128KB RAM)    │
+│  - Sherpa-ONNX VAD Frame-für-Frame                  │
+│  - Progress-Reporting (max 10 Updates/s)            │
+│  - Cancel-Support (Flag bricht Loop ab)             │
 └───────────────────────┬─────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────┐
 │ pipeline/speechRenderer.js                          │
-│  - Extrahiert nur die Sprach-Segmente               │
+│  - Batch-Extraktion via FFmpeg filter_complex       │
+│  - Dynamisches Chunking bei langen Commands         │
+│  - Fallback auf sequentielle Extraktion             │
 │  - Erzeugt speech_only.wav                          │
 └───────────────────────┬─────────────────────────────┘
                         │
@@ -312,28 +335,48 @@ VAD wird verwendet um **nach der Aufnahme** die Stille aus der Audio-Datei zu en
 ### Offline VAD (pipeline/offlineVad.js)
 
 ```javascript
-const { processAudioWithVAD } = require('./src/pipeline/offlineVad');
+const { runOfflineVAD, cancelVAD } = require('./src/pipeline/offlineVad');
 
-// Nach der Aufnahme: Stille entfernen
-const result = await processAudioWithVAD(recordedAudioPath);
-// result: {
-//   speechOnlyPath: '/tmp/speech_only.wav',
-//   segments: [{ start: 0, end: 5000 }, { start: 7000, end: 15000 }],
-//   originalDuration: 20000,
-//   speechDuration: 13000
-// }
+// Nach der Aufnahme: Sprach-Segmente erkennen
+const segments = await runOfflineVAD(recordedAudioPath, (progress) => {
+  // progress: { stage: 'vad', percent: 45, message: 'Sprache wird erkannt... 45%' }
+  updateUI(progress);
+});
+// segments: [{ index: 0, path: '...', startMs: 0, endMs: 5000, duration: 5000 }, ...]
+
+// Abbrechen (z.B. bei Cancel-Button)
+cancelVAD();
+```
+
+### Worker Thread Details
+
+Der VAD Worker (`offlineVadWorker.js`) vermeidet den Main-Thread-Freeze durch:
+- **Streaming:** `fs.openSync` + `fs.readSync` in 64KB Chunks statt `fs.readFileSync` (Gesamtdatei)
+- **Reusable Buffers:** `readBuffer` (64KB), `frameBuffer` (Float32Array[1024]) - kein GC-Spam
+- **Carry Buffer:** Rest-Samples zwischen Chunks werden korrekt übertragen
+- **RAM:** Konstant ~128KB egal wie lang die Aufnahme (vorher: 555MB bei 101 Min)
+- **Cancel:** Main sendet `{type:'cancel'}` → Worker bricht Loop ab + 3s Hard-Kill Sicherung
+
+### Speech Renderer (pipeline/speechRenderer.js)
+
+```javascript
+// Batch-Extraktion mit FFmpeg filter_complex (1 Spawn statt N)
+// Bei > 28k chars Command-Length: automatisches Chunking
+// Bei Fehler: Fallback auf sequentielle Extraktion (alt)
+const { wavPath, speechMap } = await speechRenderer.renderSpeechOnly(segments, outputPath);
 ```
 
 ### VAD-Flow im Verarbeitungsprozess
 
 ```
 1. User stoppt Aufnahme (F9)
-2. Audio-Datei liegt vor (z.B. 2 Minuten)
-3. offlineVad.js analysiert die Datei
-4. Erkennt: 0-30s Sprache, 30-45s Stille, 45-120s Sprache
-5. speechRenderer.js extrahiert nur Sprach-Teile
-6. Ergebnis: 1:45 statt 2:00 (15s Stille entfernt)
-7. Kürzere Datei wird hochgeladen
+2. Audio-Datei liegt vor (bereits 16kHz mono - kein Downsample)
+3. offlineVad.js startet Worker Thread
+4. Worker liest WAV streaming, füttern Silero VAD frame-für-frame
+5. Erkennt Sprach-Segmente (z.B. 0-30s, 45-120s)
+6. speechRenderer.js extrahiert Segmente via FFmpeg filter_complex
+7. Ergebnis: speech_only.wav (nur Sprache, Stille entfernt)
+8. Kürzere Datei wird hochgeladen
 ```
 
 ### vad-controller.js (Live Audio-Level)
@@ -365,83 +408,36 @@ module.exports = {
 };
 ```
 
-### VAD Performance-Optimierungen (Januar 2026)
+### VAD Performance-Optimierungen
 
-Die folgenden Optimierungen wurden implementiert um die VAD-Verarbeitung auf alten PCs zu beschleunigen:
+#### Januar 2026: Grundlegende Fixes
 
-#### 1. Vad Constructor Fix (kritisch!)
+- **Vad Constructor Fix:** `bufferSizeInSeconds` war fälschlich 16000 statt 60 → ~1.2 GB → ~4 MB RAM
+- **Buffer-Wiederverwendung:** Ein `Float32Array` statt 165.000 Allokationen
+- **Frame-Größe:** 20ms → 64ms Frames (3.2x weniger Frames)
+- **Zero-Padding:** `Math.ceil` statt `Math.floor` für letzten Frame
+- **Speech Counter Reset:** Verhindert falsche Speech-Starts
 
-```javascript
-// VORHER (Bug): bufferSizeInSeconds war 16000 statt 60
-const vad = new sherpaLib.Vad(vadConfig, CONFIG.sampleRate);  // FALSCH!
+#### Februar 2026: Worker Thread + Streaming (KEIN UI-FREEZE MEHR)
 
-// NACHHER (Fix):
-const vad = new sherpaLib.Vad(vadConfig, 60);  // 60 Sekunden Buffer
-```
+**Problem:** Bei 101-Min-Aufnahme (557MB) fror die App 5-12 Minuten komplett ein. `readWavSamples()` lud die gesamte Datei in den Speicher (185MB Buffer + 370MB Float32 = 555MB RAM-Spike).
 
-**Impact:** ~1.2 GB → ~4 MB RAM-Verbrauch
+**Lösung:**
 
-#### 2. Buffer-Wiederverwendung
-
-```javascript
-// VORHER: Neuer Buffer pro Frame (165.000 Allokationen für 55 Min)
-for (let i = 0; i < numSamples; i++) {
-  safeSamples[i] = frameSamples[i];  // JS for-loop
-}
-
-// NACHHER: Ein Buffer, TypedArray.set()
-const safeSamples = new Float32Array(frameSize);  // Einmal allokieren
-safeSamples.set(frameSamples);  // Native Kopie, ~10-50x schneller
-```
-
-#### 3. Frame-Größe optimiert
-
-```javascript
-// VORHER: 20ms Frames → 165.000 Frames für 55 Min
-frameMs: 20
-
-// NACHHER: 64ms Frames → 51.500 Frames für 55 Min (3.2x weniger)
-frameMs: 64
-```
-
-#### 4. Audio-Ende nicht mehr abgeschnitten
-
-```javascript
-// VORHER: Letzter Teil-Frame ging verloren
-const totalFrames = Math.floor(samples.length / frameSize);
-
-// NACHHER: Math.ceil + Zero-Padding
-const totalFrames = Math.ceil(samples.length / frameSize);
-if (frameSamples.length < frameSize) {
-  safeSamples.fill(0);  // Zero-Padding für letzten Frame
-}
-```
-
-#### 5. Speech Counter Reset
-
-```javascript
-// VORHER: speechFrameCount summierte sich über Zeit auf
-if (detected) speechFrameCount++;
-else silenceFrameCount++;
-
-// NACHHER: Reset bei Nicht-Erkennung (verhindert falsche Speech-Starts)
-if (detected) {
-  speechFrameCount++;
-  silenceFrameCount = 0;
-} else {
-  silenceFrameCount++;
-  if (!isSpeech) speechFrameCount = 0;  // Reset!
-}
-```
-
-#### Gesamt-Performance (55-Min Aufnahme)
-
-| Metrik | Vorher | Nachher |
+| Aspekt | Vorher | Nachher |
 |--------|--------|---------|
-| RAM-Verbrauch | ~1.2 GB | ~4 MB |
-| VAD-Zeit | 100-140s | 20-40s |
-| Frames | 165.000 | 51.500 |
-| Buffer-Allokationen | 165.000 | 1 |
+| Thread | Main Thread (blockiert UI) | Worker Thread (UI bleibt frei) |
+| WAV-Lesen | `fs.readFileSync` (alles in RAM) | `fs.readSync` in 64KB Chunks (Streaming) |
+| RAM | 555MB bei 101 Min | ~128KB konstant |
+| Downsample | 425s separater Schritt | 0s (Aufnahme direkt 16kHz) |
+| FFmpeg Segmente | N einzelne Spawns | 1 Spawn via `filter_complex` |
+| User-Feedback | Nichts (Freeze) | Fortschrittsbalken mit 5 Phasen |
+| Cancel | Nicht möglich | Worker bricht ab, 3s Hard-Kill |
+
+**Segment-Guardrails:**
+- Minimum Segment-Länge: 300ms
+- Merge Gap: 400ms (nahe Segmente werden vereint)
+- Hard Cap: max 500 Segmente (verhindert filter_complex Explosion)
 
 ---
 

@@ -533,7 +533,7 @@ async function identifySpeakersFromUtterances(audioFilePath, utterances) {
 async function enrollSpeaker(name, audioFilePath, role = 'Arzt') {
   const audioConverter = require('../audio-converter');
 
-  // Always convert to WAV 16kHz - the recorder uses 48kHz by default
+  // Safety: ensure WAV 16kHz (recorder now records at 16kHz, but keep as fallback)
   const wavPath = await audioConverter.convertToWav16k(audioFilePath);
 
   // Create embedding from first 30 seconds

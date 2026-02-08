@@ -800,6 +800,10 @@
         <div id="progressFill" class="progress-fill"></div>
       </div>
       <div class="progress-steps">
+        <div id="step0" class="progress-step">
+          <span class="step-dot"></span>
+          <span>Analyse</span>
+        </div>
         <div id="step1" class="progress-step">
           <span class="step-dot"></span>
           <span>Upload</span>
@@ -912,6 +916,7 @@
     const closeBtn = document.getElementById('closeBtn');
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
+    const step0 = document.getElementById('step0');
     const step1 = document.getElementById('step1');
     const step2 = document.getElementById('step2');
     const step3 = document.getElementById('step3');
@@ -1148,6 +1153,7 @@
     }
 
     function resetSteps() {
+      step0.className = 'progress-step';
       step1.className = 'progress-step';
       step2.className = 'progress-step';
       step3.className = 'progress-step';
@@ -1161,6 +1167,7 @@
 
       if (isComplete) {
         progressFill.classList.add('complete');
+        step0.className = 'progress-step done';
         step1.className = 'progress-step done';
         step2.className = 'progress-step done';
         step3.className = 'progress-step done';
@@ -1168,21 +1175,25 @@
       } else {
         progressFill.classList.remove('complete');
         // Reset all steps to grey (not started)
-        step1.className = 'progress-step';
-        step2.className = 'progress-step';
-        step3.className = 'progress-step';
-        step4.className = 'progress-step';
-        // Mark steps: done (green) for completed, active (orange) for current, grey for not started
-        if (step === 1) {
+        const allSteps = [step0, step1, step2, step3, step4];
+        allSteps.forEach(s => s.className = 'progress-step');
+        // Mark steps: done (green) for completed, active (orange) for current
+        if (step === 0) {
+          step0.className = 'progress-step active';
+        } else if (step === 1) {
+          step0.className = 'progress-step done';
           step1.className = 'progress-step active';
         } else if (step === 2) {
+          step0.className = 'progress-step done';
           step1.className = 'progress-step done';
           step2.className = 'progress-step active';
         } else if (step === 3) {
+          step0.className = 'progress-step done';
           step1.className = 'progress-step done';
           step2.className = 'progress-step done';
           step3.className = 'progress-step active';
         } else if (step === 4) {
+          step0.className = 'progress-step done';
           step1.className = 'progress-step done';
           step2.className = 'progress-step done';
           step3.className = 'progress-step done';
@@ -1307,20 +1318,26 @@
           message.textContent = data.message;
           progressContainer.classList.add('visible');
           actions.classList.remove('visible');
-          // Set progress based on step (4 steps total)
-          // Each step gets 25% of the progress bar
-          if (data.step === 1) {
-            // Upload step: 0-25% based on actual upload progress
-            const uploadPercent = data.uploadProgress !== undefined
-              ? Math.round(data.uploadProgress * 0.25)  // Scale 0-100% to 0-25%
+          // Set progress based on step (5 steps: Analyse, Upload, Transkription, Sprecher, Dokumentation)
+          // Step 0 (Analyse/VAD): 0-15%, Step 1 (Upload): 15-35%, Step 2: 35-55%, Step 3: 55-75%, Step 4: 75-100%
+          if (data.step === 0) {
+            // Analyse step: 0-15% based on VAD progressPercent (0-100 from worker)
+            const vadPercent = data.progressPercent
+              ? Math.round((data.progressPercent / 100) * 15)
               : 0;
+            setProgress(0, vadPercent);
+          } else if (data.step === 1) {
+            // Upload step: 15-35% based on actual upload progress
+            const uploadPercent = data.uploadProgress !== undefined
+              ? 15 + Math.round(data.uploadProgress * 0.20)  // Scale 0-100% to 15-35%
+              : 15;
             setProgress(1, uploadPercent);
           } else if (data.step === 2) {
-            setProgress(2, 50);   // Transkription: 25-50%
+            setProgress(2, 50);   // Transkription: 35-55%
           } else if (data.step === 3) {
-            setProgress(3, 75);   // Sprecher: 50-75%
+            setProgress(3, 70);   // Sprecher: 55-75%
           } else if (data.step === 4) {
-            setProgress(4, 90);   // Dokumentation: 75-100%
+            setProgress(4, 88);   // Dokumentation: 75-100%
           }
           break;
         case 'success':
@@ -1469,13 +1486,7 @@
 
     copySummaryBtn.addEventListener('click', () => {
       if (currentDocumentation) {
-        let summaryText = '';
-        // Add recognized speakers at top if available
-        if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
-          summaryText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
-        }
-        summaryText += currentDocumentation;
-        ipcRenderer.invoke('copy-to-clipboard', summaryText);
+        ipcRenderer.invoke('copy-to-clipboard', currentDocumentation);
         showCopied(copySummaryBtn);
         lastClickedDoc = 'summary';
         saveLastClickedDoc();
@@ -1485,12 +1496,7 @@
     copyFullBtn.addEventListener('click', () => {
       let fullText = '';
 
-      // 0. Erkannte Personen (nur Sherpa-erkannte mit Namen)
-      if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
-        fullText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
-      }
-
-      // 1. Zusammenfassung (Dokumentation)
+      // 1. Zusammenfassung (Dokumentation) - already includes "Erkannte Personen" from backend
       if (currentDocumentation) {
         fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
       }
@@ -1624,23 +1630,13 @@
 
       switch (lastClickedDoc) {
         case 'summary':
-          // Build summary with recognized speakers at top
-          let summaryText = '';
-          if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
-            summaryText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
-          }
-          summaryText += currentDocumentation;
-          textToCopy = summaryText;
+          textToCopy = currentDocumentation;
           btnToHighlight = copySummaryBtn;
           break;
         case 'full':
           // Build full text same as copyFullBtn click handler
           let fullText = '';
-          // 0. Erkannte Personen
-          if (currentRecognizedSpeakers && currentRecognizedSpeakers.length > 0) {
-            fullText += 'Erkannte Personen: ' + currentRecognizedSpeakers.join(', ') + '\n\n';
-          }
-          // 1. Zusammenfassung
+          // 1. Zusammenfassung - already includes "Erkannte Personen" from backend
           if (currentDocumentation) fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
           // 2. KZV-Dokumentation (wenn vorhanden - Agent V2.1)
           if (currentKzvDocumentation) fullText += '--- KZV-Dokumentation ---\n\n' + currentKzvDocumentation + '\n\n';
