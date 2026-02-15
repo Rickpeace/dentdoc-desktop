@@ -268,6 +268,7 @@ function tryRecordWithBackend(backend, device, outputPath) {
     const proc = spawn(getFFmpegPath(), args);
     let resolved = false;
     let errorOutput = '';
+    let firstMeaningfulLine = '';
 
     const resolveOnce = (result) => {
       if (resolved) return;
@@ -279,6 +280,20 @@ function tryRecordWithBackend(backend, device, outputPath) {
     proc.stderr.on('data', (data) => {
       const output = data.toString();
       errorOutput += output;
+
+      // Capture the first meaningful stderr line (the actual error, not FFmpeg banner)
+      if (!firstMeaningfulLine) {
+        for (const line of output.split('\n')) {
+          const t = line.trim();
+          if (t && !t.startsWith('built with') && !t.match(/^\s*lib\w+\s/) &&
+              !t.match(/^\s*--enable/) && !t.match(/^\s*configuration:/) &&
+              !t.match(/^\s*\d+\.\s*\d+\.\s*\d+/) && t.length > 5) {
+            firstMeaningfulLine = t;
+            break;
+          }
+        }
+      }
+
       // FFmpeg outputs progress to stderr - look for actual recording progress
       // Resolve IMMEDIATELY when we see recording has started
       if (!resolved && (output.includes('size=') || output.includes('time='))) {
@@ -290,8 +305,9 @@ function tryRecordWithBackend(backend, device, outputPath) {
     const timeout = setTimeout(() => {
       if (!resolved) {
         try { proc.kill(); } catch (e) { /* ignore */ }
-        console.log(`[Recorder] ${backend} failed to start:`, errorOutput.slice(-300));
-        resolveOnce({ success: false, error: errorOutput.slice(-500) });
+        const displayError = firstMeaningfulLine || errorOutput.slice(-300);
+        console.log(`[Recorder] ${backend} failed to start:`, displayError);
+        resolveOnce({ success: false, error: displayError });
       }
     }, 3000);
 

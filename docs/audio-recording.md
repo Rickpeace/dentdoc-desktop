@@ -930,6 +930,46 @@ app.on('will-quit', async () => {
 
 ---
 
+## Mikrofon-Eingangslautstärke (Windows)
+
+### Zweck
+
+Anzeige und Steuerung der Windows-Mikrofon-Eingangslautstärke direkt in Settings und Setup-Wizard. Erspart das Öffnen der Windows Sound-Einstellungen.
+
+### Implementierung
+
+Verwendet PowerShell `Add-Type` mit C# COM Interop für Windows Core Audio API:
+
+```
+IMMDeviceEnumerator
+  └→ IMMDeviceCollection (Aufzählung aller Capture-Geräte)
+       └→ IMMDevice
+            ├→ IPropertyStore → PKEY_Device_FriendlyName (Name-Matching)
+            └→ IAudioEndpointVolume → GetMasterVolumeLevelScalar / SetMasterVolumeLevelScalar
+```
+
+### Geräte-Matching
+
+Da FFmpeg/dshow und Windows Core Audio leicht unterschiedliche Namen verwenden können, wird bidirektionaler `IndexOf` (contains-Check) für robustes Matching verwendet:
+
+```csharp
+// Beispiel: FFmpeg sagt "Jabra Speak2 75", Core Audio sagt "Mikrofon (Jabra Speak2 75)"
+if (deviceName.IndexOf(targetName) >= 0 || targetName.IndexOf(deviceName) >= 0)
+  → Match!
+```
+
+### Einschränkung: Hardware DSP/AGC
+
+Bei Geräten mit eingebautem DSP (z.B. Jabra Speak2 75) hat der Windows-Volume-Regler keinen hörbaren Effekt. Das Gerät steuert die Mic-Verstärkung selbst über Hardware-AGC. Der Slider zeigt und setzt den Windows-Wert korrekt, aber die tatsächliche Aufnahmelautstärke bleibt unverändert.
+
+### UI-Verhalten
+
+- **Kein Mikrofon ausgewählt:** Slider wird ausgeblendet
+- **Mikrofon getrennt:** Slider wird bei `devicechange` automatisch ausgeblendet
+- **Rückkehr von Windows Sound-Einstellungen:** Wert wird neu geladen
+
+---
+
 ## Fehlerbehandlung
 
 ### Mikrofon-Fehler

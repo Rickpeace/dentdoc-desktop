@@ -22,8 +22,7 @@ class SetupWizard {
       docMode: 'agent-v2.1',
       autoExport: true,
       transcriptPath: '',
-      keepAudio: true, // Enabled by default for full functionality
-      profilesPath: ''
+      keepAudio: true // Enabled by default for full functionality
     };
 
     // Audio test state - uses shared MicTester from audio-utils
@@ -60,7 +59,6 @@ class SetupWizard {
       const settings = await ipcRenderer.invoke('get-settings');
       this.settings.shortcut = settings.shortcut || 'F9';
       this.settings.transcriptPath = settings.transcriptPath || '';
-      this.settings.profilesPath = settings.profilesPath || '';
       this.settings.microphoneId = settings.microphoneId || null; // Windows device name
       this.settings.docMode = settings.docMode || 'agent-v2.1';
       this.settings.autoExport = settings.autoExport !== false;
@@ -76,15 +74,10 @@ class SetupWizard {
 
   updatePathDisplays() {
     const transcriptPathEl = document.getElementById('wizardTranscriptPath');
-    const profilesPathEl = document.getElementById('wizardProfilesPath');
 
     if (transcriptPathEl) {
       transcriptPathEl.value = this.settings.transcriptPath;
       transcriptPathEl.placeholder = this.settings.transcriptPath || 'Kein Pfad gesetzt';
-    }
-    if (profilesPathEl) {
-      profilesPathEl.value = this.settings.profilesPath;
-      profilesPathEl.placeholder = this.settings.profilesPath || 'Kein Pfad gesetzt';
     }
   }
 
@@ -151,9 +144,26 @@ class SetupWizard {
         microphoneId: mic.deviceId,
         microphoneName: mic.deviceName
       });
+      // Refresh volume slider for new mic
+      this.loadWizardMicVolume();
     });
     document.getElementById('wizardMicTestBtn')?.addEventListener('click', () => this.toggleMicTest());
     document.getElementById('wizardPlayMicBtn')?.addEventListener('click', () => this.playMicTest());
+
+    // Wizard mic volume slider
+    let wizardMicVolumeTimeout = null;
+    document.getElementById('wizardMicVolumeSlider')?.addEventListener('input', (e) => {
+      document.getElementById('wizardMicVolumeValue').textContent = e.target.value + '%';
+      e.target.style.setProperty('--fill', e.target.value + '%');
+      if (wizardMicVolumeTimeout) clearTimeout(wizardMicVolumeTimeout);
+      wizardMicVolumeTimeout = setTimeout(async () => {
+        try {
+          await ipcRenderer.invoke('set-mic-volume', parseInt(e.target.value), this.settings.microphoneName);
+        } catch (err) {
+          console.error('[Wizard MicVolume] Failed to set:', err);
+        }
+      }, 150);
+    });
 
     // Shortcut
     document.getElementById('wizardChangeShortcutBtn')?.addEventListener('click', () => this.startShortcutRecording());
@@ -204,41 +214,6 @@ class SetupWizard {
       }
       this.settings.transcriptPath = result.path;
       document.getElementById('wizardTranscriptPath').value = result.path;
-    });
-
-    document.getElementById('wizardBrowseProfilesBtn')?.addEventListener('click', async () => {
-      console.log('Wizard: Browse profiles folder clicked');
-      const result = await ipcRenderer.invoke('select-folder-with-validation', {
-        title: 'Stimmprofile-Ordner auswählen'
-      });
-      console.log('Wizard: select-folder-with-validation result:', result);
-
-      if (result.canceled) {
-        return;
-      }
-
-      if (!result.success) {
-        console.log('Wizard: Folder validation failed:', result.validation?.error);
-        if (typeof showFolderValidationError === 'function') {
-          showFolderValidationError('wizardProfilesPath', result.validation?.error || 'Ordner nicht verwendbar');
-        } else {
-          alert(result.validation?.error || 'Ordner nicht verwendbar');
-        }
-        return;
-      }
-
-      // Success - clear any previous error
-      if (typeof clearFolderValidationError === 'function') {
-        clearFolderValidationError('wizardProfilesPath');
-      }
-      this.settings.profilesPath = result.path;
-      document.getElementById('wizardProfilesPath').value = result.path;
-
-      // Save the new path immediately so get-voice-profiles can use it
-      await ipcRenderer.invoke('save-settings', { profilesPath: result.path });
-
-      // Reload existing profiles from the new path
-      await this.loadExistingProfiles();
     });
 
     // Voice profile recording in wizard
@@ -1276,6 +1251,40 @@ class SetupWizard {
       this.settings.microphoneId = result.deviceId;
       this.settings.microphoneName = result.deviceName;
     }
+    this.loadWizardMicVolume();
+  }
+
+  async loadWizardMicVolume() {
+    const container = document.getElementById('wizardMicVolumeContainer');
+    const slider = document.getElementById('wizardMicVolumeSlider');
+    const valueDisplay = document.getElementById('wizardMicVolumeValue');
+    if (!container || !slider || !valueDisplay) return;
+
+    // Don't show volume if no mic is selected/connected
+    const micSelect = document.getElementById('wizardMicSelect');
+    if (!micSelect || !micSelect.value) {
+      container.style.display = 'none';
+      return;
+    }
+
+    try {
+      const result = await ipcRenderer.invoke('get-mic-volume', this.settings.microphoneName);
+      if (result.error) {
+        container.style.display = 'none';
+        return;
+      }
+      if (result.muted) {
+        valueDisplay.textContent = 'Stumm';
+      } else {
+        valueDisplay.textContent = result.volume + '%';
+      }
+      slider.value = result.volume;
+      slider.style.setProperty('--fill', result.volume + '%');
+      container.style.display = '';
+    } catch (err) {
+      console.error('[Wizard MicVolume] Failed to load:', err);
+      container.style.display = 'none';
+    }
   }
 
   toggleMicTest() {
@@ -1687,8 +1696,7 @@ class SetupWizard {
         docMode: this.settings.docMode,
         autoExport: this.settings.autoExport,
         transcriptPath: this.settings.transcriptPath,
-        keepAudio: this.settings.keepAudio,
-        profilesPath: this.settings.profilesPath
+        keepAudio: this.settings.keepAudio
       });
 
       // Mark wizard as completed
@@ -1734,15 +1742,13 @@ async function restartSetupWizard() {
         docMode: 'agent-v2.1',
         autoExport: true,
         transcriptPath: '',
-        keepAudio: true,
-        profilesPath: ''
+        keepAudio: true
       };
 
       // Load current settings
       const settings = await ipcRenderer.invoke('get-settings');
       window.setupWizard.settings.shortcut = settings.shortcut || 'F9';
       window.setupWizard.settings.transcriptPath = settings.transcriptPath || '';
-      window.setupWizard.settings.profilesPath = settings.profilesPath || '';
       window.setupWizard.settings.microphoneId = settings.microphoneId || null;
       window.setupWizard.settings.docMode = settings.docMode || 'agent-v2.1';
       window.setupWizard.settings.autoExport = settings.autoExport !== false;

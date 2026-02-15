@@ -379,7 +379,7 @@ async function identifySpeakersFromUtterances(audioFilePath, utterances) {
   // Segment selection constants
   const MIN_SEGMENT_MS = 800;      // Ignore short utterances (ja, mhm, ok)
   const MAX_PER_SEGMENT_MS = 5000;  // Cap per segment at 5s (more diversity, avoid diarization errors)
-  const TARGET_MS = 30000;          // Total audio to collect
+  const TARGET_MS = 30000;          // Total audio to collect per speaker (30s)
 
   let results;
   try {
@@ -539,8 +539,8 @@ async function enrollSpeaker(name, audioFilePath, role = 'Arzt') {
   // Create embedding from first 30 seconds
   const embedding = await createEmbedding(wavPath, 0, 30000);
 
-  // Save profile with role
-  const profile = voiceProfiles.saveProfile(name, embedding, role);
+  // Save profile with role (async - saves to backend API)
+  const profile = await voiceProfiles.saveProfile(name, embedding, role);
   return profile;
 }
 

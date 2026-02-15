@@ -21,6 +21,7 @@ let currentTopicSegments = null;
 let currentSpeedIndex = 0;
 let transcriptSearchMatches = [];
 let transcriptSearchIndex = -1;
+let segmentEndMs = null; // When set, audio pauses at this time (for single utterance/segment playback)
 
 const audioSpeeds = [1, 1.25, 1.5, 2];
 
@@ -376,11 +377,11 @@ function renderUtterances(utterances, words = null) {
       </div>
     `;
 
-    // Click on time to jump to audio position
+    // Click on time to play only this utterance
     const timeEl = div.querySelector('.utterance-time');
     timeEl.addEventListener('click', (e) => {
       e.stopPropagation();
-      jumpToTime(utterance.start);
+      playSegment(utterance.start, utterance.end);
 
       // Add playing state to utterance
       container.querySelectorAll('.utterance').forEach(u => u.classList.remove('playing'));
@@ -501,6 +502,7 @@ async function setupAudioPlayer(audioPath) {
 
   // Play/Pause button
   playBtn.onclick = () => {
+    segmentEndMs = null; // Clear segment boundary for continuous playback
     if (audio.paused) {
       audio.play();
       playBtn.classList.add('playing');
@@ -530,17 +532,28 @@ async function setupAudioPlayer(audioPath) {
   const progressBar = document.getElementById('audioProgressBar');
   audio.ontimeupdate = () => {
     if (audio.duration) {
+      const currentMs = audio.currentTime * 1000;
       const percent = (audio.currentTime / audio.duration) * 100;
       updateWaveformProgress(percent);
-      currentTimeEl.textContent = formatTime(audio.currentTime * 1000);
+      currentTimeEl.textContent = formatTime(currentMs);
 
       // Update thin progress bar
       if (progressBar) {
         progressBar.style.width = percent + '%';
       }
 
+      // Stop at segment boundary (single utterance/segment playback)
+      if (segmentEndMs && currentMs >= segmentEndMs) {
+        audio.pause();
+        segmentEndMs = null;
+        playBtn.classList.remove('playing');
+        playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>`;
+      }
+
       // Update currently playing utterance
-      updatePlayingUtterance(audio.currentTime * 1000);
+      updatePlayingUtterance(currentMs);
     }
   };
 
@@ -567,6 +580,7 @@ async function setupAudioPlayer(audioPath) {
   // Click on waveform to seek
   if (waveform) {
     waveform.onclick = (e) => {
+      segmentEndMs = null; // Clear segment boundary for continuous playback
       const rect = waveform.getBoundingClientRect();
       const percent = (e.clientX - rect.left) / rect.width;
       audio.currentTime = percent * audio.duration;
@@ -577,6 +591,7 @@ async function setupAudioPlayer(audioPath) {
   const progressBarContainer = document.getElementById('audioProgressBarContainer');
   if (progressBarContainer) {
     progressBarContainer.onclick = (e) => {
+      segmentEndMs = null; // Clear segment boundary for continuous playback
       const rect = progressBarContainer.getBoundingClientRect();
       const percent = (e.clientX - rect.left) / rect.width;
       audio.currentTime = percent * audio.duration;
@@ -606,10 +621,15 @@ function updatePlayingUtterance(currentMs) {
   });
 }
 
-// Jump to specific time in audio
+// Jump to specific time in audio (continuous playback, no end boundary)
 function jumpToTime(ms) {
   const audio = document.getElementById('transcriptAudio');
   if (audio && audio.src) {
+    // Stop profile modal audio if playing
+    const profileAudio = document.getElementById('utterancePreviewAudio');
+    if (profileAudio && !profileAudio.paused) profileAudio.pause();
+
+    segmentEndMs = null; // Clear segment boundary for continuous playback
     audio.currentTime = ms / 1000;
     if (audio.paused) {
       audio.play();
@@ -864,10 +884,17 @@ function attachPassageLinkHandlers(container) {
   });
 }
 
-// Play a specific audio segment
+// Play a specific audio segment (stops at endMs)
 function playSegment(startMs, endMs) {
   const audio = document.getElementById('transcriptAudio');
   if (!audio || !audio.src) return;
+
+  // Stop profile modal audio if playing
+  const profileAudio = document.getElementById('utterancePreviewAudio');
+  if (profileAudio && !profileAudio.paused) profileAudio.pause();
+
+  // Set segment boundary so ontimeupdate will pause at endMs
+  segmentEndMs = endMs || null;
 
   // Jump to start time
   audio.currentTime = startMs / 1000;

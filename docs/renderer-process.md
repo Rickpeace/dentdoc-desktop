@@ -66,6 +66,7 @@ Das Dashboard ist ein Single-Page-App mit Tab-Navigation:
 - Auto-Export Einstellungen
 - Pfade für Transkripte/Audio (mit Berechtigungsprüfung)
 - Mikrofon-Test
+- Mikrofon-Eingangslautstärke (Slider)
 - Über/Version
 
 **Ungespeicherte Änderungen:**
@@ -80,6 +81,14 @@ Das Dashboard ist ein Single-Page-App mit Tab-Navigation:
 - Browse-Buttons verwenden `select-folder-with-validation`
 - Bei Fehler: Roter Rahmen + Inline-Fehlermeldung
 - Prüft: Lesen, Schreiben, Unterordner erstellen
+
+**Mikrofon-Eingangslautstärke:**
+- Slider zeigt/steuert Windows-Eingangslautstärke des ausgewählten Mikrofons
+- Dynamischer Füllbalken (orange) via CSS `--fill` Variable
+- Wird ausgeblendet wenn kein Mikrofon ausgewählt oder getrennt
+- Aktualisiert sich bei `devicechange` Events (USB-Verbindung/Trennung)
+- Nach Rückkehr von Windows Sound-Einstellungen wird der Wert neu geladen
+- IPC: `get-mic-volume` / `set-mic-volume` (debounced, 150ms)
 
 ---
 
@@ -203,6 +212,14 @@ class SetupWizard {
   }
 }
 ```
+
+### Mikrofon-Eingangslautstärke (Wizard)
+
+Der Setup-Wizard zeigt ebenfalls den Eingangslautstärke-Slider im Mikrofon-Schritt:
+- `loadWizardMicVolume()` — lädt Volume für das im Wizard ausgewählte Mikrofon
+- Wird bei `loadMicrophones()` und Dropdown-Änderung aufgerufen
+- Gleiche Debounce-Logik (150ms) wie in Settings
+- Wird ausgeblendet wenn kein Mikrofon ausgewählt
 
 ### Mikrofon-Test
 
@@ -528,6 +545,11 @@ module.exports = {
 };
 ```
 
+### Audio-Wiedergabe
+
+- **Utterance-Playback:** Klick auf Zeitstempel spielt nur den jeweiligen Utterance-Ausschnitt ab (stoppt bei `segmentEndMs`)
+- **Cross-Audio Stop:** Vor dem Abspielen wird `utterancePreviewAudio` (Profil-Modal) pausiert, falls aktiv
+
 ### IPC Aufrufe
 
 - `get-transcript-detail` — Transkript laden
@@ -547,7 +569,8 @@ Modal zum Hinzufügen von Transkript-Utterances zu Stimmprofilen. Wird aus `tran
 
 - **Existierendes Profil**: Dropdown mit allen gespeicherten Profilen
 - **Neues Profil**: Name + Rolle (Zahnarzt/Assistenz) eingeben
-- **Audio-Vorschau**: Play-Button spielt den Utterance-Ausschnitt ab
+- **Audio-Vorschau**: Play-Button spielt den Utterance-Ausschnitt ab (stoppt bei `endMs`)
+- **Cross-Audio Stop**: Vor dem Abspielen wird `transcriptAudio` pausiert, falls aktiv
 - **Similarity-Warnung**: Warnung wenn Stimme dem Profil nicht ähnlich genug ist (mit Force-Option)
 - **Erfolgs-Overlay**: Animierte Bestätigung nach erfolgreichem Hinzufügen
 

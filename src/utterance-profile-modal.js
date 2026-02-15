@@ -136,6 +136,10 @@ async function handlePlayClick() {
 
   if (!audio || !utteranceModalData) return;
 
+  // Stop transcript audio if playing
+  const transcriptAudio = document.getElementById('transcriptAudio');
+  if (transcriptAudio && !transcriptAudio.paused) transcriptAudio.pause();
+
   // If playing, pause
   if (!audio.paused) {
     audio.pause();

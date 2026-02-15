@@ -1,88 +1,114 @@
-const Store = require('electron-store');
-const path = require('path');
-const fs = require('fs');
+/**
+ * Voice Profiles Module
+ * Manages voice profiles via backend API with in-memory cache.
+ * Profiles are stored in the backend database, cached locally for fast access.
+ */
 
-// Store voice profiles in electron-store
-let store = new Store({
-  name: 'voice-profiles',
-  defaults: {
-    profiles: [] // Array of { id, name, embedding }
-  }
-});
+// In-memory cache of profiles (loaded from API on init)
+let profilesCache = [];
 
-// Debug logging helper - set via setDebugLog() from main process to avoid circular dependency
-let debugLog = console.log;
+// API client reference and token getter (set via init())
+let _apiClient = null;
+let _getToken = null;
 
 /**
- * Set a custom storage path for voice profiles
- * @param {string} customPath - Custom directory path (e.g., network folder)
+ * Initialize the voice profiles module
+ * Must be called after user login, before any profile operations
+ * @param {Object} apiClient - The apiClient module
+ * @param {Function} getToken - Function that returns the current auth token
  */
-let currentStorePath = null;
+async function init(apiClient, getToken) {
+  _apiClient = apiClient;
+  _getToken = getToken;
+  await refreshCache();
+}
 
-function setStorePath(customPath) {
-  if (!customPath) {
-    // Reset to default
-    store = new Store({
-      name: 'voice-profiles',
-      defaults: { profiles: [] }
-    });
-    currentStorePath = null;
+/**
+ * Refresh the in-memory cache from the backend API
+ */
+async function refreshCache() {
+  if (!_apiClient || !_getToken) {
+    console.log('[VoiceProfile] Not initialized, cache empty');
+    profilesCache = [];
     return;
   }
 
-  // Ensure directory exists
-  if (!fs.existsSync(customPath)) {
-    fs.mkdirSync(customPath, { recursive: true });
-  }
+  try {
+    const token = _getToken();
+    if (!token) {
+      profilesCache = [];
+      return;
+    }
 
-  // Create store in custom location
-  currentStorePath = customPath;
-  store = new Store({
-    name: 'voice-profiles',
-    cwd: customPath,
-    defaults: { profiles: [] }
-  });
-}
-
-function getStorePath() {
-  if (currentStorePath) {
-    return currentStorePath;
+    const profiles = await _apiClient.getVoiceProfiles(token);
+    // Parse profiles for in-memory use
+    profilesCache = (profiles || []).map(parseProfileFromDB);
+    console.log(`[VoiceProfile] Cache refreshed: ${profilesCache.length} profiles`);
+  } catch (error) {
+    console.error('[VoiceProfile] Cache refresh failed:', error.message);
+    // Keep existing cache on error
   }
-  // Return default path
-  const { app } = require('electron');
-  return path.join(app.getPath('userData'));
 }
 
 /**
- * Migrate a legacy profile (single embedding) to multi-embedding structure
- * @param {Object} profile - Legacy profile
- * @returns {Object} Migrated profile
+ * Parse a profile from DB format to in-memory format
+ * DB stores embeddings as JSON text strings, we need parsed arrays
  */
-function migrateProfileToMultiEmbedding(profile) {
-  // Already migrated
-  if (profile.confirmed_embeddings) {
-    return profile;
+function parseProfileFromDB(dbProfile) {
+  const profile = {
+    id: dbProfile.id,
+    name: dbProfile.name || dbProfile.profile_name,
+    role: dbProfile.role,
+    createdAt: dbProfile.createdAt || dbProfile.created_at,
+    updatedAt: dbProfile.updatedAt || dbProfile.updated_at,
+    confirmed_embeddings: typeof dbProfile.confirmedEmbeddings === 'string'
+      ? JSON.parse(dbProfile.confirmedEmbeddings || dbProfile.confirmed_embeddings || '[]')
+      : (dbProfile.confirmedEmbeddings || dbProfile.confirmed_embeddings || []),
+    pending_embeddings: typeof dbProfile.pendingEmbeddings === 'string'
+      ? JSON.parse(dbProfile.pendingEmbeddings || dbProfile.pending_embeddings || '[]')
+      : (dbProfile.pendingEmbeddings || dbProfile.pending_embeddings || []),
+    centroid: null,
+    centroid_updated_at: dbProfile.centroidUpdatedAt || dbProfile.centroid_updated_at || null,
+    embedding: null, // Legacy compat
+  };
+
+  // Parse centroid
+  const rawCentroid = dbProfile.centroid;
+  if (rawCentroid) {
+    profile.centroid = typeof rawCentroid === 'string' ? JSON.parse(rawCentroid) : rawCentroid;
   }
 
-  // Parse legacy embedding
-  const legacyEmbedding = typeof profile.embedding === 'string'
-    ? JSON.parse(profile.embedding)
-    : profile.embedding;
+  // Legacy compatibility: expose embedding field
+  if (!profile.embedding && profile.centroid) {
+    profile.embedding = profile.centroid;
+  }
 
-  return {
-    ...profile,
-    confirmed_embeddings: legacyEmbedding ? [{
-      embedding: JSON.stringify(legacyEmbedding),
-      sourceType: 'enrollment',
-      sourceDuration: 30000,
-      createdAt: profile.createdAt
-    }] : [],
-    pending_embeddings: [],
-    centroid: legacyEmbedding,
-    centroid_updated_at: profile.createdAt,
-    embedding: null // Clear legacy field
-  };
+  return profile;
 }
+
+/**
+ * Serialize a profile for sending to the API
+ */
+function serializeProfileForAPI(profileData) {
+  const data = { ...profileData };
+
+  // Ensure embeddings are JSON strings for the API
+  if (data.confirmedEmbeddings && typeof data.confirmedEmbeddings !== 'string') {
+    data.confirmedEmbeddings = JSON.stringify(data.confirmedEmbeddings);
+  }
+  if (data.pendingEmbeddings && typeof data.pendingEmbeddings !== 'string') {
+    data.pendingEmbeddings = JSON.stringify(data.pendingEmbeddings);
+  }
+  if (data.centroid && typeof data.centroid !== 'string') {
+    data.centroid = JSON.stringify(data.centroid);
+  }
+
+  return data;
+}
+
+// ===========================================
+// Pure math functions (no storage)
+// ===========================================
 
 /**
  * Compute centroid (average) of multiple embeddings
@@ -140,10 +166,7 @@ function cosineSimilarity(emb1, emb2) {
 
 /**
  * Check if pending embeddings should be promoted to confirmed
- * Promotion criteria:
- *   - Total pending duration >= 30s
- *   - Mean similarity to reference >= 0.65
- * @param {Object} profile - Profile to check
+ * @param {Object} profile - Profile to check (MUTATED in place)
  * @returns {boolean} Whether promotion occurred
  */
 function checkAndPromotePending(profile) {
@@ -151,7 +174,7 @@ function checkAndPromotePending(profile) {
     return false;
   }
 
-  // 1. Duration gate: need 15s minimum (lowered from 30s for easier profile improvement)
+  // Duration gate: need 15s minimum
   const totalDuration = profile.pending_embeddings.reduce(
     (sum, p) => sum + p.sourceDuration, 0
   );
@@ -159,21 +182,19 @@ function checkAndPromotePending(profile) {
     return false;
   }
 
-  // 2. Stability gate: mean similarity must be >= 0.65
+  // Stability gate: mean similarity >= 0.65
   const similarities = profile.pending_embeddings.map(p => p.similarity_to_reference || 0);
   const meanSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
 
   if (meanSimilarity < 0.65) {
-    // Only wipe pending if profile already has confirmed embeddings
-    // For new profiles (no confirmed yet), keep pending but don't promote
     if (profile.confirmed_embeddings && profile.confirmed_embeddings.length > 0) {
-      debugLog(`[VoiceProfile] promotion rejected for "${profile.name}" (mean sim ${meanSimilarity.toFixed(2)})`);
+      console.log(`[VoiceProfile] promotion rejected for "${profile.name}" (mean sim ${meanSimilarity.toFixed(2)})`);
       profile.pending_embeddings = [];
     }
     return false;
   }
 
-  // 3. Promote all pending to confirmed
+  // Promote all pending to confirmed
   if (!profile.confirmed_embeddings) {
     profile.confirmed_embeddings = [];
   }
@@ -187,7 +208,7 @@ function checkAndPromotePending(profile) {
     });
   }
 
-  debugLog(`[VoiceProfile] promoted for "${profile.name}" (${(totalDuration / 1000).toFixed(1)}s total)`);
+  console.log(`[VoiceProfile] promoted for "${profile.name}" (${(totalDuration / 1000).toFixed(1)}s total)`);
 
   profile.pending_embeddings = [];
 
@@ -202,127 +223,100 @@ function checkAndPromotePending(profile) {
   return true;
 }
 
+// ===========================================
+// SYNC read functions (from cache)
+// ===========================================
+
 /**
- * Get all voice profiles (with migration)
+ * Get all voice profiles from cache
  * @returns {Array} Array of voice profiles
  */
 function getAllProfiles() {
-  const profiles = store.get('profiles', []);
-
-  // Migrate and parse all profiles
-  const migratedProfiles = profiles.map(profile => {
-    const migrated = migrateProfileToMultiEmbedding(profile);
-
-    // Parse centroid if it's a string
-    if (migrated.centroid && typeof migrated.centroid === 'string') {
-      migrated.centroid = JSON.parse(migrated.centroid);
-    }
-
-    // Legacy compatibility: expose embedding field for backward compat
-    if (!migrated.embedding && migrated.centroid) {
-      migrated.embedding = migrated.centroid;
-    }
-
-    return migrated;
-  });
-
-  return migratedProfiles;
+  return profilesCache;
 }
 
 /**
  * Get a specific voice profile by ID
- * @param {string} id - Profile ID
+ * @param {number} id - Profile ID (DB serial integer)
  * @returns {Object|null} Voice profile or null
  */
 function getProfile(id) {
-  const profiles = getAllProfiles();
-  return profiles.find(p => p.id === id) || null;
+  const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+  return profilesCache.find(p => p.id === numId) || null;
 }
 
 /**
- * Get a voice profile by name
+ * Get a voice profile by name (case-insensitive)
  * @param {string} name - Profile name
  * @returns {Object|null} Voice profile or null
  */
 function getProfileByName(name) {
-  const profiles = getAllProfiles();
-  return profiles.find(p => p.name.toLowerCase() === name.toLowerCase()) || null;
+  return profilesCache.find(p => p.name.toLowerCase() === name.toLowerCase()) || null;
 }
 
-/**
- * Save a new voice profile (from Setup Wizard/Dashboard enrollment)
- * Goes directly to confirmed_embeddings
- * @param {string} name - Speaker name (e.g., "Dr. Notle")
- * @param {Array} embedding - Voice embedding array
- * @param {string} role - Speaker role (e.g., "Arzt" or "ZFA")
- * @returns {Object} Created profile with ID
- */
-function saveProfile(name, embedding, role = 'Arzt') {
-  const profiles = store.get('profiles', []);
+// ===========================================
+// ASYNC write functions (API + cache update)
+// ===========================================
 
-  // Check if profile with this name already exists
+/**
+ * Save a new voice profile (from enrollment - goes directly to confirmed)
+ * @param {string} name - Speaker name
+ * @param {Array} embedding - Voice embedding array
+ * @param {string} role - Speaker role
+ * @returns {Promise<Object>} Created profile
+ */
+async function saveProfile(name, embedding, role = 'Arzt') {
+  // Check for duplicate
   const existing = getProfileByName(name);
   if (existing) {
     throw new Error(`Ein Stimmprofil für "${name}" existiert bereits`);
   }
-
-  // Never allow Patient role
   if (role === 'Patient') {
     throw new Error('Patienten können nicht als Stimmprofil gespeichert werden');
   }
 
-  // Convert to plain array if needed
   const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
-
   const now = new Date().toISOString();
-  const profile = {
-    id: Date.now().toString(),
+
+  const confirmedEmbeddings = [{
+    embedding: JSON.stringify(embeddingArray),
+    sourceType: 'enrollment',
+    sourceDuration: 30000,
+    createdAt: now
+  }];
+
+  const token = _getToken();
+  const dbProfile = await _apiClient.createVoiceProfile(token, serializeProfileForAPI({
     name,
     role,
-    createdAt: now,
-    updatedAt: now,
-    // New multi-embedding structure
-    confirmed_embeddings: [{
-      embedding: JSON.stringify(embeddingArray),
-      sourceType: 'enrollment',
-      sourceDuration: 30000,
-      createdAt: now
-    }],
-    pending_embeddings: [],
+    confirmedEmbeddings,
+    pendingEmbeddings: [],
     centroid: embeddingArray,
-    centroid_updated_at: now,
-    // Legacy field (null for new profiles)
-    embedding: null
-  };
+    centroidUpdatedAt: now,
+  }));
 
-  profiles.push(profile);
-  store.set('profiles', profiles);
+  const parsed = parseProfileFromDB(dbProfile);
+  profilesCache.push(parsed);
 
   return {
-    ...profile,
-    embedding: embeddingArray // Return with array for backward compat
+    ...parsed,
+    embedding: embeddingArray // Backward compat
   };
 }
 
 /**
- * Save a new voice profile with initial pending embedding (from optimization)
- * Goes to pending_embeddings, NOT confirmed
+ * Save a new profile with initial pending embedding (from optimization)
  * @param {string} name - Speaker name
  * @param {Array} embedding - Voice embedding array
  * @param {string} role - Speaker role
  * @param {Object} metadata - { sourceDuration, transcriptionId }
- * @returns {Object} Created profile
+ * @returns {Promise<Object>} Created profile
  */
-function saveProfileWithPending(name, embedding, role = 'Arzt', metadata = {}) {
-  const profiles = store.get('profiles', []);
-
-  // Check if profile with this name already exists
+async function saveProfileWithPending(name, embedding, role = 'Arzt', metadata = {}) {
   const existing = getProfileByName(name);
   if (existing) {
     throw new Error(`Ein Stimmprofil für "${name}" existiert bereits`);
   }
-
-  // Never allow Patient role
   if (role === 'Patient') {
     throw new Error('Patienten können nicht als Stimmprofil gespeichert werden');
   }
@@ -330,51 +324,91 @@ function saveProfileWithPending(name, embedding, role = 'Arzt', metadata = {}) {
   const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
   const now = new Date().toISOString();
 
-  const profile = {
-    id: Date.now().toString(),
+  const pendingEmbeddings = [{
+    embedding: JSON.stringify(embeddingArray),
+    sourceType: 'optimization',
+    sourceDuration: metadata.sourceDuration || 15000,
+    createdAt: now,
+    transcriptionId: metadata.transcriptionId,
+    similarity_to_reference: 1.0
+  }];
+
+  const token = _getToken();
+  const dbProfile = await _apiClient.createVoiceProfile(token, serializeProfileForAPI({
     name,
     role,
-    createdAt: now,
-    updatedAt: now,
-    confirmed_embeddings: [],
-    pending_embeddings: [{
-      embedding: JSON.stringify(embeddingArray),
-      sourceType: 'optimization',
-      sourceDuration: metadata.sourceDuration || 15000,
-      createdAt: now,
-      transcriptionId: metadata.transcriptionId,
-      similarity_to_reference: 1.0 // First embedding is its own reference
-    }],
-    centroid: null, // No centroid until confirmed
-    centroid_updated_at: null,
-    embedding: null
-  };
+    confirmedEmbeddings: [],
+    pendingEmbeddings,
+    centroid: null,
+    centroidUpdatedAt: null,
+  }));
 
-  profiles.push(profile);
-  store.set('profiles', profiles);
+  const parsed = parseProfileFromDB(dbProfile);
+  profilesCache.push(parsed);
 
-  debugLog(`[VoiceProfile] pending added (${((metadata.sourceDuration || 15000) / 1000).toFixed(1)}s) to "${name}" (new profile)`);
+  console.log(`[VoiceProfile] pending added (${((metadata.sourceDuration || 15000) / 1000).toFixed(1)}s) to "${name}" (new profile)`);
+  return parsed;
+}
 
-  return profile;
+/**
+ * Create profile with IMMEDIATELY active embedding (for utterance assignment)
+ * @param {string} name - Speaker name
+ * @param {number[]} embedding - Voice embedding vector
+ * @param {string} role - Speaker role
+ * @param {Object} metadata - { sourceType, sourceDuration }
+ * @returns {Promise<Object>} Created profile
+ */
+async function saveProfileDirect(name, embedding, role = 'Arzt', metadata = {}) {
+  const existing = getProfileByName(name);
+  if (existing) {
+    throw new Error(`Ein Stimmprofil für "${name}" existiert bereits`);
+  }
+  if (role === 'Patient') {
+    throw new Error('Patienten können nicht als Stimmprofil gespeichert werden');
+  }
+
+  const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
+  const now = new Date().toISOString();
+
+  const confirmedEmbeddings = [{
+    embedding: JSON.stringify(embeddingArray),
+    sourceType: metadata.sourceType || 'utterance',
+    sourceDuration: metadata.sourceDuration || 0,
+    createdAt: now
+  }];
+
+  const token = _getToken();
+  const dbProfile = await _apiClient.createVoiceProfile(token, serializeProfileForAPI({
+    name,
+    role,
+    confirmedEmbeddings,
+    pendingEmbeddings: [],
+    centroid: embeddingArray,
+    centroidUpdatedAt: now,
+  }));
+
+  const parsed = parseProfileFromDB(dbProfile);
+  profilesCache.push(parsed);
+
+  console.log(`[VoiceProfile] created "${name}" with immediate embedding (utterance)`);
+  return parsed;
 }
 
 /**
  * Add a new embedding to pending (from optimization flow)
- * @param {string} profileId - Profile ID
+ * @param {number} profileId - Profile ID
  * @param {number[]} embedding - Voice embedding vector
  * @param {Object} metadata - { sourceDuration, transcriptionId }
- * @returns {Object} Updated profile
+ * @returns {Promise<Object>} Updated profile
  */
-function addPendingEmbedding(profileId, embedding, metadata = {}) {
-  const profiles = store.get('profiles', []);
-  const index = profiles.findIndex(p => p.id === profileId);
-
+async function addPendingEmbedding(profileId, embedding, metadata = {}) {
+  const numId = typeof profileId === 'string' ? parseInt(profileId, 10) : profileId;
+  const index = profilesCache.findIndex(p => p.id === numId);
   if (index === -1) {
     throw new Error('Stimmprofil nicht gefunden');
   }
 
-  let profile = migrateProfileToMultiEmbedding(profiles[index]);
-
+  let profile = { ...profilesCache[index] };
   const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
 
   // Compute similarity to current reference
@@ -382,7 +416,6 @@ function addPendingEmbedding(profileId, embedding, metadata = {}) {
   if (profile.centroid) {
     similarity = cosineSimilarity(embeddingArray, profile.centroid);
   } else if (profile.pending_embeddings && profile.pending_embeddings.length > 0) {
-    // No centroid yet, compare to mean of pending
     const pendingEmbeddings = profile.pending_embeddings.map(p =>
       typeof p.embedding === 'string' ? JSON.parse(p.embedding) : p.embedding
     );
@@ -407,90 +440,38 @@ function addPendingEmbedding(profileId, embedding, metadata = {}) {
 
   profile.updatedAt = new Date().toISOString();
 
-  debugLog(`[VoiceProfile] pending added (${((metadata.sourceDuration || 15000) / 1000).toFixed(1)}s) to "${profile.name}"`);
+  console.log(`[VoiceProfile] pending added (${((metadata.sourceDuration || 15000) / 1000).toFixed(1)}s) to "${profile.name}"`);
 
   // Check for promotion
   checkAndPromotePending(profile);
 
-  profiles[index] = profile;
-  store.set('profiles', profiles);
+  // Persist to API
+  const token = _getToken();
+  const dbProfile = await _apiClient.updateVoiceProfile(token, numId, serializeProfileForAPI({
+    confirmedEmbeddings: profile.confirmed_embeddings,
+    pendingEmbeddings: profile.pending_embeddings,
+    centroid: profile.centroid,
+    centroidUpdatedAt: profile.centroid_updated_at,
+  }));
 
-  return profile;
-}
-
-/**
- * Update an existing voice profile
- * @param {string} id - Profile ID
- * @param {Object} updates - Fields to update (name, embedding)
- * @returns {Object} Updated profile
- */
-function updateProfile(id, updates) {
-  const profiles = store.get('profiles', []);
-  const index = profiles.findIndex(p => p.id === id);
-
-  if (index === -1) {
-    throw new Error('Stimmprofil nicht gefunden');
-  }
-
-  profiles[index] = {
-    ...profiles[index],
-    ...updates,
-    updatedAt: new Date().toISOString()
-  };
-
-  store.set('profiles', profiles);
-  return profiles[index];
-}
-
-/**
- * Delete a voice profile
- * @param {string} id - Profile ID
- * @returns {boolean} Success
- */
-function deleteProfile(id) {
-  const profiles = store.get('profiles', []);
-  const filtered = profiles.filter(p => p.id !== id);
-
-  if (filtered.length === profiles.length) {
-    throw new Error('Stimmprofil nicht gefunden');
-  }
-
-  store.set('profiles', filtered);
-  return true;
-}
-
-/**
- * Clear all voice profiles (useful for testing)
- * @returns {boolean} Success
- */
-function clearAllProfiles() {
-  store.set('profiles', []);
-  return true;
-}
-
-/**
- * Set the debug log function (called from main process)
- * @param {Function} logFn - Debug log function
- */
-function setDebugLog(logFn) {
-  debugLog = logFn;
+  const parsed = parseProfileFromDB(dbProfile);
+  profilesCache[index] = parsed;
+  return parsed;
 }
 
 /**
  * Add embedding DIRECTLY to confirmed (for manual utterance-to-profile)
- * Skips pending system completely, recalculates centroid immediately
- * @param {string} profileId - Profile ID
+ * @param {number} profileId - Profile ID
  * @param {number[]} embedding - Voice embedding vector
  * @param {Object} metadata - { sourceType, sourceDuration }
- * @returns {Object|null} Updated profile or null
+ * @returns {Promise<Object|null>} Updated profile or null
  */
-function addConfirmedEmbedding(profileId, embedding, metadata = {}) {
-  const profiles = store.get('profiles', []);
-  const index = profiles.findIndex(p => p.id === profileId);
-
+async function addConfirmedEmbedding(profileId, embedding, metadata = {}) {
+  const numId = typeof profileId === 'string' ? parseInt(profileId, 10) : profileId;
+  const index = profilesCache.findIndex(p => p.id === numId);
   if (index === -1) return null;
 
-  let profile = migrateProfileToMultiEmbedding(profiles[index]);
+  let profile = { ...profilesCache[index] };
   const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
 
   if (!profile.confirmed_embeddings) {
@@ -504,7 +485,7 @@ function addConfirmedEmbedding(profileId, embedding, metadata = {}) {
     createdAt: new Date().toISOString()
   });
 
-  // Recompute centroid with all confirmed embeddings
+  // Recompute centroid
   const allEmbeddings = profile.confirmed_embeddings.map(e =>
     typeof e.embedding === 'string' ? JSON.parse(e.embedding) : e.embedding
   );
@@ -512,65 +493,64 @@ function addConfirmedEmbedding(profileId, embedding, metadata = {}) {
   profile.centroid_updated_at = new Date().toISOString();
   profile.updatedAt = new Date().toISOString();
 
-  profiles[index] = profile;
-  store.set('profiles', profiles);
+  // Persist to API
+  const token = _getToken();
+  const dbProfile = await _apiClient.updateVoiceProfile(token, numId, serializeProfileForAPI({
+    confirmedEmbeddings: profile.confirmed_embeddings,
+    centroid: profile.centroid,
+    centroidUpdatedAt: profile.centroid_updated_at,
+  }));
 
-  debugLog(`[VoiceProfile] confirmed embedding added to "${profile.name}" (now ${profile.confirmed_embeddings.length} samples)`);
-  return profile;
+  const parsed = parseProfileFromDB(dbProfile);
+  profilesCache[index] = parsed;
+
+  console.log(`[VoiceProfile] confirmed embedding added to "${parsed.name}" (now ${parsed.confirmed_embeddings.length} samples)`);
+  return parsed;
 }
 
 /**
- * Create profile with IMMEDIATELY active embedding (not pending)
- * For manual profile creation via utterance - profile is usable right away
- * @param {string} name - Speaker name
- * @param {number[]} embedding - Voice embedding vector
- * @param {string} role - Speaker role (Arzt, ZFA, Sonstige)
- * @param {Object} metadata - { sourceType, sourceDuration }
- * @returns {Object} Created profile
+ * Update an existing voice profile (e.g., rename)
+ * @param {number} id - Profile ID
+ * @param {Object} updates - Fields to update (name)
+ * @returns {Promise<Object>} Updated profile
  */
-function saveProfileDirect(name, embedding, role = 'Arzt', metadata = {}) {
-  const profiles = store.get('profiles', []);
-
-  // Check if profile with this name already exists
-  const existing = getProfileByName(name);
-  if (existing) {
-    throw new Error(`Ein Stimmprofil für "${name}" existiert bereits`);
+async function updateProfile(id, updates) {
+  const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+  const index = profilesCache.findIndex(p => p.id === numId);
+  if (index === -1) {
+    throw new Error('Stimmprofil nicht gefunden');
   }
 
-  // Never allow Patient role
-  if (role === 'Patient') {
-    throw new Error('Patienten können nicht als Stimmprofil gespeichert werden');
+  const token = _getToken();
+  const dbProfile = await _apiClient.updateVoiceProfile(token, numId, updates);
+
+  const parsed = parseProfileFromDB(dbProfile);
+  profilesCache[index] = parsed;
+  return parsed;
+}
+
+/**
+ * Delete a voice profile
+ * @param {number} id - Profile ID
+ * @returns {Promise<boolean>} Success
+ */
+async function deleteProfile(id) {
+  const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+  const index = profilesCache.findIndex(p => p.id === numId);
+  if (index === -1) {
+    throw new Error('Stimmprofil nicht gefunden');
   }
 
-  const embeddingArray = Array.isArray(embedding) ? embedding : Array.from(embedding);
-  const now = new Date().toISOString();
+  const token = _getToken();
+  await _apiClient.deleteVoiceProfile(token, numId);
 
-  const profile = {
-    id: Date.now().toString(),
-    name,
-    role,
-    createdAt: now,
-    updatedAt: now,
-    confirmed_embeddings: [{
-      embedding: JSON.stringify(embeddingArray),
-      sourceType: metadata.sourceType || 'utterance',
-      sourceDuration: metadata.sourceDuration || 0,
-      createdAt: now
-    }],
-    pending_embeddings: [],
-    centroid: embeddingArray,  // Immediately set!
-    centroid_updated_at: now,
-    embedding: null
-  };
-
-  profiles.push(profile);
-  store.set('profiles', profiles);
-
-  debugLog(`[VoiceProfile] created "${name}" with immediate embedding (utterance)`);
-  return profile;
+  profilesCache.splice(index, 1);
+  return true;
 }
 
 module.exports = {
+  init,
+  refreshCache,
   getAllProfiles,
   getProfile,
   getProfileByName,
@@ -584,8 +564,4 @@ module.exports = {
   cosineSimilarity,
   updateProfile,
   deleteProfile,
-  clearAllProfiles,
-  setStorePath,
-  getStorePath,
-  setDebugLog
 };

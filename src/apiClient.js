@@ -889,6 +889,63 @@ async function uploadDebugLogs(token, store, logs, appVersion, context = 'unknow
   }
 }
 
+// ===========================================
+// Voice Profiles API
+// ===========================================
+
+async function getVoiceProfiles(token) {
+  try {
+    const response = await axios.get(`${API_BASE_URL}api/voice-profiles`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return response.data.profiles;
+  } catch (error) {
+    console.error('[apiClient] Get voice profiles error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Stimmprofile konnten nicht geladen werden');
+  }
+}
+
+async function createVoiceProfile(token, data) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/voice-profiles`,
+      data,
+      { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+    );
+    return response.data.profile;
+  } catch (error) {
+    console.error('[apiClient] Create voice profile error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Stimmprofil konnte nicht erstellt werden');
+  }
+}
+
+async function updateVoiceProfile(token, id, data) {
+  try {
+    const response = await axios.patch(
+      `${API_BASE_URL}api/voice-profiles/${id}`,
+      data,
+      { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+    );
+    return response.data.profile;
+  } catch (error) {
+    console.error('[apiClient] Update voice profile error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Stimmprofil konnte nicht aktualisiert werden');
+  }
+}
+
+async function deleteVoiceProfile(token, id) {
+  try {
+    await axios.delete(
+      `${API_BASE_URL}api/voice-profiles/${id}`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    return { success: true };
+  } catch (error) {
+    console.error('[apiClient] Delete voice profile error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Stimmprofil konnte nicht gelöscht werden');
+  }
+}
+
 module.exports = {
   login,
   logout,
@@ -916,4 +973,9 @@ module.exports = {
   segmentPassages,
   // Debug Logs
   uploadDebugLogs,
+  // Voice Profiles
+  getVoiceProfiles,
+  createVoiceProfile,
+  updateVoiceProfile,
+  deleteVoiceProfile,
 };

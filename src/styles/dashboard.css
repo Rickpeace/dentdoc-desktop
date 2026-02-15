@@ -929,7 +929,7 @@ kbd {
    Settings View
    =========================================== */
 .settings-content {
-  max-width: 700px;
+  max-width: 800px;
 }
 
 .settings-section {
@@ -3342,15 +3342,12 @@ input.input-error:focus {
    =========================================== */
 .feedback-container {
   display: flex;
-  justify-content: center;
   align-items: flex-start;
-  padding: var(--space-3);
-  padding-top: var(--space-2);
 }
 
 .feedback-card {
   width: 100%;
-  max-width: 560px;
+  max-width: 800px;
   background: var(--glass-bg);
   backdrop-filter: blur(40px);
   -webkit-backdrop-filter: blur(40px);
@@ -3553,7 +3550,6 @@ input.input-error:focus {
    Subscription View
    =========================================== */
 .subscription-content {
-  padding: var(--space-6);
   max-width: 800px;
 }
 
@@ -4873,6 +4869,79 @@ input.input-error:focus {
 .radio-option span {
   color: var(--text-secondary);
   transition: color var(--transition-fast);
+}
+
+/* Microphone Input Volume Slider */
+.mic-volume-container {
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+}
+
+.mic-volume-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.mic-volume-header label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+}
+
+.mic-volume-icon {
+  margin-right: 6px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.mic-volume-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 40px;
+  text-align: right;
+}
+
+.mic-volume-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to right,
+    var(--primary-500) 0%, var(--primary-500) var(--fill, 0%),
+    rgba(255, 255, 255, 0.08) var(--fill, 0%), rgba(255, 255, 255, 0.08) 100%);
+  outline: none;
+  transition: opacity var(--transition-fast);
+}
+
+.mic-volume-slider:hover {
+  opacity: 0.9;
+}
+
+.mic-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary-500);
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.mic-volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(249, 115, 22, 0.4);
+}
+
+.mic-volume-slider::-webkit-slider-thumb:active {
+  transform: scale(1.05);
 }
 
 /* No Microphone Hint */

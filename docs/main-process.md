@@ -4,7 +4,7 @@
 
 ## Übersicht
 
-Der Main Process ist das "Gehirn" der App mit ~4800 Zeilen Code in `main.js` plus drei extrahierte Module.
+Der Main Process ist das "Gehirn" der App mit ~6400 Zeilen Code in `main.js` plus drei extrahierte Module.
 
 ## Module
 
@@ -264,11 +264,20 @@ updateStatusOverlay('Aufnahme läuft', '00:15', 'recording', {
 #### `registerShortcut(shortcut)` (Zeile ~254)
 ```javascript
 // Registriert globalen Hotkey (default: F9)
+// startInProgress Guard verhindert Race Condition bei schnellem Doppel-Drücken
+let startInProgress = false;
+
 globalShortcut.register(shortcut, async () => {
   if (isRecording) await stopRecording();
-  else await startRecording();
+  else if (!startInProgress && !isProcessing) {
+    startInProgress = true;
+    try { await startRecording(); }
+    finally { startInProgress = false; }
+  }
 });
 ```
+
+**Warum `startInProgress`?** FFmpeg-Start kann 1.4s+ dauern (WASAPI fail → DirectShow Fallback). Ohne Guard könnte ein zweites F9 `startRecording()` erneut aufrufen, da `isRecording` erst nach FFmpeg-Setup gesetzt wird.
 
 ---
 
@@ -332,6 +341,27 @@ ipcMain.handle('select-folder-with-validation', async (e, options) => {
 | ETIMEDOUT | Netzwerkordner nicht erreichbar |
 | EROFS | Ordner ist schreibgeschützt |
 | ENOSPC | Kein Speicherplatz verfügbar |
+
+### Mikrofon-Lautstärke Handler
+
+Ermöglicht Anzeige und Steuerung der Windows-Mikrofon-Eingangslautstärke direkt in der App.
+
+```javascript
+ipcMain.handle('get-mic-volume', async (event, micNameOverride) => {
+  // PowerShell C# COM Interop: IAudioEndpointVolume via IMMDeviceEnumerator
+  // Sucht Gerät anhand micNameOverride oder store.get('microphoneName')
+  // Gibt zurück: { volume: 85, muted: false } oder { error: '...' }
+});
+
+ipcMain.handle('set-mic-volume', async (event, volume, micNameOverride) => {
+  // Setzt Master-Volume (0-100%) für das benannte Mikrofon
+  // Gibt zurück: { success: true } oder { error: '...' }
+});
+```
+
+**Geräte-Matching:** Verwendet `PKEY_Device_FriendlyName` via `IPropertyStore` COM API. Bidirektionaler `IndexOf`-Vergleich für Robustheit (FFmpeg/dshow vs Core Audio Namen können leicht abweichen).
+
+**Einschränkung:** Bei Geräten mit Hardware-DSP/AGC (z.B. Jabra Speak2 75) hat der Windows-Volume-Regler keinen Effekt — das Gerät steuert die Verstärkung selbst.
 
 ### Transcript Handler
 
@@ -397,6 +427,11 @@ app.whenReady().then(() => {
 ### Shutdown
 
 ```javascript
+app.on('before-quit', () => {
+  app.isQuitting = true;  // Erlaubt Close-Handler, Fenster zu schließen
+  // Wichtig für Windows Shutdown: autoInstallOnAppQuit kann NSIS starten
+});
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   cleanupMicTestFile();
@@ -406,6 +441,59 @@ app.on('window-all-closed', (e) => {
   e.preventDefault();  // Nicht beenden, im Tray bleiben
 });
 ```
+
+---
+
+### Auto-Update
+
+```javascript
+autoUpdater.autoInstallOnAppQuit = true;
+
+let forceAutoInstall = false;  // Startup-Fallback für nicht-applizierte Updates
+```
+
+**Update-Downloaded Handler:**
+```javascript
+autoUpdater.on('update-downloaded', (info) => {
+  store.set('pendingUpdateVersion', info.version);
+
+  // Startup-Fallback: Auto-Install ohne Dialog
+  if (forceAutoInstall) {
+    setImmediate(() => {
+      app.removeAllListeners('window-all-closed');
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.removeAllListeners('close');
+        win.close();
+      });
+      autoUpdater.quitAndInstall(false, true);
+    });
+    return;
+  }
+
+  // Dialog anzeigen (Jetzt / Später)
+  // ...
+});
+```
+
+**Startup-Fallback Logik:**
+```javascript
+// Beim App-Start: Prüfe ob ein Update ausstehend ist
+const pendingUpdate = store.get('pendingUpdateVersion');
+if (pendingUpdate && pendingUpdate !== app.getVersion()) {
+  forceAutoInstall = true;
+  setTimeout(() => { forceAutoInstall = false; }, 60000);  // 60s Safety
+} else if (pendingUpdate) {
+  store.delete('pendingUpdateVersion');  // Update erfolgreich
+}
+```
+
+**Szenarien:**
+
+| Szenario | Verhalten |
+|----------|-----------|
+| PC Neustart (sauber) | `before-quit` → `isQuitting=true` → `autoInstallOnAppQuit` installiert |
+| PC Neustart (force-killed) | Startup-Fallback: `forceAutoInstall` → Auto-Install ohne Dialog |
+| Kein Internet beim Start | `forceAutoInstall` nach 60s zurückgesetzt → normaler Dialog später |
 
 ---
 

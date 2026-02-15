@@ -178,7 +178,10 @@ async function loadHomeStats() {
 }
 
 // ===== Onboarding Tutorial Card =====
+let onboardingDismissedThisSession = false;
+
 async function loadOnboardingCard(shortcut) {
+  if (onboardingDismissedThisSession) return;
   try {
     const shouldShow = await ipcRenderer.invoke('check-onboarding-visible');
     const onboardingCard = document.getElementById('onboardingCard');
@@ -221,6 +224,7 @@ function initOnboardingCard() {
 
 async function hideOnboardingCard(permanently) {
   const onboardingCard = document.getElementById('onboardingCard');
+  onboardingDismissedThisSession = true;
 
   if (onboardingCard) {
     // Animate out
@@ -1130,7 +1134,6 @@ async function loadSettingsView() {
   settingsSelectedMicId = settings.microphoneId || null;
   settingsSelectedMicName = settings.microphoneName || null;  // For FFmpeg
   document.getElementById('settingsTranscriptPath').value = settings.transcriptPath || '';
-  document.getElementById('settingsProfilesPath').value = settings.profilesPath || '';
   document.getElementById('settingsAutoCloseCheckbox').checked = settings.autoClose || false;
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
   document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
@@ -1156,13 +1159,13 @@ async function loadSettingsView() {
   const docMode = docModeSelect.value;
 
   await loadSettingsMicrophones();
+  loadMicVolume();
 
   settingsInitialSettings = {
     shortcut: settings.shortcut || 'F9',
     microphoneId: settingsSelectedMicId,
     microphoneSource: settings.microphoneSource || 'desktop',
     transcriptPath: settings.transcriptPath || '',
-    profilesPath: settings.profilesPath || '',
     autoClose: settings.autoClose || false,
     autoExport: settings.autoExport || false,
     keepAudio: settings.keepAudio || false,
@@ -1258,7 +1261,8 @@ navigator.mediaDevices?.addEventListener('devicechange', () => {
         return;
       }
       console.log('Device change detected, refreshing microphone list...');
-      loadSettingsMicrophones();
+      await loadSettingsMicrophones();
+      loadMicVolume();
     }
   }, 500);
 });
@@ -1283,7 +1287,6 @@ function settingsCheckForChanges() {
     microphoneId: document.getElementById('settingsMicSelect').value,
     microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
-    profilesPath: document.getElementById('settingsProfilesPath').value,
     autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
@@ -1879,6 +1882,9 @@ document.getElementById('settingsMicSelect').addEventListener('change', () => {
   settingsSelectedMicId = mic.deviceId;
   settingsSelectedMicName = mic.deviceName;
 
+  // Refresh volume slider for the newly selected mic
+  loadMicVolume();
+
   // Hide "mic not found" warning when user selects a new mic
   const micNotFoundWarning = document.getElementById('settingsMicNotFoundWarning');
   if (micNotFoundWarning) {
@@ -2000,6 +2006,62 @@ function clearFolderValidationError(inputId) {
 
 document.getElementById('settingsOpenSoundBtn').addEventListener('click', async () => {
   await ipcRenderer.invoke('open-sound-settings');
+  // Refresh mic volume after returning from Windows Sound Settings
+  loadMicVolume();
+});
+
+// ===== Mic Volume Slider =====
+
+async function loadMicVolume() {
+  const container = document.getElementById('micVolumeContainer');
+  const slider = document.getElementById('micVolumeSlider');
+  const valueDisplay = document.getElementById('micVolumeValue');
+  if (!container || !slider || !valueDisplay) return;
+
+  // Don't show volume if no mic is selected/connected
+  const micSelect = document.getElementById('settingsMicSelect');
+  if (!micSelect || !micSelect.value) {
+    container.style.display = 'none';
+    return;
+  }
+
+  try {
+    // Pass currently selected mic name so it targets the right device
+    const result = await ipcRenderer.invoke('get-mic-volume', settingsSelectedMicName);
+    if (result.error) {
+      container.style.display = 'none';
+      return;
+    }
+    if (result.muted) {
+      valueDisplay.textContent = 'Stumm';
+    } else {
+      valueDisplay.textContent = result.volume + '%';
+    }
+    slider.value = result.volume;
+    slider.style.setProperty('--fill', result.volume + '%');
+    container.style.display = '';
+  } catch (err) {
+    console.error('[MicVolume] Failed to load:', err);
+    container.style.display = 'none';
+  }
+}
+
+// Debounce slider changes to avoid spamming PowerShell
+let micVolumeTimeout = null;
+document.getElementById('micVolumeSlider').addEventListener('input', (e) => {
+  // Update display and filled track immediately for responsiveness
+  document.getElementById('micVolumeValue').textContent = e.target.value + '%';
+  e.target.style.setProperty('--fill', e.target.value + '%');
+
+  // Debounce the actual system call
+  if (micVolumeTimeout) clearTimeout(micVolumeTimeout);
+  micVolumeTimeout = setTimeout(async () => {
+    try {
+      await ipcRenderer.invoke('set-mic-volume', parseInt(e.target.value), settingsSelectedMicName);
+    } catch (err) {
+      console.error('[MicVolume] Failed to set:', err);
+    }
+  }, 150);
 });
 
 document.getElementById('settingsBrowseTranscriptBtn').addEventListener('click', async () => {
@@ -2034,35 +2096,6 @@ document.getElementById('settingsOpenTranscriptFolderBtn').addEventListener('cli
   }
 });
 
-document.getElementById('settingsBrowseProfilesBtn').addEventListener('click', async () => {
-  console.log('Browse profiles folder clicked');
-  const result = await ipcRenderer.invoke('select-folder-with-validation', {
-    title: 'Stimmprofile-Ordner auswählen'
-  });
-  console.log('select-folder-with-validation result:', result);
-
-  if (result.canceled) {
-    return;
-  }
-
-  if (!result.success) {
-    console.log('Folder validation failed:', result.validation?.error);
-    showFolderValidationError('settingsProfilesPath', result.validation?.error || 'Ordner nicht verwendbar');
-    return;
-  }
-
-  // Success - clear any previous error and update the path
-  clearFolderValidationError('settingsProfilesPath');
-  document.getElementById('settingsProfilesPath').value = result.path;
-  settingsCheckForChanges();
-});
-
-document.getElementById('settingsOpenProfilesFolderBtn').addEventListener('click', async () => {
-  const path = document.getElementById('settingsProfilesPath').value;
-  if (path) {
-    await ipcRenderer.invoke('open-folder', path);
-  }
-});
 
 // DISABLED: Theme toggle - dark mode is now default
 // document.getElementById('settingsThemeSelect').addEventListener('change', async () => {
@@ -2212,7 +2245,6 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
     microphoneName: micName,  // For FFmpeg
     microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
     transcriptPath: document.getElementById('settingsTranscriptPath').value,
-    profilesPath: document.getElementById('settingsProfilesPath').value,
     autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,
     autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
     keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
@@ -2231,7 +2263,6 @@ document.getElementById('settingsSaveBtn').addEventListener('click', async () =>
       microphoneId: settings.microphoneId,
       microphoneSource: settings.microphoneSource,
       transcriptPath: settings.transcriptPath,
-      profilesPath: settings.profilesPath,
       autoClose: settings.autoClose,
       autoExport: settings.autoExport,
       keepAudio: settings.keepAudio,
@@ -2275,38 +2306,8 @@ let profilesMediaStream = null;
 let profilesAnimationFrameId = null;
 
 async function loadProfilesView() {
-  const settings = await ipcRenderer.invoke('get-settings');
-  document.getElementById('profilesPathInput').value = settings.profilesPath || 'Standard (AppData)';
   await loadProfiles();
 }
-
-document.getElementById('profilesOpenFolderBtn').addEventListener('click', async () => {
-  await ipcRenderer.invoke('open-profiles-folder');
-});
-
-document.getElementById('profilesBrowseBtn').addEventListener('click', async () => {
-  console.log('Browse profiles folder clicked (profiles view)');
-  const result = await ipcRenderer.invoke('select-folder-with-validation', {
-    title: 'Stimmprofile-Ordner auswählen'
-  });
-  console.log('select-folder-with-validation result:', result);
-
-  if (result.canceled) {
-    return;
-  }
-
-  if (!result.success) {
-    console.log('Folder validation failed:', result.validation?.error);
-    showFolderValidationError('profilesPathInput', result.validation?.error || 'Ordner nicht verwendbar');
-    return;
-  }
-
-  // Success - clear any previous error, update path, save and reload
-  clearFolderValidationError('profilesPathInput');
-  document.getElementById('profilesPathInput').value = result.path;
-  await ipcRenderer.invoke('save-profiles-path', result.path);
-  loadProfiles();
-});
 
 async function loadProfiles() {
   const profiles = await ipcRenderer.invoke('get-voice-profiles');
@@ -2947,15 +2948,6 @@ function createSettingsTour() {
           title: 'Aufnahmen speichern',
           description: 'Optional können Sie die Audio-Aufnahmen dauerhaft speichern für Qualitätskontrolle oder spätere Referenz.',
           side: 'bottom',
-          align: 'start'
-        }
-      },
-      {
-        element: '#settings-section-profiles-path',
-        popover: {
-          title: 'Stimmprofile',
-          description: 'Mit Stimmprofilen erkennt DentDoc verschiedene Sprecher automatisch. So wird klar, wer was gesagt hat.',
-          side: 'top',
           align: 'start'
         }
       },
@@ -4061,11 +4053,18 @@ function openSupportModal() {
     }
     unreadChatMessages = 0;
 
-    // Maximize tawk chat to skip menu screen
+    // Maximize tawk chat to skip menu screen and scroll to top
     const webview = document.getElementById('tawkWebview');
     if (webview) {
-      webview.executeJavaScript('if (typeof Tawk_API !== "undefined" && Tawk_API.maximize) Tawk_API.maximize();')
-        .catch(() => {}); // Ignore errors if Tawk not ready
+      webview.executeJavaScript(`
+        if (typeof Tawk_API !== 'undefined' && Tawk_API.maximize) {
+          Tawk_API.maximize();
+        }
+        // Scroll the page to top so chat isn't scrolled down
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      `).catch(() => {}); // Ignore errors if Tawk not ready
     }
   }
 }
@@ -4126,8 +4125,11 @@ async function initTawkWebview() {
     console.log('Could not get data for tawk.to:', err);
   }
 
-  // Wait for webview to load, then inject user data
+  // Wait for webview to load, then inject styles and user data
   webview.addEventListener('did-finish-load', () => {
+    // Prevent the tawk.to page from scrolling (keeps chat widget at top)
+    webview.insertCSS('html, body { overflow: hidden !important; scroll-behavior: auto !important; }')
+      .catch(() => {});
     if (user && user.email) {
       // Prepare data (escape single quotes for JS injection)
       const escape = (str) => (str || '').toString().replace(/'/g, "\\'").replace(/\n/g, ' ');

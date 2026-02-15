@@ -36,6 +36,7 @@ store.get('deviceId')         // Eindeutige Geräte-ID (UUID)
 ```javascript
 store.get('shortcut', 'F9')           // Aufnahme-Shortcut
 store.get('selectedMicrophone')       // Mikrofon Device-ID
+store.get('microphoneName')           // Mikrofon-Name (für Volume-Control & Matching)
 store.get('recordingMode', 'standard') // 'standard' | 'iphone' | 'vad'
 ```
 
@@ -57,6 +58,13 @@ store.get('profilesPath')             // Stimmprofile-Pfad
 store.get('theme', 'dark')            // 'dark' | 'light'
 store.get('overlayPosition')          // { x, y } Overlay-Position
 store.get('autoCloseOverlay', false)  // Overlay auto-schließen?
+```
+
+#### Auto-Update
+```javascript
+store.get('pendingUpdateVersion')     // Ausstehende Update-Version (z.B. "1.8.0")
+// Wird bei update-downloaded gesetzt, bei erfolgreichem Start gelöscht
+// Ermöglicht Startup-Fallback wenn autoInstallOnAppQuit nicht greifen konnte
 ```
 
 #### Onboarding

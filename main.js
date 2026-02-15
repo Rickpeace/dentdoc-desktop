@@ -297,6 +297,9 @@ let lastZDocumentation = null;
 // Stop guard to prevent concurrent stop calls (e.g. double F9 press during long concatenation)
 let stopInProgress = false;
 
+// Start guard to prevent concurrent start calls (e.g. F9 pressed during slow mic startup)
+let startInProgress = false;
+
 // Pause state for recording
 let isPaused = false;
 let pausedTime = 0;        // Accumulated pause time in ms
@@ -598,10 +601,17 @@ function registerShortcut(shortcut) {
       // Block F9 during processing - show warning but don't change status overlay
       console.log('[Shortcut] Blocked - still processing');
       showNotification('Bitte warten', 'Die vorherige Aufnahme wird noch verarbeitet...');
+    } else if (startInProgress) {
+      console.log('[Shortcut] Blocked - recording start already in progress');
     } else {
       // Show immediate feedback before startRecording() does async work
+      startInProgress = true;
       updateStatusOverlay('Aufnahme wird gestartet...', 'Bitte warten...', 'starting');
-      await startRecording();
+      try {
+        await startRecording();
+      } finally {
+        startInProgress = false;
+      }
     }
   });
 
@@ -623,13 +633,18 @@ function registerShortcut(shortcut) {
         if (isRecording) {
           await stopRecording();
         } else if (isProcessing) {
-          // Block F9 during processing - show warning but don't change status overlay
           console.log('[Shortcut] Blocked - still processing');
           showNotification('Bitte warten', 'Die vorherige Aufnahme wird noch verarbeitet...');
+        } else if (startInProgress) {
+          console.log('[Shortcut] Blocked - recording start already in progress');
         } else {
-          // Show immediate feedback before startRecording() does async work
+          startInProgress = true;
           updateStatusOverlay('Aufnahme wird gestartet...', 'Bitte warten...', 'starting');
-          await startRecording();
+          try {
+            await startRecording();
+          } finally {
+            startInProgress = false;
+          }
         }
       });
     }
@@ -1564,7 +1579,7 @@ async function processAudioFile(audioFilePath, options = {}) {
  * @param {string} options.source - Audio source: 'iphone' | 'mic' (default: 'mic')
  */
 async function processFileWithVAD(audioFilePath, token, options = {}) {
-  const { source = 'mic' } = options;
+  const { source = 'mic', skipVAD = false, liveSegments = null } = options;
   const processStartTime = Date.now();
 
   // Get file size for logging
@@ -1580,28 +1595,56 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
   console.log('========================================');
   console.log(`  Datei: ${path.basename(audioFilePath)} (${fileSizeMB} MB)`);
   console.log(`  Quelle: ${source}`);
+  console.log(`  Live-VAD: ${skipVAD ? (liveSegments && liveSegments.length > 0 ? `${liveSegments.length} Segmente` : 'keine Segmente') : 'deaktiviert (Offline-VAD)'}`);
   console.log('');
 
   updateStatusOverlay('Verarbeitung...', 'Audio wird analysiert...', 'processing', { step: 0 });
 
   try {
-    const pipeline = require('./src/pipeline');
+    let wavPath;
 
-    console.log('///// SCHRITT 1: VAD /////');
-    console.log('  Stille wird erkannt und entfernt...');
-    const vadStart = Date.now();
+    if (skipVAD && liveSegments && liveSegments.length > 0) {
+      // Live VAD collected markers during recording → just render speech-only from markers
+      console.log(`///// SCHRITT 1: LIVE-VAD RENDER (${liveSegments.length} Segmente) /////`);
+      const renderStart = Date.now();
+      const pipeline = require('./src/pipeline');
+      const speechOnlyPath = path.join(os.tmpdir(), 'dentdoc', 'pipeline', `speech_only_${Date.now()}.wav`);
 
-    // Run VAD on the file to get speech-only audio
-    // Pass source for correct Auto-Level strategy (iPhone = always loudnorm)
-    const { wavPath } = await pipeline.processFileWithVAD(audioFilePath, {
-      source,
-      onProgress: (progress) => {
-        // VAD + render = Analyse step (0), anything else = Upload step (1)
-        const step = (progress.stage === 'vad' || progress.stage === 'render') ? 0 : 1;
-        updateStatusOverlay('Verarbeitung...', progress.message, 'processing', { step, progressPercent: progress.percent });
+      // Ensure output directory exists
+      const outputDir = path.dirname(speechOnlyPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
       }
-    });
-    console.log(`[TIMING] VAD completed in ${((Date.now() - vadStart) / 1000).toFixed(2)}s`);
+
+      const result = await pipeline.speechRenderer.renderSpeechOnly(liveSegments, speechOnlyPath);
+      wavPath = result.wavPath;
+
+      const speechDuration = pipeline.speechRenderer.getTotalDuration(liveSegments);
+      console.log(`[TIMING] Speech render from live markers: ${((Date.now() - renderStart) / 1000).toFixed(2)}s (${(speechDuration / 1000).toFixed(0)}s speech)`);
+      updateStatusOverlay('Verarbeitung...', `${(speechDuration / 1000).toFixed(0)}s Sprache`, 'processing', { step: 0 });
+    } else if (skipVAD) {
+      // Live VAD returned 0 segments → upload full recording as-is (no silence removal)
+      console.log('///// SCHRITT 1: KEIN VAD (vollständige Aufnahme) /////');
+      console.warn('[VAD] Live VAD: 0 Segmente, lade vollständige Aufnahme hoch');
+      wavPath = audioFilePath;
+      updateStatusOverlay('Verarbeitung...', 'Audio bereit', 'processing', { step: 0 });
+    } else {
+      // Offline VAD (for manual file upload)
+      console.log('///// SCHRITT 1: OFFLINE-VAD /////');
+      console.log('  Stille wird erkannt und entfernt...');
+      const vadStart = Date.now();
+      const pipeline = require('./src/pipeline');
+
+      const { wavPath: vadWavPath } = await pipeline.processFileWithVAD(audioFilePath, {
+        source,
+        onProgress: (progress) => {
+          const step = (progress.stage === 'vad' || progress.stage === 'render') ? 0 : 1;
+          updateStatusOverlay('Verarbeitung...', progress.message, 'processing', { step, progressPercent: progress.percent });
+        }
+      });
+      wavPath = vadWavPath;
+      console.log(`[TIMING] Offline VAD completed in ${((Date.now() - vadStart) / 1000).toFixed(2)}s`);
+    }
 
     // Now send the speech-only file to AssemblyAI
     console.log('///// SCHRITT 2: UPLOAD /////');
@@ -2596,6 +2639,11 @@ async function startRecordingWithVAD() {
     currentRecordingPath = await audioRecorder.startRecording(deleteAudio, microphoneName);
     console.log('[VAD] Recording started:', currentRecordingPath);
 
+    // Start live VAD marker collection (runs during recording, collects speech timestamps)
+    vadController.startMarkerCollection({
+      fullRecordingPath: currentRecordingPath
+    });
+
     // Recording started successfully - now update UI
     isRecording = true;
     isVadSession = true;
@@ -2611,12 +2659,15 @@ async function startRecordingWithVAD() {
     const shortcut = store.get('shortcut') || 'F9';
     updateStatusOverlay('🎤 Aufnahme läuft', `Drücken Sie ${shortcut} zum Stoppen`, 'recording');
 
-    // Notify dashboard to start audio monitoring (for level display)
+    // Notify dashboard to start VAD audio capture (vadMode triggers startVADIntegration)
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-      dashboardWindow.webContents.send('recording-started', { microphoneId: store.get('microphoneId') });
+      dashboardWindow.webContents.send('recording-started', {
+        microphoneId: store.get('microphoneId'),
+        vadMode: true
+      });
     }
 
-    console.log('[VAD] ========== Recording Started ==========');
+    console.log('[VAD] ========== Recording Started (Live VAD) ==========');
 
   } catch (error) {
     console.error('[VAD] Start error:', error.message || error);
@@ -2627,6 +2678,9 @@ async function startRecordingWithVAD() {
     } catch (e) {
       // Ignore - just ensuring cleanup
     }
+
+    // Clean up live VAD marker collection
+    vadController.stopMarkerCollection(null);
 
     // Reset states on start failure
     isRecording = false;
@@ -2709,12 +2763,19 @@ async function stopRecordingWithVAD() {
     updateStatusOverlay('Verarbeitung läuft', 'Audio wird gespeichert...', 'processing');
     saveAudioImmediately(currentRecordingPath);
 
-    // Process with Offline-VAD (same flow as file upload)
-    // This will: 1) Run VAD 2) Remove silence 3) Send to AssemblyAI
+    // Get live VAD markers (collected during recording via sample-based timeline)
+    const liveSegments = vadController.stopMarkerCollection(currentRecordingPath);
+    console.log(`[TIMING] Live VAD: ${liveSegments.length} segments`);
+
+    // Process: render speech-only from live markers, then upload + transcribe
     // source='mic' for RMS-based Auto-Level strategy
-    console.log('[Recording] >>> Processing with source: mic (RMS-based: loudnorm < -50dB, mild_gain -50 to -28dB, none > -28dB)');
+    console.log('[Recording] >>> Processing with source: mic');
     const token = store.get('authToken');
-    await processFileWithVAD(currentRecordingPath, token, { source: 'mic' });
+    await processFileWithVAD(currentRecordingPath, token, {
+      source: 'mic',
+      skipVAD: true,
+      liveSegments: liveSegments
+    });
 
     // Clear safety timeout on successful completion
     if (processingTimeoutId) {
@@ -3805,11 +3866,17 @@ ipcMain.handle('toggle-recording', async () => {
     await stopRecording();
     return { recording: false, processing: isProcessing };
   } else if (isProcessing) {
-    // Block during processing
     showNotification('Bitte warten', 'Die vorherige Aufnahme wird noch verarbeitet...');
     return { recording: false, processing: true, blocked: true };
+  } else if (startInProgress) {
+    return { recording: false, processing: false, blocked: true };
   } else {
-    await startRecording();
+    startInProgress = true;
+    try {
+      await startRecording();
+    } finally {
+      startInProgress = false;
+    }
     return { recording: isRecording, processing: false };
   }
 });
@@ -3845,6 +3912,7 @@ ipcMain.handle('toggle-pause', async () => {
         updateStatusOverlay('Fehler beim Fortsetzen', err.message, 'error');
         return { success: false, error: err.message };
       }
+      vadController.resumeMarkerCollection();
       pausedTime += (Date.now() - pauseStartTime);
       isPaused = false;
       pauseStartTime = null;
@@ -3862,6 +3930,8 @@ ipcMain.handle('toggle-pause', async () => {
         console.error('[Pause] Failed to pause recording:', err.message);
         autoUploadDebugLogs('toggle-pause-error');
       }
+
+      vadController.pauseMarkerCollection();
 
       // Now show paused state
       isPaused = true;
@@ -4019,6 +4089,10 @@ ipcMain.handle('login', async (event, email, password) => {
     store.set('user', response.user);
     trayModule.updateTrayMenu();
 
+    // Initialize voice profiles from backend DB
+    const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
+    await voiceProfiles.init(apiClient, () => store.get('authToken'));
+
     // Start heartbeat
     session.startHeartbeat();
 
@@ -4151,14 +4225,11 @@ ipcMain.handle('get-settings', async () => {
   // Default paths in Documents folder
   const documentsPath = app.getPath('documents');
   const defaultTranscriptPath = path.join(documentsPath, 'DentDoc', 'Transkripte');
-  const defaultProfilesPath = path.join(documentsPath, 'DentDoc', 'Stimmprofile');
 
   // Get stored paths - use null coalescing to preserve empty strings if intentionally set
   const storedTranscriptPath = store.get('transcriptPath');
-  const storedProfilesPath = store.get('profilesPath');
 
   console.log('get-settings - stored transcriptPath:', storedTranscriptPath);
-  console.log('get-settings - stored profilesPath:', storedProfilesPath);
 
   return {
     shortcut: store.get('shortcut') || 'F9',
@@ -4168,7 +4239,6 @@ ipcMain.handle('get-settings', async () => {
     iphoneDeviceId: store.get('iphoneDeviceId') || null,
     iphoneDeviceName: store.get('iphoneDeviceName') || null,
     transcriptPath: storedTranscriptPath !== undefined && storedTranscriptPath !== '' ? storedTranscriptPath : defaultTranscriptPath,
-    profilesPath: storedProfilesPath !== undefined && storedProfilesPath !== '' ? storedProfilesPath : defaultProfilesPath,
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', true),
@@ -4197,17 +4267,6 @@ ipcMain.handle('save-settings', async (event, settings) => {
   if (settings.transcriptPath !== undefined) {
     console.log('Saving transcriptPath:', settings.transcriptPath);
     store.set('transcriptPath', settings.transcriptPath);
-  }
-
-  // Save profiles path
-  if (settings.profilesPath !== undefined) {
-    store.set('profilesPath', settings.profilesPath);
-    // Reload voice profiles with new path
-    const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
-    console.log('[save-settings] Setting profiles path to:', settings.profilesPath);
-    voiceProfiles.setStorePath(settings.profilesPath);
-    console.log('[save-settings] New store path:', voiceProfiles.getStorePath());
-    console.log('[save-settings] Profiles at new path:', voiceProfiles.getAllProfiles().length);
   }
 
   // Save auto-close setting
@@ -4259,14 +4318,6 @@ ipcMain.handle('save-settings', async (event, settings) => {
   return { success: true, message: 'Einstellungen gespeichert' };
 });
 
-// Save profiles path separately (from voice profiles window)
-ipcMain.handle('save-profiles-path', async (event, profilesPath) => {
-  store.set('profilesPath', profilesPath);
-  // Reload voice profiles with new path
-  const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
-  voiceProfiles.setStorePath(profilesPath);
-  return { success: true };
-});
 
 // ===========================================
 // iPhone Microphone Pairing IPC Handlers
@@ -4826,21 +4877,6 @@ ipcMain.handle('open-folder', async (event, folderPath) => {
   return { success: true };
 });
 
-// Open profiles folder in explorer
-ipcMain.handle('open-profiles-folder', async () => {
-  const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
-  const profilesPath = voiceProfiles.getStorePath();
-
-  // Ensure folder exists
-  if (!fs.existsSync(profilesPath)) {
-    fs.mkdirSync(profilesPath, { recursive: true });
-  }
-
-  // Open in explorer
-  const { shell } = require('electron');
-  shell.openPath(profilesPath);
-  return { success: true };
-});
 
 // Debug log handlers
 ipcMain.handle('open-debug-log', async () => {
@@ -5213,18 +5249,17 @@ ipcMain.handle('confirm-delete-profile', async () => {
 const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
 
 ipcMain.handle('get-voice-profiles', async () => {
-  console.log('[get-voice-profiles] Current store path:', voiceProfiles.getStorePath());
   const profiles = voiceProfiles.getAllProfiles();
   console.log('[get-voice-profiles] Found profiles:', profiles.length);
   return profiles;
 });
 
 ipcMain.handle('delete-voice-profile', async (event, id) => {
-  return voiceProfiles.deleteProfile(id);
+  return await voiceProfiles.deleteProfile(id);
 });
 
 ipcMain.handle('rename-voice-profile', async (event, { id, newName }) => {
-  return voiceProfiles.updateProfile(id, { name: newName });
+  return await voiceProfiles.updateProfile(id, { name: newName });
 });
 
 // Add utterance audio segment to voice profile (or create new profile)
@@ -5302,7 +5337,7 @@ ipcMain.handle('add-utterance-to-profile', async (event, {
       }
 
       // Add directly to confirmed (not pending!) for immediate use
-      voiceProfiles.addConfirmedEmbedding(profileId, embedding, {
+      await voiceProfiles.addConfirmedEmbedding(profileId, embedding, {
         sourceType: 'utterance',
         sourceDuration: durationMs,
       });
@@ -5317,7 +5352,7 @@ ipcMain.handle('add-utterance-to-profile', async (event, {
       }
 
       // Create with immediate embedding (directly in confirmed, not pending)
-      const newProfile = voiceProfiles.saveProfileDirect(
+      const newProfile = await voiceProfiles.saveProfileDirect(
         newProfileName.trim(),
         embedding,
         newProfileRole || 'Arzt',
@@ -5858,7 +5893,7 @@ ipcMain.handle('enroll-optimized-speaker', async (event, data) => {
       }
 
       // Add to existing profile as pending embedding
-      const profile = voiceProfiles.addPendingEmbedding(profileId, embeddingResult.embedding, {
+      const profile = await voiceProfiles.addPendingEmbedding(profileId, embeddingResult.embedding, {
         sourceDuration: embeddingResult.totalDuration,
         transcriptionId: optimizationSession.transcriptionId
       });
@@ -5882,7 +5917,7 @@ ipcMain.handle('enroll-optimized-speaker', async (event, data) => {
       }
 
       // Create new profile with initial pending embedding (NOT confirmed!)
-      const profile = voiceProfiles.saveProfileWithPending(name.trim(), embeddingResult.embedding, role, {
+      const profile = await voiceProfiles.saveProfileWithPending(name.trim(), embeddingResult.embedding, role, {
         sourceDuration: embeddingResult.totalDuration,
         transcriptionId: optimizationSession.transcriptionId
       });
@@ -6086,6 +6121,193 @@ ipcMain.handle('open-sound-settings', async () => {
   return { success: true };
 });
 
+// PowerShell script to read/write Windows microphone input volume via COM API
+const micVolumeScript = `
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceEnumerator {
+    int EnumAudioEndpoints(int dataFlow, int dwStateMask, out IntPtr ppDevices);
+    int GetDefaultAudioEndpoint(int dataFlow, int role, out IntPtr ppEndpoint);
+}
+
+[Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceCollection {
+    int GetCount(out uint pcDevices);
+    int Item(uint nDevice, out IntPtr ppDevice);
+}
+
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDevice {
+    int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
+    int OpenPropertyStore(int stgmAccess, out IntPtr ppProperties);
+    int GetId([MarshalAs(UnmanagedType.LPWStr)] out string ppstrId);
+    int GetState(out int pdwState);
+}
+
+[Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IPropertyStore {
+    int GetCount(out uint cProps);
+    int GetAt(uint iProp, out IntPtr pkey);
+    int GetValue(ref PropertyKey key, out PropVariant pv);
+    int SetValue(ref PropertyKey key, ref PropVariant propvar);
+    int Commit();
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct PropertyKey {
+    public Guid fmtid;
+    public uint pid;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct PropVariant {
+    public ushort vt;
+    public ushort wReserved1;
+    public ushort wReserved2;
+    public ushort wReserved3;
+    public IntPtr val1;
+    public IntPtr val2;
+}
+
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume {
+    int RegisterControlChangeNotify(IntPtr pNotify);
+    int UnregisterControlChangeNotify(IntPtr pNotify);
+    int GetChannelCount(out uint pnChannelCount);
+    int SetMasterVolumeLevel(float fLevelDB, ref Guid pguidEventContext);
+    int SetMasterVolumeLevelScalar(float fLevel, ref Guid pguidEventContext);
+    int GetMasterVolumeLevel(out float pfLevelDB);
+    int GetMasterVolumeLevelScalar(out float pfLevel);
+    int SetChannelVolumeLevel(uint nChannel, float fLevelDB, ref Guid pguidEventContext);
+    int SetChannelVolumeLevelScalar(uint nChannel, float fLevel, ref Guid pguidEventContext);
+    int GetChannelVolumeLevel(uint nChannel, out float pfLevelDB);
+    int GetChannelVolumeLevelScalar(uint nChannel, out float pfLevel);
+    int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, ref Guid pguidEventContext);
+    int GetMute(out bool pbMute);
+}
+
+public class MicVolumeHelper {
+    static readonly PropertyKey PKEY_Device_FriendlyName = new PropertyKey {
+        fmtid = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"),
+        pid = 14
+    };
+
+    static string GetDeviceFriendlyName(IMMDevice device) {
+        IntPtr propsPtr;
+        device.OpenPropertyStore(0, out propsPtr);
+        var props = (IPropertyStore)Marshal.GetObjectForIUnknown(propsPtr);
+        PropertyKey key = PKEY_Device_FriendlyName;
+        PropVariant pv;
+        props.GetValue(ref key, out pv);
+        if (pv.vt == 31) return Marshal.PtrToStringUni(pv.val1);
+        return "";
+    }
+
+    static IAudioEndpointVolume GetCaptureVolume(string deviceName) {
+        var type = Type.GetTypeFromCLSID(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"));
+        var enumerator = (IMMDeviceEnumerator)Activator.CreateInstance(type);
+        IMMDevice targetDevice = null;
+
+        // Try to find specific device by name
+        if (!string.IsNullOrEmpty(deviceName) && deviceName != "Default") {
+            IntPtr collPtr;
+            enumerator.EnumAudioEndpoints(1, 1, out collPtr);
+            var collection = (IMMDeviceCollection)Marshal.GetObjectForIUnknown(collPtr);
+            uint count;
+            collection.GetCount(out count);
+            for (uint i = 0; i < count; i++) {
+                IntPtr devPtr;
+                collection.Item(i, out devPtr);
+                var dev = (IMMDevice)Marshal.GetObjectForIUnknown(devPtr);
+                string name = GetDeviceFriendlyName(dev);
+                if (name.IndexOf(deviceName, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    deviceName.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0) {
+                    targetDevice = dev;
+                    break;
+                }
+            }
+        }
+
+        // Fall back to default capture device
+        if (targetDevice == null) {
+            IntPtr devicePtr;
+            enumerator.GetDefaultAudioEndpoint(1, 0, out devicePtr);
+            targetDevice = (IMMDevice)Marshal.GetObjectForIUnknown(devicePtr);
+        }
+
+        Guid volumeIid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+        object volumeObj;
+        targetDevice.Activate(ref volumeIid, 1, IntPtr.Zero, out volumeObj);
+        return (IAudioEndpointVolume)volumeObj;
+    }
+
+    public static string GetVolume(string deviceName) {
+        var vol = GetCaptureVolume(deviceName);
+        float level; vol.GetMasterVolumeLevelScalar(out level);
+        bool muted; vol.GetMute(out muted);
+        return (muted ? "muted" : Math.Round(level * 100).ToString());
+    }
+
+    public static void SetVolume(string deviceName, float percent) {
+        var vol = GetCaptureVolume(deviceName);
+        Guid empty = Guid.Empty;
+        vol.SetMasterVolumeLevelScalar(percent / 100f, ref empty);
+    }
+}
+'@
+`;
+
+// Get Windows microphone input volume (0-100 or "muted") for the selected mic
+ipcMain.handle('get-mic-volume', async (event, micNameOverride) => {
+  try {
+    const { execFile } = require('child_process');
+    const micName = (micNameOverride || store.get('microphoneName') || '').replace(/'/g, "''");
+    return new Promise((resolve) => {
+      execFile('powershell.exe', ['-NoProfile', '-Command', micVolumeScript + `[MicVolumeHelper]::GetVolume('${micName}')`], { timeout: 5000 }, (err, stdout) => {
+        if (err) {
+          console.error('[MicVolume] Get error:', err.message);
+          resolve({ error: err.message });
+          return;
+        }
+        const value = stdout.trim();
+        if (value === 'muted') {
+          resolve({ volume: 0, muted: true });
+        } else {
+          resolve({ volume: parseInt(value) || 0, muted: false });
+        }
+      });
+    });
+  } catch (err) {
+    console.error('[MicVolume] Get error:', err);
+    return { error: err.message };
+  }
+});
+
+// Set Windows microphone input volume (0-100) for the selected mic
+ipcMain.handle('set-mic-volume', async (event, volume, micNameOverride) => {
+  try {
+    const { execFile } = require('child_process');
+    const clamped = Math.max(0, Math.min(100, parseInt(volume) || 0));
+    const micName = (micNameOverride || store.get('microphoneName') || '').replace(/'/g, "''");
+    return new Promise((resolve) => {
+      execFile('powershell.exe', ['-NoProfile', '-Command', micVolumeScript + `[MicVolumeHelper]::SetVolume('${micName}', ${clamped})`], { timeout: 5000 }, (err) => {
+        if (err) {
+          console.error('[MicVolume] Set error:', err.message);
+          resolve({ error: err.message });
+          return;
+        }
+        resolve({ success: true, volume: clamped });
+      });
+    });
+  } catch (err) {
+    console.error('[MicVolume] Set error:', err);
+    return { error: err.message };
+  }
+});
+
 // Disable global shortcut (for shortcut recording in settings)
 ipcMain.handle('disable-global-shortcut', () => {
   globalShortcut.unregisterAll();
@@ -6140,6 +6362,12 @@ autoUpdater.forceDevUpdateConfig = true;
 // Disable code signature verification (we don't have a code signing certificate)
 autoUpdater.verifyUpdateCodeSignature = false;
 
+// Auto-install downloaded updates when the app quits (e.g. PC restart)
+autoUpdater.autoInstallOnAppQuit = true;
+
+// Flag for startup fallback: auto-install pending update without dialog
+let forceAutoInstall = false;
+
 // Track which version we already notified about (to avoid spam)
 let notifiedUpdateVersion = null;
 
@@ -6160,6 +6388,24 @@ autoUpdater.on('update-available', (info) => {
 autoUpdater.on('update-downloaded', (info) => {
   console.log('Update downloaded:', info.version);
 
+  // Save pending version so startup fallback can detect unapplied updates
+  store.set('pendingUpdateVersion', info.version);
+
+  // Startup fallback: auto-install without dialog if pending update wasn't applied
+  if (forceAutoInstall) {
+    console.log('[AutoUpdate] Pending update detected on startup, auto-installing v' + info.version);
+    forceAutoInstall = false;
+    setImmediate(() => {
+      app.removeAllListeners('window-all-closed');
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.removeAllListeners('close');
+        win.close();
+      });
+      autoUpdater.quitAndInstall(false, true);
+    });
+    return;
+  }
+
   // Only show dialog once per version
   if (notifiedUpdateVersion === info.version) {
     console.log('Already notified about this version, skipping dialog');
@@ -6171,7 +6417,7 @@ autoUpdater.on('update-downloaded', (info) => {
     type: 'info',
     title: 'Update bereit',
     message: `Version ${info.version} wurde heruntergeladen`,
-    detail: 'Das Update wird beim nächsten Start von DentDoc automatisch installiert.',
+    detail: 'Das Update wird beim nächsten Neustart automatisch installiert.',
     buttons: ['Jetzt neu starten', 'Später'],
     defaultId: 0,
     cancelId: 1
@@ -6300,20 +6546,8 @@ app.whenReady().then(() => {
   vadController.initialize();
   console.log('[App] VAD Controller initialized');
 
-  // Initialize voice profiles path (use stored path or default)
-  const storedProfilesPath = store.get('profilesPath');
-  const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
-
-  if (storedProfilesPath) {
-    // Use custom path
-    console.log('[App] Using stored profiles path:', storedProfilesPath);
-    voiceProfiles.setStorePath(storedProfilesPath);
-  } else {
-    // Use default path in Documents folder
-    const defaultProfilesPath = path.join(app.getPath('documents'), 'DentDoc', 'Stimmprofile');
-    console.log('[App] Using default profiles path:', defaultProfilesPath);
-    voiceProfiles.setStorePath(defaultProfilesPath);
-  }
+  // Voice profiles are now stored in the backend DB.
+  // They get initialized via voiceProfiles.init(apiClient, getToken) after user login.
 
   // Register global shortcut (use saved or default F9)
   const savedShortcut = store.get('shortcut') || 'F9';
@@ -6329,6 +6563,21 @@ app.whenReady().then(() => {
       owner: 'Rickpeace',
       repo: 'dentdoc-desktop'
     });
+
+    // Startup fallback: check if a previously downloaded update wasn't applied
+    // (e.g. Windows force-killed the process before NSIS installer could run)
+    const pendingUpdate = store.get('pendingUpdateVersion');
+    if (pendingUpdate && pendingUpdate !== app.getVersion()) {
+      console.log('[AutoUpdate] Pending update v' + pendingUpdate + ' not applied, will auto-install');
+      forceAutoInstall = true;
+      // Safety: reset flag after 60s so a delayed download doesn't
+      // surprise-restart the app while the user is working
+      setTimeout(() => { forceAutoInstall = false; }, 60000);
+    } else if (pendingUpdate) {
+      // Version matches — update was successfully applied
+      console.log('[AutoUpdate] Update v' + pendingUpdate + ' successfully applied');
+      store.delete('pendingUpdateVersion');
+    }
 
     autoUpdater.checkForUpdatesAndNotify();
 
@@ -6353,9 +6602,13 @@ app.whenReady().then(() => {
         // Session expired
         throw new Error('Session expired');
       }
-    }).then(user => {
+    }).then(async user => {
       store.set('user', user);
       trayModule.updateTrayMenu();
+
+      // Initialize voice profiles from backend DB
+      const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
+      await voiceProfiles.init(apiClient, () => store.get('authToken'));
 
       // Create dashboard window hidden at startup (for F9 audio monitoring)
       // The renderer needs to be running to handle getUserMedia for real audio levels
@@ -6444,6 +6697,12 @@ app.whenReady().then(() => {
 app.on('window-all-closed', (e) => {
   // Don't quit the app when all windows are closed (stay in tray)
   e.preventDefault();
+});
+
+// Ensure app.isQuitting is set on all quit paths (Windows shutdown, app.quit(), etc.)
+// This allows close handlers to permit window closing instead of hiding to tray
+app.on('before-quit', () => {
+  app.isQuitting = true;
 });
 
 app.on('will-quit', async () => {

@@ -1,7 +1,7 @@
 # DentDoc Desktop - Architektur & Dokumentation
 
 > **Letzte Aktualisierung:** Februar 2026
-> **Version:** 1.6.17
+> **Version:** 1.7.0
 
 ## Übersicht
 
@@ -276,6 +276,15 @@ VITE_API_URL=http://localhost:3000
 ---
 
 ## Changelog
+
+### Version 1.7.0 (Februar 2026)
+- **Auto-Update Fix:** `before-quit` Handler setzt `app.isQuitting` bei Windows Shutdown, damit `autoInstallOnAppQuit` greifen kann. Startup-Fallback (`pendingUpdateVersion`) für force-killed Szenarien
+- **F9 Race Condition Fix:** `startInProgress` Guard verhindert doppelte `startRecording()` Aufrufe bei schnellem Doppel-Drücken (in Shortcut, Fallback-Shortcut und `toggle-recording` IPC)
+- **Mikrofon-Eingangslautstärke:** Slider in Settings und Setup-Wizard zum Anzeigen/Steuern der Windows-Mic-Lautstärke (PowerShell COM Interop, geräte-spezifisch per Name-Matching)
+- **Cross-Audio Stop:** Transkript-Audio und Profil-Modal-Audio pausieren sich gegenseitig
+- **Utterance-Playback Fix:** Klick auf Utterance im Transkript spielt nur den jeweiligen Abschnitt (stoppt bei `segmentEndMs`)
+- **Dashboard UI:** Einheitliche 800px max-width für alle Card-Views, Onboarding-Card session-basiert
+- **Tawk.to Chat Fix:** `overflow:hidden` auf Webview-Body behebt Scroll-Problem
 
 ### Version 1.6.17 (Februar 2026)
 - **16kHz Live-Recording:** FFmpeg nimmt direkt mit 16kHz auf, Downsample-Schritt entfällt (~7 Min gespart bei 100+ Min Aufnahmen)

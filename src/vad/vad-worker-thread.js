@@ -25,16 +25,16 @@ let vad = null;
 // VAD Configuration
 const CONFIG = {
   sampleRate: 16000,
-  // REDUZIERT: 100ms statt 300ms für schnelleren Recording-Start
-  // FFmpeg braucht ~500ms zum Initialisieren, daher früher starten
-  speechStartMs: 100,
+  // Schneller Trigger: 50ms reicht um Speech-Start zu erkennen
+  // Padding im Controller sorgt dafür, dass nichts abgeschnitten wird
+  speechStartMs: 50,
   speechStopMs: 1500,
   // PRE-ROLL: Erhöht auf 800ms um den FFmpeg-Startup zu kompensieren
   preRollMs: 800,
   postRollMs: 1000,
   frameMs: 20,
-  // Silero VAD parameters - niedrigerer Threshold für schnellere Erkennung
-  sileroThreshold: 0.4,
+  // Silero VAD parameters - sehr niedrig um keine Sprache zu verpassen
+  sileroThreshold: 0.15,
   minSpeechDuration: 0.1,  // Reduziert von 0.25
   maxSpeechDuration: 300,
   // Silero model URL (official sherpa-onnx release)
@@ -183,8 +183,8 @@ async function initializeVAD() {
       for (let idx = 0; idx < input.length; idx++) {
         safeSamples[idx] = input[idx];
       }
-      if (wrapperCallCount <= 3 || wrapperCallCount % 50 === 0) {
-        log(`acceptWaveform wrapper called #${wrapperCallCount}, input.length=${input.length}`);
+      if (wrapperCallCount === 1) {
+        log(`acceptWaveform wrapper active, input.length=${input.length}`);
       }
       return originalAcceptWaveform(safeSamples);
     };
@@ -213,16 +213,20 @@ function addToRingBuffer(samples) {
 // Debug counter for logging
 let processedBatchCount = 0;
 
+// Sample-based timeline: track cumulative sample position for accurate markers
+let lastSamplePosition = 0;
+
 /**
  * Process audio batch
  */
-function processAudioBatch(samples, timestamp) {
+function processAudioBatch(samples, timestamp, samplePosition) {
   if (!state.isInitialized || !vad) {
     log('WARNING: processAudioBatch called but not initialized. isInit:', state.isInitialized, 'vad:', !!vad);
     return;
   }
 
   processedBatchCount++;
+  lastSamplePosition = samplePosition || 0;
 
   // Der Wrapper um vad.acceptWaveform() erstellt die sichere Kopie
   // Wir übergeben samples direkt - der Wrapper kümmert sich um alles
@@ -236,18 +240,9 @@ function processAudioBatch(samples, timestamp) {
   // Check if VAD detected speech
   const isSpeech = vad.isDetected();
 
-  // Log every 10th batch (~1 second)
-  if (processedBatchCount % 10 === 1) {
-    // RMS ist stabiler als Max für Sprache-Erkennung
-    // Keine Spread-Operatoren verwenden (GC-problematisch im Worker)
-    let sumSq = 0;
-    const sampleCount = Math.min(100, samples.length);
-    for (let i = 0; i < sampleCount; i++) {
-      const v = samples[i];
-      sumSq += v * v;
-    }
-    const rms = Math.sqrt(sumSq / sampleCount);
-    log(`Batch #${processedBatchCount}: samples=${samples.length}, rms=${rms.toFixed(4)}, isDetected=${isSpeech}`);
+  // Log speech state every ~1s — just SPEECH or NONE
+  if (processedBatchCount % 10 === 0) {
+    log(isSpeech ? 'SPEECH' : 'NONE');
   }
 
   // Update counters
@@ -274,10 +269,10 @@ function processAudioBatch(samples, timestamp) {
 
     log('Speech started');
 
-    // Send event to main process
+    // Send event to main process (sample-based timeline for accurate markers)
     parentPort.postMessage({
       type: 'speech-start',
-      timestamp: now,
+      samplePosition: lastSamplePosition,
       preRollMs: CONFIG.preRollMs
     });
   }
@@ -290,10 +285,10 @@ function processAudioBatch(samples, timestamp) {
 
     log('Speech ended');
 
-    // Send event to main process
+    // Send event to main process (sample-based timeline for accurate markers)
     parentPort.postMessage({
       type: 'speech-end',
-      timestamp: now,
+      samplePosition: lastSamplePosition,
       postRollMs: CONFIG.postRollMs
     });
   }
@@ -344,7 +339,7 @@ parentPort.on('message', async (data) => {
     case 'audio-batch':
       // Einfache Kopie - der Wrapper um acceptWaveform macht die sichere Kopie
       // Wir übergeben die Samples direkt, der Wrapper kümmert sich um den Rest
-      processAudioBatch(samples, timestamp);
+      processAudioBatch(samples, timestamp, data.samplePosition);
       break;
 
     case 'reset':
@@ -356,7 +351,7 @@ parentPort.on('message', async (data) => {
       if (state.isSpeech) {
         parentPort.postMessage({
           type: 'speech-end',
-          timestamp: Date.now(),
+          samplePosition: lastSamplePosition,
           postRollMs: CONFIG.postRollMs,
           reason: 'manual-stop'
         });

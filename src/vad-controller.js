@@ -34,12 +34,12 @@ let vadWorkerInitialized = false;
 const CONFIG = {
   // Minimum speech duration to keep (discard shorter markers)
   minSpeechMs: 300,
-  // Merge markers closer than this (ms)
-  mergeGapMs: 500,
-  // Padding before speech start (ms) - increased to avoid cutting first syllable
-  paddingBeforeMs: 800,
-  // Padding after speech end (ms)
-  paddingAfterMs: 500
+  // Merge markers closer than this (ms) - 1s to prevent splitting continuous speech
+  mergeGapMs: 1000,
+  // Padding before speech start (ms) - 1.5s to never cut first syllable
+  paddingBeforeMs: 1500,
+  // Padding after speech end (ms) - 0.8s for trailing sounds
+  paddingAfterMs: 800
 };
 
 // ============================================================================
@@ -56,7 +56,12 @@ let state = {
   currentSpeechStart: null,  // When current speech started (null if not speaking)
   // Microphone
   microphoneId: null,
-  tempDir: null
+  tempDir: null,
+  // Sample-based timeline (for marker-only mode)
+  processedSamples: 0,
+  sampleRate: 16000,
+  isPaused: false,
+  markerOnlyMode: false
 };
 
 // Event callbacks
@@ -66,9 +71,9 @@ let callbacks = {
   onError: null
 };
 
-// Audio level throttling (send ~10 updates per second)
+// Audio level throttling (send ~20 updates per second for smooth animation)
 let lastAudioLevelSend = 0;
-const AUDIO_LEVEL_INTERVAL_MS = 100;
+const AUDIO_LEVEL_INTERVAL_MS = 50;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -147,10 +152,21 @@ function mergeMarkers(markers) {
  * Apply padding to markers (clamped to recording duration)
  */
 function applyPadding(markers, recordingDurationMs) {
-  return markers.map(m => ({
+  const padded = markers.map(m => ({
     startMs: Math.max(0, m.startMs - CONFIG.paddingBeforeMs),
     endMs: Math.min(recordingDurationMs, m.endMs + CONFIG.paddingAfterMs)
   }));
+
+  // Prevent overlap between adjacent markers (causes doubled words)
+  for (let i = 1; i < padded.length; i++) {
+    if (padded[i].startMs < padded[i - 1].endMs) {
+      const mid = (padded[i - 1].endMs + padded[i].startMs) / 2;
+      padded[i - 1].endMs = mid;
+      padded[i].startMs = mid;
+    }
+  }
+
+  return padded;
 }
 
 /**
@@ -167,31 +183,33 @@ function filterShortMarkers(markers) {
 /**
  * Handle speech start from VAD Worker
  */
-function handleSpeechStart(timestamp) {
+function handleSpeechStart(data) {
   if (!state.sessionActive || state.currentSpeechStart !== null) {
     return;
   }
 
-  // Calculate relative time from recording start
-  const relativeMs = timestamp - state.recordingStartTime;
+  // Sample-based timeline: exact alignment with WAV file
+  const samplePosition = data.samplePosition || 0;
+  const relativeMs = (samplePosition / state.sampleRate) * 1000;
   state.currentSpeechStart = Math.max(0, relativeMs);
 
-  log(`Speech started at ${state.currentSpeechStart}ms`);
+  log(`Speech started at ${state.currentSpeechStart.toFixed(0)}ms (sample ${samplePosition})`);
 
   // Notify renderer
-  notifyRenderer('vad-speech-detected', { isSpeech: true, timestamp });
+  notifyRenderer('vad-speech-detected', { isSpeech: true });
 }
 
 /**
  * Handle speech end from VAD Worker
  */
-function handleSpeechEnd(timestamp) {
+function handleSpeechEnd(data) {
   if (!state.sessionActive || state.currentSpeechStart === null) {
     return;
   }
 
-  // Calculate relative time from recording start
-  const relativeMs = timestamp - state.recordingStartTime;
+  // Sample-based timeline: exact alignment with WAV file
+  const samplePosition = data.samplePosition || 0;
+  const relativeMs = (samplePosition / state.sampleRate) * 1000;
   const endMs = Math.max(state.currentSpeechStart, relativeMs);
 
   // Create marker
@@ -203,10 +221,10 @@ function handleSpeechEnd(timestamp) {
   state.speechMarkers.push(marker);
   state.currentSpeechStart = null;
 
-  log(`Speech ended at ${endMs}ms, marker: ${marker.startMs}-${marker.endMs}ms`);
+  log(`Speech ended at ${endMs.toFixed(0)}ms, marker: ${marker.startMs.toFixed(0)}-${marker.endMs.toFixed(0)}ms`);
 
   // Notify renderer
-  notifyRenderer('vad-speech-detected', { isSpeech: false, timestamp });
+  notifyRenderer('vad-speech-detected', { isSpeech: false });
 
   if (callbacks.onSpeechMarker) {
     callbacks.onSpeechMarker(marker);
@@ -245,11 +263,11 @@ async function initializeWorker() {
             break;
 
           case 'speech-start':
-            handleSpeechStart(data.timestamp || Date.now());
+            handleSpeechStart(data);
             break;
 
           case 'speech-end':
-            handleSpeechEnd(data.timestamp || Date.now());
+            handleSpeechEnd(data);
             break;
 
           case 'status':
@@ -306,6 +324,10 @@ function processAudioBatch(samples, timestamp) {
   if (!vadWorker || !vadWorkerInitialized) {
     return;
   }
+  if (state.isPaused) return;  // Skip during pause — sample counter stops, timeline auto-excludes pause
+
+  // Track sample-based timeline
+  state.processedSamples += samples.length;
 
   // Element-by-element copy to avoid external buffer issues
   const len = samples.length;
@@ -317,7 +339,8 @@ function processAudioBatch(samples, timestamp) {
   vadWorker.postMessage({
     type: 'audio-batch',
     samples: samplesCopy,
-    timestamp: timestamp
+    timestamp: timestamp,
+    samplePosition: state.processedSamples
   });
 }
 
@@ -356,8 +379,8 @@ function sendAudioLevel(samples) {
   lastAudioLevelSend = now;
 
   const rms = calculateRMS(samples);
-  // Notify all windows (status overlay listens for 'audio-level')
-  notifyRenderer('audio-level', rms);
+  const boosted = Math.min(1, rms * 5);  // Match F9 monitoring boost
+  notifyRenderer('audio-level', boosted);
 }
 
 // ============================================================================
@@ -372,9 +395,9 @@ function initialize() {
   ipcMain.on('vad-audio-batch', (event, data) => {
     batchCount++;
 
-    const shouldLog = batchCount <= 5 || batchCount % 10 === 1;
-    if (shouldLog) {
-      log(`Audio batch #${batchCount} received, sessionActive=${state.sessionActive}, workerInit=${vadWorkerInitialized}`);
+    // Only log first batch and then every 500th (~50s)
+    if (batchCount === 1 || batchCount % 500 === 0) {
+      log(`Audio batch #${batchCount}, markers: ${state.speechMarkers.length}`);
     }
 
     if (state.sessionActive && vadWorkerInitialized) {
@@ -710,6 +733,109 @@ async function concatenateSegments(outputPath) {
   return renderSpeechOnly(segments, outputPath);
 }
 
+// ============================================================================
+// MARKER-ONLY MODE (for live VAD during F9 recording)
+// Recording managed by main.js, we only collect speech markers
+// ============================================================================
+
+/**
+ * Start collecting speech markers without starting a recording.
+ * Recording is managed externally by main.js (audioRecorder).
+ * Uses sample-based timeline for accurate marker positions.
+ */
+function startMarkerCollection(options = {}) {
+  if (state.sessionActive) {
+    log('Session already active');
+    return false;
+  }
+
+  log('Starting marker collection (marker-only mode)');
+  state.sessionActive = true;
+  state.markerOnlyMode = true;
+  state.speechMarkers = [];
+  state.currentSpeechStart = null;
+  state.processedSamples = 0;
+  state.isPaused = false;
+  state.fullRecordingPath = options.fullRecordingPath || null;
+
+  return true;
+}
+
+/**
+ * Stop collecting markers and return processed segments.
+ * Does NOT stop any recording — that's managed by main.js.
+ * @param {string} fullRecordingPath - Path to the full WAV recording
+ * @returns {Array} Segments ready for speechRenderer.renderSpeechOnly()
+ */
+function stopMarkerCollection(fullRecordingPath) {
+  if (!state.sessionActive) {
+    log('No active session');
+    return [];
+  }
+
+  state.sessionActive = false;
+
+  // Close open speech marker using current sample position
+  const recordingDurationMs = (state.processedSamples / state.sampleRate) * 1000;
+  if (state.currentSpeechStart !== null) {
+    state.speechMarkers.push({
+      startMs: state.currentSpeechStart,
+      endMs: recordingDurationMs
+    });
+    state.currentSpeechStart = null;
+  }
+
+  // Process markers (filter short, merge close, add padding)
+  let markers = filterShortMarkers(state.speechMarkers);
+  markers = mergeMarkers(markers);
+  markers = applyPadding(markers, recordingDurationMs);
+
+  // Log stats
+  const totalSpeechMs = markers.reduce((sum, m) => sum + (m.endMs - m.startMs), 0);
+  const silencePercent = recordingDurationMs > 0
+    ? ((1 - totalSpeechMs / recordingDurationMs) * 100).toFixed(1) : '0';
+
+  console.log('');
+  console.log('///// LIVE-VAD ERGEBNIS /////');
+  console.log(`  Aufnahme:  ${(recordingDurationMs / 1000).toFixed(1)}s`);
+  console.log(`  Sprache:   ${(totalSpeechMs / 1000).toFixed(1)}s`);
+  console.log(`  Entfernt:  ${silencePercent}% Stille`);
+  console.log(`  Marker:    ${state.speechMarkers.length} roh → ${markers.length} verarbeitet`);
+  console.log('////////////////////////////');
+
+  // Convert to segment format for speechRenderer
+  const segments = markers.map((marker, index) => ({
+    index,
+    path: fullRecordingPath,
+    startMs: marker.startMs,
+    endMs: marker.endMs,
+    duration: marker.endMs - marker.startMs
+  }));
+
+  state.markerOnlyMode = false;
+  return segments;
+}
+
+/**
+ * Pause marker collection (e.g., when recording is paused).
+ * Audio batches will be ignored and sample counter stops.
+ * Timeline auto-excludes pause gaps.
+ */
+function pauseMarkerCollection() {
+  if (!state.sessionActive || state.isPaused) return;
+  state.isPaused = true;
+  log('Marker collection paused');
+}
+
+/**
+ * Resume marker collection (e.g., when recording resumes).
+ */
+function resumeMarkerCollection() {
+  if (!state.sessionActive || !state.isPaused) return;
+  state.isPaused = false;
+  log('Marker collection resumed');
+}
+
 module.exports = {
   initialize,
   initializeWorker,
@@ -722,5 +848,9 @@ module.exports = {
   isWorkerInitialized: () => vadWorkerInitialized,
   renderSpeechOnly,
   concatenateSegments,
+  startMarkerCollection,
+  stopMarkerCollection,
+  pauseMarkerCollection,
+  resumeMarkerCollection,
   CONFIG
 };
