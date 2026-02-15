@@ -363,31 +363,24 @@ function stopF9AudioMonitoring() {
 ipcRenderer.on('recording-started', async (event, options) => {
   console.log('F9 recording started, options:', options);
 
-  // If VAD mode, ONLY start VAD integration - skip F9 audio monitoring!
-  // VAD has its own audio capture and they conflict with each other.
+  // Always start F9 audio monitoring for status bar levels (lightweight, reliable fallback)
+  await startF9AudioMonitoring(options?.microphoneId);
+
   if (options?.vadMode) {
-    console.log('[VAD] VAD mode - skipping F9 audio monitoring, starting VAD integration only...');
+    // Also start VAD integration for speech marker detection
+    console.log('[VAD] VAD mode - starting VAD integration alongside F9 monitoring...');
     startVADIntegration(options?.microphoneId).catch(err => {
       console.error('[VAD] startVADIntegration error:', err);
     });
-  } else {
-    // Normal recording mode - use F9 audio monitoring for level display
-    console.log('[F9] Normal mode - starting audio monitoring...');
-    await startF9AudioMonitoring(options?.microphoneId);
   }
 });
 
 ipcRenderer.on('recording-stopped', () => {
-  // Only stop F9 audio monitoring if VAD is not active/starting
-  // VAD manages its own audio capture
-  if (!vadIsActive && !vadIsStarting) {
-    console.log('[F9] Stopping F9 audio monitoring...');
-    stopF9AudioMonitoring();
-  } else {
-    console.log('[VAD] VAD active/starting - skipping F9 audio monitoring stop');
-  }
+  // Always stop F9 audio monitoring (always started now)
+  console.log('[F9] Stopping F9 audio monitoring...');
+  stopF9AudioMonitoring();
 
-  // Only stop VAD if it's actually active (not starting)
+  // Also stop VAD if it's active
   if (vadIsActive && !vadIsStarting) {
     console.log('[VAD] Stopping VAD integration...');
     stopVADIntegration();
