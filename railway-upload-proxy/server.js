@@ -38,8 +38,8 @@ fastify.post('/upload', async (request, reply) => {
   console.log('Upload started');
 
   try {
-    // EU Endpoint für DSGVO-Compliance
-    const upstream = await fetch('https://api.eu.assemblyai.com/v2/upload', {
+    // TODO: re-enable EU endpoint for DSGVO production: https://api.eu.assemblyai.com/v2/upload
+    const upstream = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
       headers: {
         authorization: ASSEMBLYAI_API_KEY,
