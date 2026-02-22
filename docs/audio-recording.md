@@ -292,20 +292,52 @@ async function stopRecordingWithIphone() {
 
 ### Zweck
 
-VAD wird verwendet um **nach der Aufnahme** die Stille aus der Audio-Datei zu entfernen. Dies:
+VAD entfernt Stille aus der Audio-Datei. Dies:
 - Reduziert die Upload-Größe
 - Verbessert die Transkriptions-Qualität
 - Spart AssemblyAI Kosten (Abrechnung nach Audio-Länge)
 
-**Wichtig:** VAD läuft NICHT während der Live-Aufnahme, sondern als Post-Processing-Schritt.
+### Zwei VAD-Modi
+
+| Modus | Wann | Wie | Dauer |
+|-------|------|-----|-------|
+| **Live VAD** | Mikrofon-Aufnahme (F9) | Sammelt Marker während der Aufnahme parallel zu FFmpeg | ~5s nach Stop |
+| **Offline VAD** | Manueller Datei-Upload | Analysiert komplette WAV-Datei nachträglich | ~3 Min bei 30 Min Audio |
+
+**Live VAD** ist der Standard für alle Mikrofon-Aufnahmen. Offline VAD dient nur als Fallback (wenn Live VAD keine Marker liefert) und für manuell hochgeladene Dateien.
 
 ### Architektur
 
+**Live VAD (während Mikrofon-Aufnahme):**
+```
+┌─────────────────────────────────────────────────────┐
+│ vad-controller.js (Marker Collection)               │
+│  - startMarkerCollection() bei F9 Start             │
+│  - Empfängt Audio-Batches vom Renderer AudioWorklet │
+│  - Trackt sample-basierte Timeline                  │
+│  - Pause/Resume Support                             │
+│  - stopMarkerCollection() bei F9 Stop               │
+└───────────────────────┬─────────────────────────────┘
+                        │ Worker Thread
+┌───────────────────────▼─────────────────────────────┐
+│ vad/vad-worker-thread.js                            │
+│  - Sherpa-ONNX Silero VAD (Echtzeit)                │
+│  - Sendet speech-start/speech-end Events            │
+│  - samplePosition für exakte Timeline               │
+└───────────────────────┬─────────────────────────────┘
+                        │ Nach Stop
+┌───────────────────────▼─────────────────────────────┐
+│ pipeline/speechRenderer.js                          │
+│  - Batch-Extraktion via FFmpeg filter_complex       │
+│  - Erzeugt speech_only.wav aus Markern              │
+└─────────────────────────────────────────────────────┘
+```
+
+**Offline VAD (für Datei-Upload / Fallback):**
 ```
 ┌─────────────────────────────────────────────────────┐
 │ pipeline/offlineVad.js (Orchestrierung)             │
 │  - Startet Worker Thread für VAD                    │
-│  - Fallback auf Main Thread bei Worker-Fehler       │
 │  - Cancel-Support mit 3s Hard-Kill Timeout          │
 └───────────────────────┬─────────────────────────────┘
                         │ Worker Thread
@@ -313,31 +345,21 @@ VAD wird verwendet um **nach der Aufnahme** die Stille aus der Audio-Datei zu en
 │ pipeline/offlineVadWorker.js                        │
 │  - Streaming WAV-Lesen (64KB Chunks, ~128KB RAM)    │
 │  - Sherpa-ONNX VAD Frame-für-Frame                  │
-│  - Progress-Reporting (max 10 Updates/s)            │
-│  - Cancel-Support (Flag bricht Loop ab)             │
 └───────────────────────┬─────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────┐
-│ pipeline/speechRenderer.js                          │
-│  - Batch-Extraktion via FFmpeg filter_complex       │
-│  - Dynamisches Chunking bei langen Commands         │
-│  - Fallback auf sequentielle Extraktion             │
-│  - Erzeugt speech_only.wav                          │
-└───────────────────────┬─────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────┐
-│ silero_vad.onnx                                     │
-│  - Neuronales Netzwerk für VAD                      │
-│  - ~2MB Modell                                      │
+│ pipeline/speechRenderer.js (selbe wie oben)         │
 └─────────────────────────────────────────────────────┘
 ```
 
-### Offline VAD (pipeline/offlineVad.js)
+**Gemeinsam:** silero_vad.onnx (~2MB Modell)
+
+### Offline VAD (pipeline/offlineVad.js) — nur Datei-Upload
 
 ```javascript
 const { runOfflineVAD, cancelVAD } = require('./src/pipeline/offlineVad');
 
-// Nach der Aufnahme: Sprach-Segmente erkennen
+// Für manuellen Datei-Upload: Sprach-Segmente erkennen
 const segments = await runOfflineVAD(recordedAudioPath, (progress) => {
   // progress: { stage: 'vad', percent: 45, message: 'Sprache wird erkannt... 45%' }
   updateUI(progress);
@@ -366,47 +388,85 @@ Der VAD Worker (`offlineVadWorker.js`) vermeidet den Main-Thread-Freeze durch:
 const { wavPath, speechMap } = await speechRenderer.renderSpeechOnly(segments, outputPath);
 ```
 
-### VAD-Flow im Verarbeitungsprozess
+### Live VAD-Flow (Mikrofon-Aufnahme)
 
 ```
-1. User stoppt Aufnahme (F9)
-2. Audio-Datei liegt vor (bereits 16kHz mono - kein Downsample)
-3. offlineVad.js startet Worker Thread
-4. Worker liest WAV streaming, füttern Silero VAD frame-für-frame
-5. Erkennt Sprach-Segmente (z.B. 0-30s, 45-120s)
-6. speechRenderer.js extrahiert Segmente via FFmpeg filter_complex
-7. Ergebnis: speech_only.wav (nur Sprache, Stille entfernt)
-8. Kürzere Datei wird hochgeladen
+1. User drückt F9
+2. FFmpeg startet Aufnahme + vadController.startMarkerCollection()
+3. Renderer startet AudioWorklet, sendet Audio-Batches via IPC
+4. vad-controller.js → vad-worker-thread.js: Echtzeit-VAD
+5. Worker sendet speech-start/speech-end mit samplePosition
+6. Controller sammelt Marker (processedSamples-basierte Timeline)
+7. User drückt F9 erneut
+8. vadController.stopMarkerCollection() → verarbeitete Segmente
+9. speechRenderer extrahiert Sprache via FFmpeg (~5s)
+10. speech_only.wav wird hochgeladen
 ```
 
-### vad-controller.js (Live Audio-Level)
+### Offline VAD-Flow (Datei-Upload / Fallback)
 
-Der VAD-Controller wird primär für **Live Audio-Level Anzeige** verwendet (nicht für Aufnahme-Steuerung):
+```
+1. Audio-Datei liegt vor (bereits 16kHz mono)
+2. offlineVad.js startet Worker Thread
+3. Worker liest WAV streaming, füttert Silero VAD frame-für-frame
+4. Erkennt Sprach-Segmente (z.B. 0-30s, 45-120s)
+5. speechRenderer extrahiert Segmente via FFmpeg filter_complex
+6. speech_only.wav wird hochgeladen
+```
 
+### vad-controller.js (Live VAD + Audio-Level)
+
+Der VAD-Controller hat zwei Aufgaben:
+1. **Marker Collection:** Sammelt Speech-Marker während der Aufnahme
+2. **Audio-Level:** Sendet RMS-Level an Status-Overlay (5x Boost, 50ms Throttle)
+
+**Marker-Only API:**
 ```javascript
 const vadController = require('./src/vad-controller');
 
 // Initialisieren (einmal bei App-Start)
 vadController.initialize();
 
-// Für Audio-Level Monitoring im Dashboard
-vadController.onAudioLevel((level) => {
-  // 0.0 - 1.0
-  updateAudioMeter(level);
-});
+// Bei F9 Start:
+vadController.startMarkerCollection({ fullRecordingPath });
+
+// Bei Pause/Resume:
+vadController.pauseMarkerCollection();
+vadController.resumeMarkerCollection();
+
+// Bei F9 Stop:
+const segments = vadController.stopMarkerCollection(fullRecordingPath);
+// segments: [{ index, path, startMs, endMs, duration }, ...]
 ```
 
-### vad-config.js
+**Sample-basierte Timeline:**
+Marker-Positionen basieren auf `processedSamples / sampleRate * 1000`, nicht auf `Date.now()`. Dadurch:
+- Exakte Ausrichtung mit WAV-Datei
+- Pause/Resume funktioniert automatisch (Counter stoppt bei Pause)
+- Kein Drift durch IPC-Latenz
 
-```javascript
-module.exports = {
-  // Silero VAD Parameter
-  sampleRate: 16000,
-  frameSamples: 512,        // 32ms pro Frame
-  silenceThreshold: 0.5,    // VAD Confidence
-  speechPadMs: 300,         // Padding um Sprache (verhindert abgeschnittene Wörter)
-};
-```
+### VAD-Konfiguration
+
+**vad-worker-thread.js CONFIG:**
+
+| Parameter | Wert | Beschreibung |
+|-----------|------|--------------|
+| `sileroThreshold` | 0.15 | Niedrig = empfindlich, verpasst keine leise Sprache |
+| `speechStartMs` | 50 | Schneller Trigger (50ms reicht) |
+| `speechStopMs` | 1500 | 1.5s Stille → Speech End |
+| `preRollMs` | 800 | Ring-Buffer für FFmpeg-Startup |
+
+**vad-controller.js CONFIG:**
+
+| Parameter | Wert | Beschreibung |
+|-----------|------|--------------|
+| `paddingBeforeMs` | 1500 | 1.5s vor Sprache (erste Silbe nie abschneiden) |
+| `paddingAfterMs` | 800 | 0.8s nach Sprache (Nachhall) |
+| `mergeGapMs` | 1000 | Marker innerhalb 1s werden vereint |
+| `minSpeechMs` | 300 | Marker < 300ms werden verworfen |
+
+**applyPadding() Overlap-Schutz:**
+Nach dem Padding werden benachbarte Marker geprüft. Bei Überlappung wird am Mittelpunkt getrennt. Verhindert doppelte Wörter nach Pause/Resume.
 
 ### VAD Performance-Optimierungen
 
@@ -436,8 +496,21 @@ module.exports = {
 
 **Segment-Guardrails:**
 - Minimum Segment-Länge: 300ms
-- Merge Gap: 400ms (nahe Segmente werden vereint)
+- Merge Gap: 1000ms Live VAD / 400ms Offline VAD (nahe Segmente werden vereint)
 - Hard Cap: max 500 Segmente (verhindert filter_complex Explosion)
+
+#### Februar 2026: Live VAD (KEINE ANALYSE-WARTEZEIT MEHR)
+
+**Problem:** Bei 30-Min-Aufnahme auf langsamem PC dauerte "Sprache wird erkannt" ~3 Minuten (28K+ ONNX Inference Calls nach dem Stoppen).
+
+**Lösung:** VAD läuft jetzt **während der Aufnahme** parallel zu FFmpeg. Nach Stop nur noch FFmpeg-Extraktion (~5s).
+
+| Aspekt | Vorher (Offline) | Nachher (Live) |
+|--------|-----------------|----------------|
+| VAD-Zeitpunkt | Nach der Aufnahme | Während der Aufnahme |
+| Wartezeit nach Stop | ~3 Min (30 Min Audio) | ~5s |
+| Audio-Level | Separater Stream (F9 Monitoring) | Via VAD Controller (5x Boost) |
+| Pause/Resume | Nicht relevant | Sample-Timeline stoppt automatisch |
 
 ---
 
@@ -536,7 +609,7 @@ ffmpeg -i input.webm \
 ┌───────────────────────▼─────────────────────────────┐
 │ speaker-recognition/voice-profiles.js               │
 │  - Speichern/Laden von Stimmprofilen                │
-│  - JSON-Dateien in Documents/DentDoc/Stimmprofile   │
+│  - Backend DB (API) + In-Memory Cache               │
 └───────────────────────┬─────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────┐
@@ -569,21 +642,20 @@ const result = await speakerRecognition.identifySpeakers(
 ```javascript
 const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
 
-// Pfad setzen
-voiceProfiles.setStorePath('/path/to/profiles');
+// Initialisierung (bei Login/App-Start)
+await voiceProfiles.init(apiClient, () => store.get('authToken'));
 
-// Profil speichern
-await voiceProfiles.saveProfile({
-  name: 'Dr. Müller',
-  role: 'Zahnarzt',
-  embedding: [0.1, 0.2, ...]  // 256-dim Vektor
-});
+// Alle Profile (sync, aus Cache)
+const profiles = voiceProfiles.getAllProfiles();
 
-// Alle Profile laden
-const profiles = voiceProfiles.loadAllProfiles();
+// Profil erstellen (async, via API)
+await voiceProfiles.saveProfile('Dr. Müller', embedding, 'Arzt');
 
-// Profil löschen
-voiceProfiles.deleteProfile('profile-id');
+// Embedding hinzufügen (async)
+await voiceProfiles.addConfirmedEmbedding(profileId, embedding, { sourceType: 'utterance' });
+
+// Profil löschen (async, via API)
+await voiceProfiles.deleteProfile(profileId);
 ```
 
 ### Embedding-Vergleich
@@ -629,23 +701,19 @@ let currentEnrollmentPath = null;
 let currentEnrollmentName = null;
 let currentEnrollmentRole = null;
 
-ipcMain.handle('start-enrollment', async (e, { name, role }) => {
+ipcMain.handle('start-voice-enrollment', async (e, { name, role }) => {
   isEnrolling = true;
   currentEnrollmentName = name;
   currentEnrollmentRole = role;
   // Aufnahme starten...
 });
 
-ipcMain.handle('stop-enrollment', async () => {
+ipcMain.handle('stop-voice-enrollment', async () => {
   isEnrolling = false;
   // Embedding extrahieren
   const embedding = await speakerRecognition.getEmbedding(currentEnrollmentPath);
-  // Profil speichern
-  await voiceProfiles.saveProfile({
-    name: currentEnrollmentName,
-    role: currentEnrollmentRole,
-    embedding
-  });
+  // Profil speichern (async, via Backend API)
+  await voiceProfiles.saveProfile(currentEnrollmentName, embedding, currentEnrollmentRole);
 });
 ```
 

@@ -1,6 +1,27 @@
 # DentDoc Desktop - TODO
 
+## !!! CRITICAL: AssemblyAI Endpoints zurück auf EU (DSGVO) !!!
 
+Aktuell US endpoint (`api.assemblyai.com`) für Universal-3 Pro Testing.
+**MUSS vor Production zurück auf EU (`api.eu.assemblyai.com`)!**
+
+### 4 Dateien ändern (alle markiert mit `// TODO: re-enable for DSGVO production`):
+
+1. `saas-starter/app/api/transcriptions/start/route.ts` — `baseUrl` uncomment
+2. `saas-starter/app/api/transcriptions/upload/route.ts` — `baseUrl` uncomment
+3. `saas-starter/app/api/transcriptions/[id]/status/route.ts` — `baseUrl` uncomment
+4. `dentdoc-desktop/railway-upload-proxy/server.js` — URL zurück auf `https://api.eu.assemblyai.com/v2/upload` + Railway redeployen!
+
+### VOR dem Switch testen!
+- AssemblyAI Docs sagen nur "LLM Gateway not supported in EU"
+- NICHT bestätigt ob Universal-3 Pro (`speech_models`, `prompt`, `temperature`, `language_detection`) auf EU funktioniert
+- Erst nur `start/route.ts` auf EU switchen und eine Transkription testen
+
+### AssemblyAI SDK Types
+- `temperature` nicht in `TranscribeParams` — `as any` cast aktiv
+- Bei SDK Update checken ob Type hinzugefügt wurde (`npm update assemblyai`)
+
+---
 
 
 knopf für aufnahme .... FLIC !? oder selber bauen ?

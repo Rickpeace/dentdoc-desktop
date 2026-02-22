@@ -230,6 +230,16 @@ async function stopRecording() {
 }
 ```
 
+#### `processFileWithVAD(audioPath, token, options)` (Zeile ~1581)
+```javascript
+async function processFileWithVAD(audioPath, token, options) {
+  // options: { skipVAD, liveSegments, source }
+  // skipVAD=true + liveSegments=[...] → Nutzt Live-Marker (kein Offline VAD)
+  // skipVAD=false → Offline VAD (nur Datei-Upload)
+  // liveSegments leer → Upload ohne Stille-Entfernung
+}
+```
+
 #### `processAudioFile(audioPath)` (Zeile ~870)
 ```javascript
 async function processAudioFile(audioPath) {
@@ -399,8 +409,8 @@ app.whenReady().then(() => {
   // 4. VAD Controller initialisieren
   vadController.initialize();
 
-  // 5. Voice Profiles Pfad setzen
-  voiceProfiles.setStorePath(profilesPath);
+  // 5. Voice Profiles initialisieren (Backend DB)
+  await voiceProfiles.init(apiClient, () => store.get('authToken'));
 
   // 6. Shortcut registrieren
   registerShortcut(store.get('shortcut', 'F9'));

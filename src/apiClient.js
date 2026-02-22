@@ -494,11 +494,11 @@ async function getDocumentation(transcriptionId, token) {
  * @param {string} token - Auth token
  * @returns {Promise<Object>} Full response with documentation, detection, status01, statusPA
  */
-async function getDocumentationAgentV2_1(transcriptionId, token) {
+async function getDocumentationAgentV2_1(transcriptionId, token, appVersion) {
   try {
     const response = await axios.post(
       `${API_BASE_URL}api/transcriptions/${transcriptionId}/generate-doc-agent-v2.1`,
-      {},
+      { appVersion },
       {
         headers: {
           'Authorization': `Bearer ${token}`,

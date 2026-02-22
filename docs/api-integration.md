@@ -347,11 +347,90 @@ autoUploadDebugLogs('startup');
 | `/api/subscription` | GET | Abo-Status |
 | `/api/subscription/portal` | GET | Stripe Portal URL |
 
+### Voice Profiles
+
+| Endpoint | Method | Beschreibung |
+|----------|--------|--------------|
+| `/api/voice-profiles` | GET | Alle Stimmprofile abrufen |
+| `/api/voice-profiles` | POST | Neues Stimmprofil erstellen |
+| `/api/voice-profiles/{id}` | GET | Einzelnes Profil abrufen |
+| `/api/voice-profiles/{id}` | PATCH | Profil aktualisieren |
+| `/api/voice-profiles/{id}` | DELETE | Profil löschen |
+
 ### Debug
 
 | Endpoint | Method | Beschreibung |
 |----------|--------|--------------|
 | `/api/debug-logs` | POST | Debug-Logs hochladen |
+
+---
+
+### Voice Profiles
+
+#### `getVoiceProfiles(token)`
+
+```javascript
+const profiles = await apiClient.getVoiceProfiles(token);
+// profiles: [{ id, name, role, confirmedEmbeddings, pendingEmbeddings, centroid, ... }]
+```
+
+**Request:**
+```http
+GET /api/voice-profiles
+Authorization: Bearer <token>
+```
+
+---
+
+#### `createVoiceProfile(token, data)`
+
+```javascript
+const profile = await apiClient.createVoiceProfile(token, {
+  name: 'Dr. Müller',
+  role: 'Arzt',
+  confirmedEmbeddings: '[]',
+  pendingEmbeddings: '[]'
+});
+```
+
+**Request:**
+```http
+POST /api/voice-profiles
+Authorization: Bearer <token>
+{ "name": "Dr. Müller", "role": "Arzt", ... }
+```
+
+---
+
+#### `updateVoiceProfile(token, id, data)`
+
+```javascript
+const profile = await apiClient.updateVoiceProfile(token, 5, {
+  confirmedEmbeddings: '[...]',
+  centroid: '[...]'
+});
+```
+
+**Request:**
+```http
+PATCH /api/voice-profiles/{id}
+Authorization: Bearer <token>
+{ "confirmedEmbeddings": "[...]", "centroid": "[...]" }
+```
+
+---
+
+#### `deleteVoiceProfile(token, id)`
+
+```javascript
+await apiClient.deleteVoiceProfile(token, 5);
+```
+
+**Request:**
+```http
+DELETE /api/voice-profiles/{id}
+Authorization: Bearer <token>
+```
 
 ---
 

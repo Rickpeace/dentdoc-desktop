@@ -11,7 +11,7 @@ Die App verwendet mehrere Speichermechanismen:
 | Einstellungen | electron-store | Persistente JSON-Datei |
 | Transkripte | JSON-Dateien | Export in User-Ordner |
 | Audio | WebM/WAV-Dateien | Temporär oder persistent |
-| Stimmprofile | JSON-Dateien | User-definierter Pfad |
+| Stimmprofile | Backend DB (PostgreSQL) | API + In-Memory Cache |
 
 ---
 
@@ -46,11 +46,6 @@ store.get('autoExport', false)        // Auto-Export aktiviert?
 store.get('transcriptSavePath')       // Transkript-Export-Pfad
 store.get('keepAudio', false)         // Audio behalten?
 store.get('audioSavePath')            // Audio-Speicherpfad
-```
-
-#### Voice Profiles
-```javascript
-store.get('profilesPath')             // Stimmprofile-Pfad
 ```
 
 #### UI Settings
@@ -136,10 +131,6 @@ const transcriptPath = store.get('transcriptSavePath') ||
 const audioPath = store.get('audioSavePath') ||
   path.join(dentdocBase, 'Audio');
 
-// Stimmprofile
-const profilesPath = store.get('profilesPath') ||
-  path.join(dentdocBase, 'Stimmprofile');
-
 // Fehlgeschlagene Aufnahmen (Backup)
 const failedPath = path.join(dentdocBase, 'Fehlgeschlagen');
 ```
@@ -156,11 +147,6 @@ C:\Users\{user}\Documents\DentDoc\
 ├── Audio\
 │   ├── 2026-01-15_14-30-25.webm
 │   ├── 2026-01-15_15-45-10.webm
-│   └── ...
-│
-├── Stimmprofile\
-│   ├── dr-mueller.json
-│   ├── zfa-schmidt.json
 │   └── ...
 │
 └── Fehlgeschlagen\
@@ -234,19 +220,27 @@ const filename = `${timestamp}_transkript.json`;
 
 ---
 
-## Stimmprofile
+## Stimmprofile (Backend DB)
 
-### Dateiformat
+### Speicherort
 
-```javascript
-// dr-mueller.json
-{
-  "id": "uuid-1234-5678",
-  "name": "Dr. Müller",
-  "role": "Zahnarzt",
-  "createdAt": "2026-01-10T10:00:00.000Z",
-  "embedding": [0.123, -0.456, 0.789, ...]  // 256-dim Float-Array
-}
+Stimmprofile werden in der PostgreSQL-Datenbank (Supabase) gespeichert und beim App-Start in einen In-Memory Cache geladen. Lese-Operationen greifen auf den Cache zu (sync), Schreib-Operationen gehen über die REST API (async).
+
+### Datenbankschema
+
+```sql
+voice_profiles (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER REFERENCES users(id),
+  name            VARCHAR(100) NOT NULL,
+  role            VARCHAR(20) NOT NULL,        -- 'Arzt' | 'ZFA' | 'Sonstige'
+  confirmed_embeddings TEXT DEFAULT '[]',       -- JSON-Array von Embedding-Objekten
+  pending_embeddings   TEXT DEFAULT '[]',       -- JSON-Array von Pending-Embeddings
+  centroid        TEXT,                         -- JSON-Array (512-dim Durchschnitts-Vektor)
+  centroid_updated_at TIMESTAMP,
+  created_at      TIMESTAMP DEFAULT NOW(),
+  updated_at      TIMESTAMP DEFAULT NOW()
+)
 ```
 
 ### voice-profiles.js API
@@ -254,23 +248,27 @@ const filename = `${timestamp}_transkript.json`;
 ```javascript
 const voiceProfiles = require('./src/speaker-recognition/voice-profiles');
 
-// Pfad setzen (einmal bei App-Start)
-voiceProfiles.setStorePath('/path/to/profiles');
+// Initialisierung (bei Login/App-Start)
+await voiceProfiles.init(apiClient, () => store.get('authToken'));
 
-// Alle Profile laden
-const profiles = voiceProfiles.loadAllProfiles();
-// → [{ id, name, role, embedding }, ...]
+// Alle Profile (sync, aus Cache)
+const profiles = voiceProfiles.getAllProfiles();
+// → [{ id, name, role, confirmed_embeddings, pending_embeddings, centroid, ... }, ...]
 
-// Profil speichern
-await voiceProfiles.saveProfile({
-  name: 'Dr. Müller',
-  role: 'Zahnarzt',
-  embedding: [...]
-});
+// Profil erstellen (async, via API)
+await voiceProfiles.saveProfile('Dr. Müller', embedding, 'Arzt');
 
-// Profil löschen
-voiceProfiles.deleteProfile('uuid-1234-5678');
+// Embedding zu Profil hinzufügen (async)
+await voiceProfiles.addConfirmedEmbedding(profileId, embedding, { sourceType: 'utterance' });
+
+// Profil umbenennen (async)
+await voiceProfiles.updateProfile(profileId, { name: 'Neuer Name' });
+
+// Profil löschen (async, via API)
+await voiceProfiles.deleteProfile(profileId);
 ```
+
+**Wichtig:** Profile-IDs sind DB Serial Integers (nicht UUIDs). IPC vom Renderer sendet Strings — `voice-profiles.js` konvertiert intern mit `parseInt()`.
 
 ---
 

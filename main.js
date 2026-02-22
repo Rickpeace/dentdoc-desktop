@@ -1352,7 +1352,7 @@ async function processAudioFile(audioFilePath, options = {}) {
 
     // Generate documentation - Agent V2.1 only
     updateStatusOverlay('Dokumentation...', 'KI-Agent erstellt Dokumentation...', 'processing', { step: 4 });
-    const result = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
+    const result = await apiClient.getDocumentationAgentV2_1(transcriptionId, token, app.getVersion());
 
     const documentation = result.documentation;
     const finalTranscript = result.transcript || transcript;
@@ -1771,7 +1771,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const docStart = Date.now();
     updateStatusOverlay('Verarbeitung...', 'KI-Agent erstellt Dokumentation...', 'processing', { step: 4 });
 
-    const docResponse = await apiClient.getDocumentationAgentV2_1(transcriptionId, token);
+    const docResponse = await apiClient.getDocumentationAgentV2_1(transcriptionId, token, app.getVersion());
     console.log(`[TIMING] Documentation completed in ${((Date.now() - docStart) / 1000).toFixed(2)}s`);
 
     const documentation = docResponse.documentation;

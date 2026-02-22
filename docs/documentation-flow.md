@@ -254,6 +254,10 @@ Content-Type: application/json
 
 ```javascript
 async function processAudioFile(audioPath) {
+  // 0. VAD: Bereits während Aufnahme erledigt (Live VAD Marker)
+  //    speech_only.wav bereits via speechRenderer aus Live-Segmenten erzeugt
+  //    → Direkt zum Upload (kein Offline VAD nötig)
+
   // 1. Upload
   updateStatusOverlay('Verarbeitung', 'Audio wird hochgeladen...', 'processing');
   const transcriptionId = await apiClient.uploadAudio(audioPath, token, onProgress);

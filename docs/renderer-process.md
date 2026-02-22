@@ -25,26 +25,31 @@ Das Dashboard ist ein Single-Page-App mit Tab-Navigation:
 ```
 ┌──────────────────────────────────────────────────────┐
 │ [Logo] DentDoc          [Theme] [?] [_] [□] [X]     │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│  [Home] [Archiv] [Stimmprofile] [Einstellungen]     │
-│                                                      │
-│  ┌──────────────────────────────────────────────┐   │
-│  │                                              │   │
-│  │            Tab-Content                       │   │
-│  │                                              │   │
-│  └──────────────────────────────────────────────┘   │
-│                                                      │
-└──────────────────────────────────────────────────────┘
+├───────────┬──────────────────────────────────────────┤
+│           │ ▓▓▓ Upgrade Top Bar (Trial/Expired) ▓▓▓ │
+│  Sidebar  ├──────────────────────────────────────────┤
+│  Nav      │                                          │
+│           │  .views-wrapper (scrollable)             │
+│  [Home]   │  ┌──────────────────────────────────┐   │
+│  [Archiv] │  │                                  │   │
+│  [Stimm]  │  │         Tab-Content              │   │
+│  [Einst]  │  │                                  │   │
+│  [Abo]    │  └──────────────────────────────────┘   │
+│           │                                          │
+│  [Status] │                                          │
+└───────────┴──────────────────────────────────────────┘
 ```
+
+**Layout:** `.main-content` ist eine Flex-Column. Der Upgrade Top Bar sitzt oben (flex-shrink: 0), darunter `.views-wrapper` (flex: 1, overflow-y: auto) enthält alle Views.
 
 ### Tabs
 
 #### Home Tab
-- Aufnahme-Button (F9)
-- Echtzeit-Audio-Pegel
-- Mikrofon-Auswahl
-- Quick-Access zu Einstellungen
+- Onboarding-Card (für neue User, dismissbar)
+- Upgrade-Banner (Trial/Expired/Inaktiv — hidden für Abonnenten)
+- Stat-Cards: Aufnahmen heute, Stimmprofile, Aktive Arbeitsplätze
+- iPhone-Sektion (wenn Smartphone-Mikrofon ausgewählt)
+- Letzte Dokumentation
 
 #### Archiv Tab
 - Liste aller gespeicherten Transkripte
@@ -134,6 +139,33 @@ const state = await ipcRenderer.invoke('get-recording-state');
 const transcripts = await ipcRenderer.invoke('get-all-transcripts');
 const detail = await ipcRenderer.invoke('get-transcript-detail', filePath);
 ```
+
+#### Upgrade-Prompts (Trial/Conversion)
+
+Zwei Komponenten zeigen Trial-/Abo-Status und leiten zum Kauf weiter:
+
+**1. Upgrade Top Bar** (`#upgradeTopBar`) — Persistente Leiste über allen Views:
+- `loadUpgradeTopBar()` — liest `get-subscription-status` IPC
+- Orange (Trial aktiv), Rot (abgelaufen/inaktiv), Hidden (Abonnent)
+- Klick auf Link → `openSubscriptionPage()` → Web-Abo-Seite
+
+**2. Upgrade Banner** (`#upgradeBanner`) — Karte auf Übersicht:
+- `loadUpgradeBanner()` — aufgerufen in `loadHomeStats()`
+- Fortschrittsbalken (X/60 Min), Feature-Highlights, Preis, CTA-Button
+- 3 Varianten: `.upgrade-trial` (orange), `.upgrade-expired` (rot), `.upgrade-inactive` (amber)
+
+**Refresh-Events:** Beide aktualisieren sich bei:
+- `recording-completed` — nach Aufnahme (Minuten können sich geändert haben)
+- `refresh-subscription-status` — bei Window-Focus (z.B. nach Abo-Kauf im Browser)
+
+**Show/Hide Logik:**
+
+| `status.type` | Top Bar | Banner |
+|---|---|---|
+| `'success'` | Hidden | Hidden |
+| `'trial'` | Orange | Orange + Fortschrittsbalken |
+| `'error'` | Rot | Rot/Amber |
+| `'warning'` | Rot | Amber |
 
 #### View-Wechsel & Mic Test Cleanup
 

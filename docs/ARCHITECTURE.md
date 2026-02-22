@@ -74,7 +74,7 @@ dentdoc-desktop/
 │   │
 │   ├── speaker-recognition/
 │   │   ├── index.js             # Sherpa-ONNX Integration
-│   │   └── voice-profiles.js    # Stimmprofil-Verwaltung
+│   │   └── voice-profiles.js    # Stimmprofil-Verwaltung (Backend DB + Cache)
 │   │
 │   ├── vad/
 │   │   ├── vad-worker-thread.js # VAD Worker (Silero)
@@ -146,6 +146,7 @@ dentdoc-desktop/
 │  │ dashboard.js │  │ setup-wizard │  │ status-overlay.html  │   │
 │  │ Home, Archiv │  │ Einrichtung  │  │ Recording-Status     │   │
 │  │ Settings     │  │ Mikrofon     │  │ Progress, Fehler     │   │
+│  │ Upgrade Bar  │  │              │  │                      │   │
 │  └──────┬───────┘  └──────┬───────┘  └──────────────────────┘   │
 │         │                 │                                      │
 │         └────────┬────────┘                                      │
@@ -161,6 +162,7 @@ dentdoc-desktop/
 │  ├─ /api/transcriptions     - Transkription starten/abrufen     │
 │  ├─ /api/transcriptions/[id]/generate-doc-agent-v2.1  - Doku    │
 │  ├─ /api/auth/*             - Login, Register, Session          │
+│  ├─ /api/voice-profiles/*   - Stimmprofile (CRUD)               │
 │  └─ /api/devices/*          - Geräteverwaltung                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -187,10 +189,9 @@ Details: [documentation-flow.md](documentation-flow.md)
 
 ### 3. VAD (Voice Activity Detection)
 
-VAD wird **nach der Aufnahme** verwendet um Stille aus der Audio-Datei zu entfernen:
-- Reduziert Upload-Größe
-- Verbessert Transkriptions-Qualität
-- Spart AssemblyAI Kosten
+VAD entfernt Stille aus der Audio-Datei (Upload-Größe, Transkriptions-Qualität, Kosten):
+- **Live VAD:** Läuft während Mikrofon-Aufnahme (vad-controller.js + vad-worker-thread.js)
+- **Offline VAD:** Nur für manuellen Datei-Upload (pipeline/offlineVad.js)
 
 Details: [audio-recording.md](audio-recording.md)
 
@@ -216,18 +217,18 @@ Details: [main-process.md](main-process.md)
 1. User drückt F9 (oder Tray-Menü)
 2. startRecording() prüft Subscription
 3. audioRecorderFFmpeg startet FFmpeg-Prozess (direkt 16kHz mono)
-4. Status-Overlay zeigt "Aufnahme läuft"
-5. User drückt F9 erneut
-6. stopRecording() beendet FFmpeg
-7. processAudioFile() startet:
-   a. VAD: Stille aus Audio entfernen (Worker Thread, Streaming)
-   b. Speech Renderer: Sprach-Segmente extrahieren (FFmpeg filter_complex)
-   c. Upload zu Backend
-   d. Backend: AssemblyAI Transkription
-   e. Lokal: Sprechererkennung (optional)
-   f. Backend: Agent V2.1 Dokumentation
-8. Dokumentation in Zwischenablage
-9. Status-Overlay zeigt Ergebnis
+4. Live VAD sammelt Speech-Marker parallel (vad-controller.js)
+5. Status-Overlay zeigt "Aufnahme läuft"
+6. User drückt F9 erneut
+7. stopRecording() beendet FFmpeg + Live VAD
+8. processAudioFile() startet:
+   a. Live VAD Marker → speechRenderer → speech_only.wav (~5s)
+   b. Upload zu Backend
+   c. Backend: AssemblyAI Transkription
+   d. Lokal: Sprechererkennung (optional)
+   e. Backend: Agent V2.1 Dokumentation
+9. Dokumentation in Zwischenablage
+10. Status-Overlay zeigt Ergebnis
 ```
 
 ### Sprechererkennung
@@ -260,7 +261,6 @@ Details: [main-process.md](main-process.md)
 | `keepAudio` | boolean | Audio behalten nach Verarbeitung |
 | `audioSavePath` | string | Audio-Speicherpfad |
 | `selectedMicrophone` | string | Mikrofon Device-ID |
-| `profilesPath` | string | Stimmprofile-Pfad |
 | `overlayPosition` | object | {x, y} Position des Overlays |
 
 ### Umgebungsvariablen
