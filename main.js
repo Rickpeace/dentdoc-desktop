@@ -6406,11 +6406,14 @@ autoUpdater.on('update-downloaded', (info) => {
     return;
   }
 
-  // Only show dialog once per version
-  if (notifiedUpdateVersion === info.version) {
+  // Skip dialog only for automatic checks if already notified
+  if (!isManualUpdateCheck && notifiedUpdateVersion === info.version) {
     console.log('Already notified about this version, skipping dialog');
     return;
   }
+
+  // Reset manual check flag
+  isManualUpdateCheck = false;
   notifiedUpdateVersion = info.version;
 
   dialog.showMessageBox({
