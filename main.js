@@ -6687,12 +6687,29 @@ app.whenReady().then(() => {
           );
         }, 2000);
       }
-    }).catch(() => {
-      // Token invalid or session expired, show login
-      session.stopHeartbeat();
-      store.delete('authToken');
-      store.delete('user');
-      createLoginWindow();
+    }).catch((error) => {
+      // Only logout on auth errors (401/session_expired), NOT on network errors
+      const isAuthError = error.message === 'Session expired'
+        || error.response?.status === 401
+        || error.response?.data?.error === 'session_expired';
+
+      if (isAuthError) {
+        session.stopHeartbeat();
+        store.delete('authToken');
+        store.delete('user');
+        createLoginWindow();
+      } else {
+        // Network error - keep token, start heartbeat, use cached user data
+        console.warn('[Startup] Network error during user fetch, using cached data:', error.message);
+        session.startHeartbeat();
+        const cachedUser = store.get('user');
+        if (cachedUser) {
+          createDashboardWindow();
+        } else {
+          // No cached user data - must show login
+          createLoginWindow();
+        }
+      }
     });
   }
 });
