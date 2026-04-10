@@ -14,12 +14,11 @@ const wizardAudioUtils = require('./scripts/audio-utils');
 class SetupWizard {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 9; // 0-8 (added DSGVO step)
+    this.totalSteps = 8; // 0-7 (removed KI-Dokumentation step)
     this.settings = {
       microphoneId: null, // Windows device name for FFmpeg
       microphoneSource: 'desktop', // 'desktop' or 'iphone'
       shortcut: 'F9',
-      docMode: 'agent-v2.1',
       autoExport: true,
       transcriptPath: '',
       keepAudio: true // Enabled by default for full functionality
@@ -60,7 +59,6 @@ class SetupWizard {
       this.settings.shortcut = settings.shortcut || 'F9';
       this.settings.transcriptPath = settings.transcriptPath || '';
       this.settings.microphoneId = settings.microphoneId || null; // Windows device name
-      this.settings.docMode = settings.docMode || 'agent-v2.1';
       this.settings.autoExport = settings.autoExport !== false;
       this.settings.keepAudio = settings.keepAudio !== false; // Default true
 
@@ -1604,7 +1602,6 @@ class SetupWizard {
     const items = {
       'summaryMic': this.getMicrophoneName(),
       'summaryShortcut': this.settings.shortcut,
-      'summaryMode': 'Agent V2.1',  // Only mode available
       'summaryTranscripts': this.settings.autoExport ? 'Aktiviert' : 'Deaktiviert',
       'summaryAudio': this.settings.keepAudio ? 'Aktiviert' : 'Deaktiviert'
     };
@@ -1693,7 +1690,6 @@ class SetupWizard {
         microphoneName: this.settings.microphoneName,  // For FFmpeg (needs device name)
         microphoneSource: this.settings.microphoneSource,  // 'desktop' | 'iphone' | 'none'
         shortcut: this.settings.shortcut,
-        docMode: this.settings.docMode,
         autoExport: this.settings.autoExport,
         transcriptPath: this.settings.transcriptPath,
         keepAudio: this.settings.keepAudio
@@ -1739,7 +1735,6 @@ async function restartSetupWizard() {
       window.setupWizard.settings = {
         microphoneId: null,
         shortcut: 'F9',
-        docMode: 'agent-v2.1',
         autoExport: true,
         transcriptPath: '',
         keepAudio: true
@@ -1750,7 +1745,6 @@ async function restartSetupWizard() {
       window.setupWizard.settings.shortcut = settings.shortcut || 'F9';
       window.setupWizard.settings.transcriptPath = settings.transcriptPath || '';
       window.setupWizard.settings.microphoneId = settings.microphoneId || null;
-      window.setupWizard.settings.docMode = settings.docMode || 'agent-v2.1';
       window.setupWizard.settings.autoExport = settings.autoExport !== false;
       window.setupWizard.settings.keepAudio = settings.keepAudio !== false;
 

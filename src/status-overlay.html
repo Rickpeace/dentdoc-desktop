@@ -832,47 +832,6 @@
         </div>
         <div class="btn-status">✓</div>
       </button>
-      <button id="copyFullBtn" class="action-btn full">
-        <div class="btn-icon">📄</div>
-        <div class="btn-text">
-          <div class="btn-title">Komplette Unterhaltung</div>
-          <div class="btn-desc">Transkript + Dokumentation kopieren</div>
-        </div>
-        <div class="btn-status">✓</div>
-      </button>
-
-      <!-- KZV Documentation Section -->
-      <div id="kzvSection" class="kzv-section">
-        <div class="kzv-label">KZV-Dokumentation</div>
-        <div class="kzv-buttons">
-          <button id="copyKzvBtn" class="kzv-btn" title="KZV-taugliche Dokumentation kopieren" disabled>
-            <span class="kzv-icon">📑</span>
-            <span>KZV-Doku kopieren</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Z-Doku Section (Chef-Zusammenfassung) -->
-      <div id="zDokuSection" class="kzv-section">
-        <div class="kzv-label">Z-Dokumentation</div>
-        <div class="kzv-buttons">
-          <button id="copyZDokuBtn" class="kzv-btn" title="Chef-taugliche Z-Dokumentation kopieren" disabled>
-            <span class="kzv-icon">📋</span>
-            <span>Z-Doku kopieren</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Normalized Transcript Section -->
-      <div id="normalizedSection" class="kzv-section">
-        <div class="kzv-label">Normalisiertes Transkript</div>
-        <div class="kzv-buttons">
-          <button id="copyNormalizedBtn" class="kzv-btn" title="Normalisiertes Transkript kopieren" disabled>
-            <span class="kzv-icon">📝</span>
-            <span>Transkript kopieren</span>
-          </button>
-        </div>
-      </div>
 
       <!-- Befund Section (01/PA Status) -->
       <div id="befundSection" class="befund-section">
@@ -1072,8 +1031,8 @@
     }
 
     let currentDocumentation = null;
-    let currentKzvDocumentation = null;
     let currentZDocumentation = null;
+    let currentCustomDocumentation = null;
     let currentTranscript = null;
     let currentReconstructedTranscript = null;
     let currentTranscriptWithSpeakers = null;
@@ -1347,8 +1306,8 @@
           progressContainer.classList.remove('visible');
           if (data.documentation) {
             currentDocumentation = data.documentation;
-            currentKzvDocumentation = data.kzvDocumentation || null;
             currentZDocumentation = data.zDocumentation || null;
+            currentCustomDocumentation = data.customDocumentation || null;
             currentTranscript = data.transcript;
             currentReconstructedTranscript = data.reconstructedTranscript || null;
             currentTranscriptWithSpeakers = data.transcriptWithSpeakers || null;
@@ -1358,43 +1317,6 @@
             currentStatusPA = data.statusPA || null;
             actions.classList.add('visible');
             copySummaryBtn.classList.remove('copied');
-            copyFullBtn.classList.remove('copied');
-
-            // Show KZV section if kzvDocumentation available
-            const kzvSection = document.getElementById('kzvSection');
-            const copyKzvBtn = document.getElementById('copyKzvBtn');
-            if (currentKzvDocumentation) {
-              kzvSection.classList.add('visible');
-              copyKzvBtn.disabled = false;
-              copyKzvBtn.classList.remove('copied');
-            } else {
-              kzvSection.classList.remove('visible');
-              copyKzvBtn.disabled = true;
-            }
-
-            // Show Z-Doku section if zDocumentation available
-            const zDokuSection = document.getElementById('zDokuSection');
-            const copyZDokuBtn = document.getElementById('copyZDokuBtn');
-            if (currentZDocumentation) {
-              zDokuSection.classList.add('visible');
-              copyZDokuBtn.disabled = false;
-              copyZDokuBtn.classList.remove('copied');
-            } else {
-              zDokuSection.classList.remove('visible');
-              copyZDokuBtn.disabled = true;
-            }
-
-            // Show normalized transcript section if available
-            const normalizedSection = document.getElementById('normalizedSection');
-            const copyNormalizedBtn = document.getElementById('copyNormalizedBtn');
-            if (currentReconstructedTranscript) {
-              normalizedSection.classList.add('visible');
-              copyNormalizedBtn.disabled = false;
-              copyNormalizedBtn.classList.remove('copied');
-            } else {
-              normalizedSection.classList.remove('visible');
-              copyNormalizedBtn.disabled = true;
-            }
 
             // Show befund section if 01 or PA status available
             const befundSection = document.getElementById('befundSection');
@@ -1501,14 +1423,14 @@
         fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
       }
 
-      // 2. KZV-Dokumentation (wenn vorhanden - Agent V2.1)
-      if (currentKzvDocumentation) {
-        fullText += '--- KZV-Dokumentation ---\n\n' + currentKzvDocumentation + '\n\n';
-      }
-
-      // 2b. Z-Dokumentation (wenn vorhanden - Agent V2.1)
+      // 2. Z-Dokumentation (wenn vorhanden - Agent V2.1)
       if (currentZDocumentation) {
         fullText += '--- Z-Dokumentation ---\n\n' + currentZDocumentation + '\n\n';
+      }
+
+      // 2c. Custom-Dokumentation (wenn vorhanden - Unified Agent)
+      if (currentCustomDocumentation) {
+        fullText += '--- Mein Format ---\n\n' + currentCustomDocumentation + '\n\n';
       }
 
       // 3. Normalisiertes Transkript (wenn vorhanden - Agent V2)
@@ -1559,22 +1481,22 @@
       }
     });
 
-    // Copy KZV Documentation button
-    document.getElementById('copyKzvBtn').addEventListener('click', () => {
-      if (currentKzvDocumentation) {
-        ipcRenderer.invoke('copy-to-clipboard', currentKzvDocumentation);
-        showCopied(document.getElementById('copyKzvBtn'));
-        lastClickedDoc = 'kzv';
-        saveLastClickedDoc();
-      }
-    });
-
     // Copy Z-Doku button
     document.getElementById('copyZDokuBtn').addEventListener('click', () => {
       if (currentZDocumentation) {
         ipcRenderer.invoke('copy-to-clipboard', currentZDocumentation);
         showCopied(document.getElementById('copyZDokuBtn'));
         lastClickedDoc = 'zdoku';
+        saveLastClickedDoc();
+      }
+    });
+
+    // Copy Custom Doku button
+    document.getElementById('copyCustomDokuBtn').addEventListener('click', () => {
+      if (currentCustomDocumentation) {
+        ipcRenderer.invoke('copy-to-clipboard', currentCustomDocumentation);
+        showCopied(document.getElementById('copyCustomDokuBtn'));
+        lastClickedDoc = 'custom';
         saveLastClickedDoc();
       }
     });
@@ -1638,10 +1560,10 @@
           let fullText = '';
           // 1. Zusammenfassung - already includes "Erkannte Personen" from backend
           if (currentDocumentation) fullText += '--- Zusammenfassung ---\n\n' + currentDocumentation + '\n\n';
-          // 2. KZV-Dokumentation (wenn vorhanden - Agent V2.1)
-          if (currentKzvDocumentation) fullText += '--- KZV-Dokumentation ---\n\n' + currentKzvDocumentation + '\n\n';
-          // 2b. Z-Dokumentation (wenn vorhanden - Agent V2.1)
+          // 2. Z-Dokumentation (wenn vorhanden - Agent V2.1)
           if (currentZDocumentation) fullText += '--- Z-Dokumentation ---\n\n' + currentZDocumentation + '\n\n';
+          // 2c. Custom-Dokumentation (wenn vorhanden - Unified Agent)
+          if (currentCustomDocumentation) fullText += '--- Mein Format ---\n\n' + currentCustomDocumentation + '\n\n';
           // 3. Normalisiertes Transkript (wenn vorhanden - Agent V2)
           if (currentReconstructedTranscript) fullText += '--- Normalisiertes Transkript ---\n\n' + currentReconstructedTranscript + '\n\n';
           // 4. Transkript mit Sprechern
@@ -1653,13 +1575,13 @@
           textToCopy = fullText.trim();
           btnToHighlight = copyFullBtn;
           break;
-        case 'kzv':
-          textToCopy = currentKzvDocumentation;
-          btnToHighlight = document.getElementById('copyKzvBtn');
-          break;
         case 'zdoku':
           textToCopy = currentZDocumentation;
           btnToHighlight = document.getElementById('copyZDokuBtn');
+          break;
+        case 'custom':
+          textToCopy = currentCustomDocumentation;
+          btnToHighlight = document.getElementById('copyCustomDokuBtn');
           break;
         case 'normalized':
           textToCopy = currentReconstructedTranscript;

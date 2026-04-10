@@ -202,8 +202,8 @@
         </svg>
       </div>
       <div class="content">
-        <div id="title" class="title">Hinweis</div>
-        <div id="message" class="message">Nachricht hier</div>
+        <div id="title" class="title"></div>
+        <div id="message" class="message"></div>
         <div id="ctaHint" class="cta-hint" style="display: none;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -232,8 +232,26 @@
     let hasClickAction = false;
     let autoCloseTimeout = null;
 
-    // Listen for notification data
+    // Load data from query params (avoids IPC timing issues)
+    function loadNotificationData() {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get('data');
+      if (raw) {
+        try {
+          const data = JSON.parse(decodeURIComponent(raw));
+          showNotificationData(data);
+        } catch (e) {
+          console.error('Failed to parse notification data:', e);
+        }
+      }
+    }
+
+    // Also listen for IPC (backwards compatibility)
     ipcRenderer.on('show-notification', (event, data) => {
+      showNotificationData(data);
+    });
+
+    function showNotificationData(data) {
       title.textContent = data.title || 'DentDoc';
       message.textContent = data.body || '';
 
@@ -276,7 +294,10 @@
       autoCloseFill.style.animation = 'none';
       autoCloseFill.offsetHeight; // Trigger reflow
       autoCloseFill.style.animation = 'shrink 8s linear forwards';
-    });
+    }
+
+    // Load data immediately from query params
+    loadNotificationData();
 
     // Click on container triggers action
     container.addEventListener('click', (e) => {

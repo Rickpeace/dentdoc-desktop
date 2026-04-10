@@ -102,11 +102,6 @@ async function login(email, password, store) {
     const errorData = error.response?.data;
     console.error('[Login] Fehler:', error.response?.status, errorData || error.message);
 
-    // Handle max devices reached error
-    if (errorData?.error === 'max_devices_reached') {
-      throw new Error(`MAX_DEVICES:${errorData.message}`);
-    }
-
     throw new Error(errorData?.error || 'Login fehlgeschlagen');
   }
 }
@@ -514,7 +509,6 @@ async function getDocumentationAgentV2_1(transcriptionId, token, appVersion) {
 
     return {
       documentation: response.data.documentation,
-      kzvDocumentation: response.data.kzvDocumentation || null,
       zDocumentation: response.data.zDocumentation || null,
       transcript: response.data.transcript || null,
       reconstructedTranscript: response.data.reconstructedTranscript || null,
@@ -946,6 +940,126 @@ async function deleteVoiceProfile(token, id) {
   }
 }
 
+// ============================================================================
+// Format Block (kundenspezifisches Dokumentationsformat)
+// ============================================================================
+
+async function getFormatBlock(token) {
+  try {
+    const response = await axios.get(`${API_BASE_URL}api/format-block`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Get format block error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Dokumentationsformat konnte nicht geladen werden');
+  }
+}
+
+async function updateFormatBlock(token, changeRequest) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/format-block/update`,
+      { changeRequest },
+      {
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        timeout: 120000, // 2 min — Meta-Prompt + LLM braucht Zeit
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Update format block error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Dokumentationsformat konnte nicht angepasst werden');
+  }
+}
+
+async function resetFormatBlock(token) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/format-block/reset`,
+      {},
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Reset format block error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Dokumentationsformat konnte nicht zurückgesetzt werden');
+  }
+}
+
+async function getFormatHistory(token) {
+  try {
+    const response = await axios.get(`${API_BASE_URL}api/format-block/history`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return response.data.history;
+  } catch (error) {
+    console.error('[apiClient] Get format history error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Formathistorie konnte nicht geladen werden');
+  }
+}
+
+async function previewFormatBlock(token, block, isExpertMode = false) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/format-block/preview`,
+      { block, isExpertMode },
+      {
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        timeout: 120000,
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Preview format block error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Vorschau konnte nicht generiert werden');
+  }
+}
+
+async function saveCustomPrompt(token, prompt) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/format-block/save-prompt`,
+      { prompt },
+      {
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Save custom prompt error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Prompt konnte nicht gespeichert werden');
+  }
+}
+
+async function setFormatMode(token, mode) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/format-block/set-mode`,
+      { mode },
+      { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Set format mode error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Modus konnte nicht gewechselt werden');
+  }
+}
+
+async function revertFormatBlock(token, version) {
+  try {
+    const response = await axios.post(
+      `${API_BASE_URL}api/format-block/revert`,
+      { version },
+      { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('[apiClient] Revert format block error:', error.response?.data || error.message);
+    throw new Error(error.response?.data?.error || 'Version konnte nicht wiederhergestellt werden');
+  }
+}
+
 module.exports = {
   login,
   logout,
@@ -978,4 +1092,13 @@ module.exports = {
   createVoiceProfile,
   updateVoiceProfile,
   deleteVoiceProfile,
+  // Format Block
+  getFormatBlock,
+  updateFormatBlock,
+  resetFormatBlock,
+  getFormatHistory,
+  previewFormatBlock,
+  revertFormatBlock,
+  saveCustomPrompt,
+  setFormatMode,
 };

@@ -157,7 +157,7 @@ function buildTrayMenu() {
       : '';
     statusLabel = `⚠️ Abo gekündigt (bis ${endDate})`;
   } else if (hasActiveSubscription) {
-    statusLabel = `✓ DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`;
+    statusLabel = `✓ DentDoc Pro (${user?.maxDevices || 1} Lizenz${(user?.maxDevices || 1) !== 1 ? 'en' : ''})`;
   } else if (isRealTrial) {
     statusLabel = `Testphase: ${minutesRemaining} Min übrig`;
   } else if (wasSubscriber) {

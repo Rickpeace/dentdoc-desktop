@@ -19,24 +19,6 @@ const views = document.querySelectorAll('.view');
 let currentView = 'home';
 
 async function switchView(viewName) {
-  // Check for unsaved settings changes when leaving settings page
-  if (currentView === 'settings' && viewName !== 'settings' && settingsHasUnsavedChanges) {
-    const result = await showUnsavedSettingsDialog();
-
-    if (result === 'cancel') {
-      return; // Stay on settings page
-    }
-
-    if (result === 'save') {
-      // Trigger save - the save handler already navigates to home after saving
-      document.getElementById('settingsSaveBtn').click();
-      return;
-    }
-
-    // result === 'discard' - reset flag and continue navigation
-    settingsHasUnsavedChanges = false;
-  }
-
   // Check for smartphone mic warning when leaving settings
   if (currentView === 'settings' && viewName !== 'settings') {
     if (typeof checkSmartphoneMicWarning === 'function') {
@@ -137,6 +119,12 @@ async function loadViewContent(viewName) {
       break;
     case 'profiles':
       loadProfilesView();
+      break;
+    case 'format':
+      loadFormatView();
+      break;
+    case 'subscription':
+      loadSubscriptionView();
       break;
   }
 }
@@ -264,8 +252,9 @@ initOnboardingCard();
 ipcRenderer.on('recording-completed', async () => {
   console.log('Recording completed, refreshing dashboard...');
   await loadHomeStats();
-  await loadSubscriptionStatus(); // Refresh trial minutes in sidebar
-  await loadUpgradeTopBar(); // Refresh top bar (trial minutes may have changed)
+  await loadSubscriptionStatus();
+  await loadActiveRecordingsBadge();
+  await loadUpgradeTopBar();
 });
 
 // ===== F9 Recording Audio Monitoring =====
@@ -363,6 +352,9 @@ function stopF9AudioMonitoring() {
 ipcRenderer.on('recording-started', async (event, options) => {
   console.log('F9 recording started, options:', options);
 
+  // Refresh active recordings badge (with small delay to let claim resolve)
+  setTimeout(() => loadActiveRecordingsBadge(), 1000);
+
   // Always start F9 audio monitoring for status bar levels (lightweight, reliable fallback)
   await startF9AudioMonitoring(options?.microphoneId);
 
@@ -376,6 +368,9 @@ ipcRenderer.on('recording-started', async (event, options) => {
 });
 
 ipcRenderer.on('recording-stopped', () => {
+  // Refresh active recordings badge
+  setTimeout(() => loadActiveRecordingsBadge(), 500);
+
   // Always stop F9 audio monitoring (always started now)
   console.log('[F9] Stopping F9 audio monitoring...');
   stopF9AudioMonitoring();
@@ -672,6 +667,7 @@ function stopVADIntegration() {
 ipcRenderer.on('refresh-subscription-status', async () => {
   console.log('Window focused, refreshing subscription status...');
   await loadSubscriptionStatus();
+  await loadActiveRecordingsBadge();
   await loadUpgradeTopBar();
   await loadUpgradeBanner();
 });
@@ -750,6 +746,33 @@ async function loadSubscriptionStatus() {
 
 // Load subscription status on init
 loadSubscriptionStatus();
+
+// ===== Active Recordings Badge =====
+async function loadActiveRecordingsBadge() {
+  try {
+    const data = await ipcRenderer.invoke('get-active-recordings');
+    const badge = document.getElementById('activeRecordingsBadge');
+    const text = document.getElementById('activeRecordingsText');
+
+    if (data.maxRecordings > 0) {
+      badge.style.display = 'flex';
+      const count = data.activeRecordings || 0;
+      text.textContent = `${count}/${data.maxRecordings} Aufnahmen aktiv`;
+
+      if (count > 0) {
+        badge.classList.remove('no-active');
+      } else {
+        badge.classList.add('no-active');
+      }
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (error) {
+    console.error('Error loading active recordings:', error);
+  }
+}
+
+loadActiveRecordingsBadge();
 
 // ===== Upgrade Top Bar (all views) =====
 async function loadUpgradeTopBar() {
@@ -901,49 +924,15 @@ async function initSidebarLinks() {
 initSidebarLinks();
 
 // ===== Window Controls =====
-document.getElementById('minimizeBtn').addEventListener('click', async () => {
-  // Check for unsaved settings when minimizing from settings page
-  if (currentView === 'settings' && settingsHasUnsavedChanges) {
-    const result = await showUnsavedSettingsDialog();
-
-    if (result === 'cancel') {
-      return; // Stay on settings page
-    }
-
-    if (result === 'save') {
-      document.getElementById('settingsSaveBtn').click();
-      setTimeout(() => ipcRenderer.send('minimize-window'), 900);
-      return;
-    }
-
-    // result === 'discard' - reset flag and minimize
-    settingsHasUnsavedChanges = false;
-  }
-
+document.getElementById('minimizeBtn').addEventListener('click', () => {
   ipcRenderer.send('minimize-window');
 });
 
-document.getElementById('closeBtn').addEventListener('click', async () => {
-  // Check for unsaved settings when closing from settings page
-  if (currentView === 'settings' && settingsHasUnsavedChanges) {
-    const result = await showUnsavedSettingsDialog();
+document.getElementById('maximizeBtn').addEventListener('click', () => {
+  ipcRenderer.send('maximize-window');
+});
 
-    if (result === 'cancel') {
-      return; // Stay on settings page
-    }
-
-    if (result === 'save') {
-      // Trigger save, then close after save completes
-      document.getElementById('settingsSaveBtn').click();
-      // The save handler will navigate away, then we close
-      setTimeout(() => ipcRenderer.send('minimize-to-tray'), 900);
-      return;
-    }
-
-    // result === 'discard' - reset flag and close
-    settingsHasUnsavedChanges = false;
-  }
-
+document.getElementById('closeBtn').addEventListener('click', () => {
   ipcRenderer.send('minimize-to-tray');
 });
 
@@ -1110,8 +1099,14 @@ let settingsSelectedMicId = null;
 let settingsSelectedMicName = null;  // For FFmpeg (needs device name, not ID)
 let settingsNewShortcut = null;
 let settingsIsRecordingShortcut = false;
-let settingsHasUnsavedChanges = false;
-let settingsInitialSettings = {};
+async function autoSaveSetting(settingsPartial) {
+  try {
+    await ipcRenderer.invoke('save-settings', settingsPartial);
+  } catch (error) {
+    console.error('Auto-save failed:', error);
+    throw error;
+  }
+}
 
 async function loadSettingsView() {
   const settings = await ipcRenderer.invoke('get-settings');
@@ -1143,29 +1138,9 @@ async function loadSettingsView() {
   // const theme = settings.theme || 'dark';
   // document.getElementById('settingsThemeSelect').value = theme;
 
-  const docModeSelect = document.getElementById('settingsDocModeSelect');
-  docModeSelect.value = settings.docMode || 'agent-v2.1';
-  // If stored value doesn't exist in dropdown (deleted agent), fall back to default
-  if (!docModeSelect.value) {
-    docModeSelect.value = 'agent-v2.1';
-  }
-  const docMode = docModeSelect.value;
-
   await loadSettingsMicrophones();
   loadMicVolume();
 
-  settingsInitialSettings = {
-    shortcut: settings.shortcut || 'F9',
-    microphoneId: settingsSelectedMicId,
-    microphoneSource: settings.microphoneSource || 'desktop',
-    transcriptPath: settings.transcriptPath || '',
-    autoClose: settings.autoClose || false,
-    autoExport: settings.autoExport || false,
-    keepAudio: settings.keepAudio || false,
-    docMode: docMode,
-    // Note: theme excluded - saves immediately on change
-    vadEnabled: settings.vadEnabled !== false
-  };
 }
 
 async function loadSettingsMicrophones() {
@@ -1274,22 +1249,6 @@ navigator.mediaDevices?.addEventListener('devicechange', () => {
   }
 })();
 
-function settingsCheckForChanges() {
-  const currentSettings = {
-    shortcut: settingsNewShortcut || document.getElementById('settingsShortcutDisplay').textContent,
-    microphoneId: document.getElementById('settingsMicSelect').value,
-    microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
-    transcriptPath: document.getElementById('settingsTranscriptPath').value,
-    autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,
-    autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
-    keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
-    docMode: document.getElementById('settingsDocModeSelect').value,
-    // Note: theme is excluded - it saves immediately on change
-    vadEnabled: true // VAD always enabled
-  };
-
-  settingsHasUnsavedChanges = JSON.stringify(currentSettings) !== JSON.stringify(settingsInitialSettings);
-}
 
 function settingsShowStatus(element, message, type) {
   element.textContent = message;
@@ -1685,8 +1644,8 @@ function startPairingPoll(pairingId) {
         // Generate QR code for /mic (so user can reopen Safari later)
         generateMicQRCode();
 
-        // Mark settings as changed
-        settingsCheckForChanges();
+        // Auto-save mic source
+        autoSaveSetting({ microphoneSource: 'iphone' });
       } else if (status.status === 'expired') {
         // Pairing code expired
         clearInterval(iphonePairingPollInterval);
@@ -1739,7 +1698,7 @@ async function unpairIphone() {
     document.getElementById('settingsMicSourceDesktop').checked = true;
     updateMicSourceUI('desktop');
 
-    settingsCheckForChanges();
+    autoSaveSetting({ microphoneSource: 'desktop' });
   } catch (error) {
     console.error('Unpair error:', error);
     alert('Fehler beim Entkoppeln: ' + error.message);
@@ -1891,7 +1850,7 @@ document.getElementById('settingsMicSelect').addEventListener('change', () => {
     settingsMicTester.stop();
     settingsStopMicTest();
   }
-  settingsCheckForChanges();
+  autoSaveSetting({ microphoneId: settingsSelectedMicId, microphoneName: settingsSelectedMicName });
 });
 
 // Settings Shortcut Recording
@@ -1949,8 +1908,16 @@ document.addEventListener('keydown', async (e) => {
 
   await ipcRenderer.invoke('enable-global-shortcut');
 
-  settingsShowStatus(document.getElementById('settingsShortcutStatus'), `Neue Tastenkombination: ${settingsNewShortcut}`, 'success');
-  settingsCheckForChanges();
+  const shortcutStatus = document.getElementById('settingsShortcutStatus');
+  try {
+    await autoSaveSetting({ shortcut: settingsNewShortcut });
+    settingsShowStatus(shortcutStatus, `Neue Tastenkombination: ${settingsNewShortcut}`, 'success');
+  } catch (error) {
+    const settings = await ipcRenderer.invoke('get-settings');
+    document.getElementById('settingsShortcutDisplay').textContent = settings.shortcut || 'F9';
+    settingsNewShortcut = null;
+    settingsShowStatus(shortcutStatus, error.message, 'error');
+  }
 });
 
 // Settings Path Buttons
@@ -2079,7 +2046,7 @@ document.getElementById('settingsBrowseTranscriptBtn').addEventListener('click',
   clearFolderValidationError('settingsTranscriptPath');
   document.getElementById('settingsTranscriptPath').value = result.path;
   console.log('Set transcriptPath input to:', result.path);
-  settingsCheckForChanges();
+  autoSaveSetting({ transcriptPath: result.path });
 });
 
 document.getElementById('settingsOpenTranscriptFolderBtn').addEventListener('click', async () => {
@@ -2098,11 +2065,18 @@ document.getElementById('settingsOpenTranscriptFolderBtn').addEventListener('cli
 // });
 
 // Settings change tracking
-document.getElementById('settingsAutoExportCheckbox').addEventListener('change', settingsCheckForChanges);
-document.getElementById('settingsKeepAudioCheckbox').addEventListener('change', settingsCheckForChanges);
-document.getElementById('settingsAutoCloseCheckbox').addEventListener('change', settingsCheckForChanges);
-document.getElementById('settingsDocModeSelect').addEventListener('change', settingsCheckForChanges);
-document.getElementById('settingsVadEnabled').addEventListener('change', settingsCheckForChanges);
+document.getElementById('settingsAutoExportCheckbox').addEventListener('change', (e) => {
+  autoSaveSetting({ autoExport: e.target.checked });
+});
+document.getElementById('settingsKeepAudioCheckbox').addEventListener('change', (e) => {
+  autoSaveSetting({ keepAudio: e.target.checked });
+});
+document.getElementById('settingsAutoCloseCheckbox').addEventListener('change', (e) => {
+  autoSaveSetting({ autoClose: e.target.checked });
+});
+document.getElementById('settingsVadEnabled').addEventListener('change', (e) => {
+  autoSaveSetting({ vadEnabled: e.target.checked });
+});
 
 // Settings Debug
 document.getElementById('settingsOpenLogBtn').addEventListener('click', async () => {
@@ -2178,33 +2152,6 @@ function showWarningModal(title, message) {
   });
 }
 
-// Show unsaved settings dialog with 3 options: Save, Discard, Cancel
-function showUnsavedSettingsDialog() {
-  return new Promise((resolve) => {
-    const modal = document.getElementById('unsavedSettingsModal');
-    const saveBtn = document.getElementById('unsavedSaveBtn');
-    const discardBtn = document.getElementById('unsavedDiscardBtn');
-    const cancelBtn = document.getElementById('unsavedCancelBtn');
-
-    modal.style.display = 'flex';
-
-    const cleanup = () => {
-      modal.style.display = 'none';
-      saveBtn.removeEventListener('click', onSave);
-      discardBtn.removeEventListener('click', onDiscard);
-      cancelBtn.removeEventListener('click', onCancel);
-    };
-
-    const onSave = () => { cleanup(); resolve('save'); };
-    const onDiscard = () => { cleanup(); resolve('discard'); };
-    const onCancel = () => { cleanup(); resolve('cancel'); };
-
-    saveBtn.addEventListener('click', onSave);
-    discardBtn.addEventListener('click', onDiscard);
-    cancelBtn.addEventListener('click', onCancel);
-  });
-}
-
 // Check if smartphone is selected but not paired
 function checkSmartphoneMicWarning() {
   const micSource = document.querySelector('input[name="micSource"]:checked')?.value;
@@ -2218,73 +2165,6 @@ function checkSmartphoneMicWarning() {
   }
   return null;
 }
-
-// Settings Save/Cancel
-document.getElementById('settingsSaveBtn').addEventListener('click', async () => {
-  // Check for smartphone mic warning
-  const warning = checkSmartphoneMicWarning();
-  if (warning && !await showWarningModal(warning.title, warning.message)) {
-    return;
-  }
-
-  // Get mic name from the selected option (FFmpeg needs device name, not browser ID)
-  const micSelect = document.getElementById('settingsMicSelect');
-  const selectedMicOption = micSelect.options[micSelect.selectedIndex];
-  const micName = selectedMicOption ? selectedMicOption.dataset.micName : null;
-
-  const settings = {
-    shortcut: settingsNewShortcut || document.getElementById('settingsShortcutDisplay').textContent,
-    microphoneId: micSelect.value,
-    microphoneName: micName,  // For FFmpeg
-    microphoneSource: document.querySelector('input[name="micSource"]:checked')?.value || 'desktop',
-    transcriptPath: document.getElementById('settingsTranscriptPath').value,
-    autoClose: document.getElementById('settingsAutoCloseCheckbox').checked,
-    autoExport: document.getElementById('settingsAutoExportCheckbox').checked,
-    keepAudio: document.getElementById('settingsKeepAudioCheckbox').checked,
-    docMode: document.getElementById('settingsDocModeSelect').value,
-    // theme: document.getElementById('settingsThemeSelect').value,  // DISABLED: dark mode default
-    vadEnabled: true // VAD always enabled
-  };
-
-  try {
-    await ipcRenderer.invoke('save-settings', settings);
-    settingsHasUnsavedChanges = false;
-
-    // Update initial settings to match saved state (exclude theme - saves immediately)
-    settingsInitialSettings = {
-      shortcut: settings.shortcut,
-      microphoneId: settings.microphoneId,
-      microphoneSource: settings.microphoneSource,
-      transcriptPath: settings.transcriptPath,
-      autoClose: settings.autoClose,
-      autoExport: settings.autoExport,
-      keepAudio: settings.keepAudio,
-      docMode: settings.docMode,
-      vadEnabled: settings.vadEnabled
-    };
-
-    const confirmation = document.getElementById('settingsSaveConfirmation');
-    confirmation.style.display = 'block';
-
-    setTimeout(() => {
-      confirmation.style.display = 'none';
-    }, 2000);
-  } catch (error) {
-    settingsShowStatus(document.getElementById('settingsShortcutStatus'), 'Fehler beim Speichern: ' + error.message, 'error');
-  }
-});
-
-document.getElementById('settingsCancelBtn').addEventListener('click', async () => {
-  // Check for smartphone mic warning
-  const warning = checkSmartphoneMicWarning();
-  if (warning && !await showWarningModal(warning.title, warning.message)) {
-    return;
-  }
-
-  settingsHasUnsavedChanges = false;
-  await switchView('home');
-});
-
 
 // =============================================================================
 // PROFILES VIEW
@@ -2954,15 +2834,6 @@ function createSettingsTour() {
         }
       },
       {
-        element: '#settingsSaveBtn',
-        popover: {
-          title: 'Einstellungen speichern',
-          description: 'Vergessen Sie nicht, Ihre Änderungen zu speichern! Klicken Sie auf "Speichern", wenn Sie fertig sind.',
-          side: 'top',
-          align: 'end'
-        }
-      },
-      {
         popover: {
           title: 'Sie sind startklar!',
           description: 'Drücken Sie F9, um Ihre erste Aufnahme zu starten. Das Status-Fenster zeigt Ihnen den Fortschritt an. Viel Erfolg!',
@@ -3080,10 +2951,9 @@ async function loadSubscriptionView() {
     // Update plan name
     document.getElementById('subscriptionPlanName').textContent = data.planName || 'Kein Plan';
 
-    // Update devices
-    const deviceUsage = `${data.activeDevices || 0}/${data.maxDevices || 0}`;
-    document.getElementById('subscriptionDevices').textContent = deviceUsage;
-    document.getElementById('deviceUsage').textContent = deviceUsage;
+    // Update license count
+    document.getElementById('subscriptionDevices').textContent = `${data.maxDevices || 0}`;
+    document.getElementById('deviceUsage').textContent = `${data.maxDevices || 0}`;
 
     // Load devices list
     renderDevicesList(data.devices || []);
@@ -3096,7 +2966,7 @@ function renderDevicesList(devices) {
   const container = document.getElementById('devicesList');
 
   if (!devices || devices.length === 0) {
-    container.innerHTML = '<div class="devices-empty">Keine Arbeitsplätze registriert</div>';
+    container.innerHTML = '<div class="devices-empty">Keine Geräte angemeldet</div>';
     return;
   }
 
@@ -3147,24 +3017,8 @@ document.getElementById('iphoneDashboardGoToSettings')?.addEventListener('click'
   switchView('settings');
 });
 
-// Update loadViewContent to include subscription
-const originalLoadViewContent = loadViewContent;
-async function loadViewContent(viewName) {
-  switch (viewName) {
-    case 'home':
-      loadHomeStats();
-      break;
-    case 'settings':
-      loadSettingsView();
-      break;
-    case 'profiles':
-      loadProfilesView();
-      break;
-    case 'subscription':
-      loadSubscriptionView();
-      break;
-  }
-}
+// Note: loadViewContent is defined once at the top of the file (line ~130)
+// subscription was previously added here as a duplicate — now consolidated above
 
 // =============================================================================
 // SPEAKER OPTIMIZATION
@@ -4234,4 +4088,432 @@ async function initTawkWebview() {
 // Initialize on DOMContentLoaded
 document.addEventListener('DOMContentLoaded', initTawkWebview);
 
+// ============================================================================
+// FORMAT BLOCK VIEW (Kundenspezifisches Dokumentationsformat)
+// ============================================================================
 
+let formatBlockLoaded = false;
+let currentFormatBlock = null; // Cache the current block for preview
+
+async function loadFormatView() {
+  if (formatBlockLoaded) return;
+  try {
+    const data = await ipcRenderer.invoke('get-format-block');
+    if (data?.error) {
+      document.getElementById('formatBlockPreview').textContent = 'Fehler: ' + data.error;
+      return;
+    }
+    displayFormatBlock(data);
+    currentFormatBlock = data.block;
+    formatBlockLoaded = true;
+    // Show demo transcript
+    if (data.demoTranscript) {
+      document.getElementById('formatDemoTranscript').textContent = data.demoTranscript;
+    }
+    // Load expert prompt if exists
+    if (data.customPrompt) {
+      document.getElementById('formatCustomPrompt').value = data.customPrompt;
+    }
+    // Set correct mode
+    if (data.activeMode === 'expert') {
+      setFormatMode('expert');
+    }
+    // Load history
+  } catch (error) {
+    console.error('[Format] Load error:', error);
+    document.getElementById('formatBlockPreview').textContent = 'Fehler beim Laden: ' + (error.message || error);
+  }
+}
+
+function displayFormatBlock(data) {
+  const lastUpdated = document.getElementById('formatLastUpdated');
+
+  // Store block in hidden field for preview generation
+  document.getElementById('formatBlockPreview').value = data.block;
+  currentFormatBlock = data.block;
+
+  if (data.updatedAt) {
+    const date = new Date(data.updatedAt);
+    lastUpdated.textContent = date.toLocaleDateString('de-DE') + ', ' + date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  } else {
+    lastUpdated.textContent = '';
+  }
+
+  // Refresh rules display
+  displayActiveRules(data.activeRules);
+}
+
+async function updateFormatBlock() {
+  const textarea = document.getElementById('formatChangeRequest');
+  const changeRequest = textarea.value.trim();
+
+  if (!changeRequest) {
+    showFormatStatus('Bitte beschreiben Sie Ihre Änderungswünsche.', 'error');
+    return;
+  }
+
+  setFormatLoading(true, 'KI passt Ihr Format an...');
+
+  try {
+    const result = await ipcRenderer.invoke('update-format-block', changeRequest);
+    if (result?.error) {
+      showFormatStatus(result.error, 'error');
+      return;
+    }
+    displayFormatBlock(result);
+    textarea.value = '';
+    showFormatStatus('Format angepasst!', 'success');
+    generateFormatPreview();
+  } catch (error) {
+    console.error('[Format] Update error:', error);
+    showFormatStatus(error.message || 'Fehler bei der Anpassung.', 'error');
+  } finally {
+    setFormatLoading(false);
+  }
+}
+
+async function resetFormatBlock() {
+  const confirmed = await ipcRenderer.invoke('confirm-format-reset');
+  if (!confirmed) return;
+
+  const btn = document.getElementById('formatResetBtn');
+  btn.disabled = true;
+
+  try {
+    const result = await ipcRenderer.invoke('reset-format-block');
+    if (result?.error) {
+      showFormatStatus(result.error, 'error');
+      return;
+    }
+    displayFormatBlock(result);
+    showFormatStatus('Format auf Standard zurückgesetzt.', 'success');
+    // Clear preview
+    document.getElementById('formatPreviewContent').textContent = 'Klicken Sie auf "Vorschau laden" um die neue Vorschau zu sehen.';
+    // Reset to simple mode
+    setFormatMode('simple');
+    document.getElementById('formatCustomPrompt').value = '';
+    formatBlockLoaded = false; // Force reload
+  } catch (error) {
+    console.error('[Format] Reset error:', error);
+    showFormatStatus(error.message || 'Fehler beim Zurücksetzen.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ===== Preview =====
+
+async function generateFormatPreview() {
+  if (!currentFormatBlock) return;
+
+  const previewContent = document.getElementById('formatPreviewContent');
+  const previewSpinner = document.getElementById('formatPreviewSpinner');
+  const previewBtn = document.getElementById('formatPreviewBtn');
+
+  previewBtn.disabled = true;
+  previewSpinner.style.display = 'inline-block';
+  previewContent.textContent = 'Vorschau wird generiert...';
+  previewContent.style.color = 'var(--text-secondary)';
+
+  try {
+    const result = await ipcRenderer.invoke('preview-format-block', currentFormatBlock);
+    if (result?.error) {
+      previewContent.textContent = 'Fehler: ' + result.error;
+      return;
+    }
+    previewContent.textContent = result.documentation;
+    previewContent.style.color = 'var(--text-primary, #e0e0e0)';
+    // Show demo transcript
+    if (result.demoTranscript) {
+      document.getElementById('formatDemoTranscript').textContent = result.demoTranscript;
+    }
+  } catch (error) {
+    console.error('[Format] Preview error:', error);
+    previewContent.textContent = 'Fehler bei der Vorschau: ' + (error.message || error);
+  } finally {
+    previewBtn.disabled = false;
+    previewSpinner.style.display = 'none';
+  }
+}
+
+// ===== Active Rules Display =====
+
+function displayActiveRules(activeRules) {
+  const rulesList = document.getElementById('formatRulesList');
+
+  if (!activeRules || activeRules.trim().length === 0) {
+    rulesList.innerHTML = `<div style="color: var(--text-secondary); padding: 12px; text-align: center;">
+      <p style="margin: 0 0 4px 0;">Standard-Format aktiv</p>
+      <p style="margin: 0; font-size: 12px;">Geben Sie unten Ihre Änderungswünsche ein um Ihr Format anzupassen.</p>
+    </div>`;
+    return;
+  }
+
+  const rules = activeRules.split('\n').filter(r => r.trim().length > 0);
+  rulesList.innerHTML = rules.map((rule, i) => {
+    // Remove leading "- " or "1. " etc if present
+    const cleanRule = rule.replace(/^[-•]\s*/, '').replace(/^\d+\.\s*/, '').trim();
+    const escaped = cleanRule.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return `<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-color);">
+      <span style="min-width: 24px; font-weight: 600; color: var(--primary, #4a90d9);">${i + 1}.</span>
+      <span style="flex: 1;">${cleanRule}</span>
+      <button class="format-rule-delete" onclick="removeFormatRule('${escaped}')" title="Diese Regel entfernen" style="background: none; border: none; cursor: pointer; padding: 4px 8px; font-size: 14px; opacity: 0.4; transition: opacity 0.2s; color: var(--text-secondary);" onmouseover="this.style.opacity='1';this.style.color='var(--danger, #e74c3c)'" onmouseout="this.style.opacity='0.4';this.style.color='var(--text-secondary)'">&times;</button>
+    </div>`;
+  }).join('');
+}
+
+// ===== History =====
+
+async function loadFormatHistory() {
+  const historyList = document.getElementById('formatHistoryList');
+  try {
+    cachedHistory = await ipcRenderer.invoke('get-format-history') || [];
+
+    if (cachedHistory.length === 0) {
+      historyList.innerHTML = '<p style="color: var(--text-secondary); margin: 0;">Noch keine Änderungen vorgenommen.</p>';
+      return;
+    }
+
+    historyList.innerHTML = cachedHistory.map(entry => {
+      const date = new Date(entry.createdAt);
+      const dateStr = date.toLocaleDateString('de-DE') + ', ' + date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+      const changeText = entry.changeRequest
+        ? entry.changeRequest.substring(0, 80) + (entry.changeRequest.length > 80 ? '...' : '')
+        : 'Keine Beschreibung';
+
+      return `<div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-color);">
+        <div>
+          <span style="font-weight: 600; color: var(--primary, #4a90d9);">V${entry.version}</span>
+          <span style="margin-left: 8px;">${changeText}</span>
+          <span style="margin-left: 8px; color: var(--text-secondary); font-size: 11px;">${dateStr}</span>
+        </div>
+        <button class="btn btn-outline" style="padding: 2px 10px; font-size: 11px;" onclick="revertFormatBlock(${entry.version})">
+          Wiederherstellen
+        </button>
+      </div>`;
+    }).join('');
+
+  } catch (error) {
+    console.error('[Format] History error:', error);
+    historyList.innerHTML = '<p style="color: var(--danger);">Fehler beim Laden der Historie.</p>';
+  }
+}
+
+async function revertFormatBlock(version) {
+  const confirmed = confirm(`Möchten Sie auf Version ${version} zurücksetzen?`);
+  if (!confirmed) return;
+
+  try {
+    showFormatStatus('Wird wiederhergestellt...', 'info');
+    const result = await ipcRenderer.invoke('revert-format-block', version);
+    if (result?.error) {
+      showFormatStatus(result.error, 'error');
+      return;
+    }
+    displayFormatBlock(result);
+    showFormatStatus(`Version ${version} wiederhergestellt!`, 'success');
+    // Clear preview
+    document.getElementById('formatPreviewContent').textContent = 'Klicken Sie auf "Vorschau laden" um die neue Vorschau zu sehen.';
+  } catch (error) {
+    console.error('[Format] Revert error:', error);
+    showFormatStatus(error.message || 'Fehler beim Wiederherstellen.', 'error');
+  }
+}
+
+let formatLoadingTimeout = null;
+
+function setFormatLoading(loading, message) {
+  const overlay = document.getElementById('formatLoadingOverlay');
+  if (loading) {
+    // Safety timeout: 2 minutes max
+    if (formatLoadingTimeout) clearTimeout(formatLoadingTimeout);
+    formatLoadingTimeout = setTimeout(() => {
+      setFormatLoading(false);
+      showFormatStatus('Zeitüberschreitung — bitte erneut versuchen.', 'error');
+    }, 120000);
+    if (!overlay) {
+      const el = document.createElement('div');
+      el.id = 'formatLoadingOverlay';
+      el.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10;';
+      el.innerHTML = `<div style="text-align: center; color: var(--text-primary, #e0e0e0);"><div class="spinner" style="display: inline-block; margin-bottom: 8px;"></div><div style="font-size: 13px;">${message || 'Wird verarbeitet...'}</div></div>`;
+      const mainContent = document.getElementById('mainContent');
+      mainContent.style.position = 'relative';
+      mainContent.appendChild(el);
+    }
+  } else {
+    if (formatLoadingTimeout) { clearTimeout(formatLoadingTimeout); formatLoadingTimeout = null; }
+    overlay?.remove();
+  }
+}
+
+async function removeFormatRule(ruleText) {
+  setFormatLoading(true, 'Regel wird entfernt...');
+
+  try {
+    const changeRequest = `Folgende Regel entfernen und die entsprechende Änderung im Block rückgängig machen: "${ruleText}"`;
+    const result = await ipcRenderer.invoke('update-format-block', changeRequest);
+    if (result?.error) {
+      showFormatStatus(result.error, 'error');
+      return;
+    }
+    displayFormatBlock(result);
+    showFormatStatus('Regel entfernt!', 'success');
+    generateFormatPreview();
+  } catch (error) {
+    console.error('[Format] Remove rule error:', error);
+    showFormatStatus(error.message || 'Fehler beim Entfernen.', 'error');
+  } finally {
+    setFormatLoading(false);
+  }
+}
+
+function showFormatStatus(message, type) {
+  const statusEl = document.getElementById('formatStatusMsg');
+  statusEl.textContent = message;
+  statusEl.style.display = 'inline';
+  statusEl.style.color = type === 'error' ? 'var(--danger, #e74c3c)' :
+                          type === 'success' ? 'var(--success, #27ae60)' :
+                          'var(--text-secondary)';
+
+  if (type !== 'info') {
+    setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+  }
+}
+
+// ===== Format Mode Toggle (Einfach / Experte) =====
+
+async function setFormatMode(mode) {
+  const simpleMode = document.getElementById('formatSimpleMode');
+  const expertMode = document.getElementById('formatExpertMode');
+  const simpleBtn = document.getElementById('formatModeSimple');
+  const expertBtn = document.getElementById('formatModeExpert');
+  const simpleOnlyCards = document.querySelectorAll('.format-simple-only');
+
+  if (mode === 'expert') {
+    simpleMode.style.display = 'none';
+    simpleOnlyCards.forEach(el => el.style.display = 'none');
+    expertMode.style.display = 'block';
+    simpleBtn.style.background = 'transparent';
+    simpleBtn.style.color = 'var(--text-secondary)';
+    expertBtn.style.background = 'var(--primary, #f97316)';
+    expertBtn.style.color = 'white';
+  } else {
+    simpleMode.style.display = 'grid';
+    simpleOnlyCards.forEach(el => el.style.display = '');
+    expertMode.style.display = 'none';
+    simpleBtn.style.background = 'var(--primary, #f97316)';
+    simpleBtn.style.color = 'white';
+    expertBtn.style.background = 'transparent';
+    expertBtn.style.color = 'var(--text-secondary)';
+  }
+
+  // Persist mode on server
+  ipcRenderer.invoke('set-format-mode', mode).catch(e =>
+    console.error('[Format] Set mode error:', e)
+  );
+}
+
+async function saveCustomPrompt() {
+  const textarea = document.getElementById('formatCustomPrompt');
+  const prompt = textarea.value.trim();
+
+  if (!prompt) {
+    showExpertStatus('Bitte geben Sie einen Prompt ein.', 'error');
+    return;
+  }
+
+  setFormatLoading(true, 'Prompt wird gespeichert...');
+
+  try {
+    const result = await ipcRenderer.invoke('save-custom-prompt', prompt);
+    if (result?.error) {
+      showExpertStatus(result.error, 'error');
+      return;
+    }
+    currentFormatBlock = result.block;
+    showExpertStatus('Prompt gespeichert!', 'success');
+  } catch (error) {
+    console.error('[Format] Save prompt error:', error);
+    showExpertStatus(error.message || 'Fehler beim Speichern.', 'error');
+  } finally {
+    setFormatLoading(false);
+  }
+}
+
+async function generateExpertPreview() {
+  const textarea = document.getElementById('formatCustomPrompt');
+  const prompt = textarea.value.trim();
+
+  if (!prompt) {
+    showExpertStatus('Bitte geben Sie erst einen Prompt ein.', 'error');
+    return;
+  }
+
+  const previewContent = document.getElementById('formatExpertPreviewContent');
+  const previewSpinner = document.getElementById('formatExpertPreviewSpinner');
+  const previewBtn = document.getElementById('formatExpertPreviewBtn');
+
+  previewBtn.disabled = true;
+  previewSpinner.style.display = 'inline-block';
+  previewContent.textContent = 'Vorschau wird generiert...';
+  previewContent.style.color = 'var(--text-secondary)';
+
+  try {
+    const result = await ipcRenderer.invoke('preview-format-block', prompt, true);
+    if (result?.error) {
+      previewContent.textContent = 'Fehler: ' + result.error;
+      return;
+    }
+    previewContent.textContent = result.documentation;
+    previewContent.style.color = 'var(--text-primary, #e0e0e0)';
+  } catch (error) {
+    console.error('[Format] Expert preview error:', error);
+    previewContent.textContent = 'Fehler: ' + (error.message || error);
+  } finally {
+    previewBtn.disabled = false;
+    previewSpinner.style.display = 'none';
+  }
+}
+
+const EXPERT_DEFAULT_PROMPT = `Erstelle aus dem Text eine kompakte Behandlungsdokumentation.
+
+FORMAT
+Diktathafter Fließtext, keine Überschriften, keine Aufzählungszeichen.
+Stichpunkte mit Kommas getrennt, ein Absatz pro Behandlungsschritt.
+
+STIL
+- Patient → immer "Pat."
+- Zahnangaben ohne Punkt: 36 (nicht 3.6)
+- Gängige Abkürzungen: empf., einv., Fllg, Rö, ZF, BF, OPG, Zst, MSH, PZR, WF, WB
+- So kurz wie möglich, so lang wie medizinisch nötig
+
+INHALT
+- Nur medizinisch, rechtlich oder abrechnungsrelevante Inhalte
+- Befunde mit Zahnangabe dokumentieren
+- Aufklärungen und Patientenentscheidungen festhalten
+- Keine Ablaufdetails (Spülen, Absaugen, Materialwechsel etc.)
+- Keine erfundenen Befunde
+
+REIHENFOLGE
+1. Anlass / Beratungsgrund
+2. Befunde und Diagnostik
+3. Durchgeführte Maßnahmen
+4. Aufklärung und Patientenwunsch
+5. Planung / Weiterbehandlung`;
+
+function resetExpertPrompt() {
+  document.getElementById('formatCustomPrompt').value = EXPERT_DEFAULT_PROMPT;
+  showExpertStatus('Prompt auf Vorlage zurückgesetzt.', 'success');
+}
+
+function showExpertStatus(message, type) {
+  const statusEl = document.getElementById('formatExpertStatusMsg');
+  statusEl.textContent = message;
+  statusEl.style.display = 'inline';
+  statusEl.style.color = type === 'error' ? 'var(--danger, #e74c3c)' :
+                          type === 'success' ? 'var(--success, #27ae60)' :
+                          'var(--text-secondary)';
+  if (type !== 'info') {
+    setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
+  }
+}

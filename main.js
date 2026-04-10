@@ -42,6 +42,7 @@ const vadController = require('./src/vad-controller');
 const { showNotification, showCustomNotification, initNotificationIPC } = require('./src/notifications');
 const session = require('./src/session');
 const trayModule = require('./src/tray');
+const recordingSlot = require('./src/recordingSlot');
 
 // Early debug logging
 const DEBUG_LOG = path.join(os.tmpdir(), 'dentdoc-main-debug.log');
@@ -53,12 +54,6 @@ function debugLog(message) {
   } catch (e) {
     // Can't use console.error here - would cause infinite loop
   }
-}
-
-// Valid docMode values - update this when adding/removing agents
-const VALID_DOC_MODES = ['agent-v2.1'];
-function validateDocMode(mode) {
-  return VALID_DOC_MODES.includes(mode) ? mode : 'agent-v2.1';
 }
 
 /**
@@ -277,6 +272,8 @@ let processingTimeoutId = null;
 let isEnrolling = false;
 let recordingStartCancelled = false;  // Flag to abort startRecording() if user cancels during startup
 let currentRecordingPath = null;
+let currentRecordingSlotId = null; // Backend recording slot ID for license enforcement
+let recordingSlotPending = false; // True while startRecording() is in progress (before isRecording=true)
 let savedAudioPathInBackup = null; // Path to audio saved in "Fehlgeschlagen" folder (deleted after successful save)
 let currentEnrollmentPath = null;
 let currentEnrollmentName = null;
@@ -291,9 +288,7 @@ let lastRecognizedSpeakers = [];
 let lastDetection = null;
 let lastStatus01 = null;
 let lastStatusPA = null;
-let lastKzvDocumentation = null;
 let lastZDocumentation = null;
-
 // Stop guard to prevent concurrent stop calls (e.g. double F9 press during long concatenation)
 let stopInProgress = false;
 
@@ -345,6 +340,17 @@ function copyToClipboardWithFormatting(text) {
   const html = `<!DOCTYPE html>\r\n<html>\r\n<head>\r\n<meta charset="utf-8">\r\n</head>\r\n<body>\r\n${htmlBody}\r\n</body>\r\n</html>`;
 
   // === RTF Format (Word-compatible with font table and codepage) ===
+  // Unicode codepoints that map to Windows-1252 bytes 0x80-0x9F
+  // (these differ from Unicode — older RTF parsers like Charly need \'XX not \uNNNN)
+  const unicodeToCp1252 = {
+    0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84, // € ‚ ƒ „
+    0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x02C6: 0x88, // … † ‡ ˆ
+    0x2030: 0x89, 0x0160: 0x8A, 0x2039: 0x8B, 0x0152: 0x8C, // ‰ Š ‹ Œ
+    0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92, 0x201C: 0x93, // Ž ' ' "
+    0x201D: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97, // " • – —
+    0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B, // ˜ ™ š ›
+    0x0153: 0x9C, 0x017E: 0x9E, 0x0178: 0x9F,               // œ ž Ÿ
+  };
   // RTF uses \par for line breaks, needs escaping for \ { } and non-ASCII chars
   const escapeRtf = (str) => str
     .replace(/\\/g, '\\\\')
@@ -352,9 +358,16 @@ function copyToClipboardWithFormatting(text) {
     .replace(/\}/g, '\\}')
     .replace(/[^\x00-\x7F]/g, (char) => {
       const code = char.charCodeAt(0);
+      // Direct ANSI range (Latin-1 supplement, includes ä ö ü ß)
       if (code <= 255) {
         return "\\'" + code.toString(16).padStart(2, '0');
       }
+      // Windows-1252 special chars (€ „ " " – — etc.)
+      const cp1252 = unicodeToCp1252[code];
+      if (cp1252 !== undefined) {
+        return "\\'" + cp1252.toString(16).padStart(2, '0');
+      }
+      // Unicode fallback for everything else
       return '\\u' + code + '?';
     });
 
@@ -835,7 +848,7 @@ function saveAudioImmediately(tempAudioPath) {
  * @param {boolean} options.saveAudio - Whether to save audio
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, utterances = null, words = null, topicSegments = null, passages = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, kzvDocumentation = null, zDocumentation = null } = options;
+  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, utterances = null, words = null, topicSegments = null, passages = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, zDocumentation = null } = options;
 
   // Nothing to save
   if (!saveTranscript && !saveAudio) {
@@ -875,19 +888,6 @@ function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping 
   // Create base filename: YYYY-MM-DD_HH-MM_JobID_[Names]
   let filenameSuffix = nameParts.length > 0 ? nameParts.join('_') : 'Unbekannt';
   const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}_${filenameSuffix}`;
-
-  // Build KZV documentation section if available (Agent V2.1)
-  let kzvSection = '';
-  if (kzvDocumentation) {
-    kzvSection = `
-
-────────────────────────────────────────────────────────────────────
-  KZV-DOKUMENTATION
-────────────────────────────────────────────────────────────────────
-
-${kzvDocumentation}
-`;
-  }
 
   // Build Z-Doku section if available (Agent V2.1 - Agent 4)
   let zDokuSection = '';
@@ -936,7 +936,7 @@ ${recognizedSpeakersLine}
 ────────────────────────────────────────────────────────────────────
 
 ${summary}
-${kzvSection}${zDokuSection}${normalizedSection}
+${zDokuSection}${normalizedSection}
 
 ────────────────────────────────────────────────────────────────────
   TRANSKRIPT MIT SPRECHERN
@@ -1009,7 +1009,6 @@ ${finalTranscriptText}
           })),
           words: words || null, // Word-level timestamps for precise audio navigation
           summary: summary,
-          kzvDocumentation: kzvDocumentation || null, // KZV-Dokumentation (Agent V2.1)
           zDocumentation: zDocumentation || null, // Z-Dokumentation / Chef-Zusammenfassung
           topicSegments: topicSegments || null, // KI-extracted topic segments for audio navigation
           passages: passages || null, // Semantic audio passages (15-40 sec thematic clips)
@@ -1252,7 +1251,12 @@ async function processAudioFile(audioFilePath, options = {}) {
         updateStatusOverlay('Verarbeitung...', 'Sprache erkannt', 'processing', { step: 2 });
         break;
       } else if (transcriptionResult.status === 'error') {
-        throw new Error(transcriptionResult.error || 'Transkription fehlgeschlagen');
+        const errMsg = transcriptionResult.error || 'Transkription fehlgeschlagen';
+        // AssemblyAI returns English error for no speech with language_detection enabled
+        if (errMsg.includes('no spoken audio') || errMsg.includes('language_detection')) {
+          throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+        }
+        throw new Error(errMsg);
       }
 
       await new Promise(resolve => setTimeout(resolve, 1000)); // Poll every 1 second
@@ -1362,7 +1366,6 @@ async function processAudioFile(audioFilePath, options = {}) {
     const detection = result.detection || null;
     const status01 = result.status01 || null;
     const statusPA = result.statusPA || null;
-    const kzvDocumentation = result.kzvDocumentation || null;
     const zDocumentation = result.zDocumentation || null;
 
     // Store for "show last result"
@@ -1374,7 +1377,6 @@ async function processAudioFile(audioFilePath, options = {}) {
     lastDetection = detection;
     lastStatus01 = status01;
     lastStatusPA = statusPA;
-    lastKzvDocumentation = kzvDocumentation;
     lastZDocumentation = zDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
@@ -1387,7 +1389,7 @@ async function processAudioFile(audioFilePath, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, kzvDocumentation, zDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, zDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Reset processing state immediately so user knows it's done
@@ -1457,7 +1459,6 @@ async function processAudioFile(audioFilePath, options = {}) {
             recognizedSpeakers: recognizedSpeakers,
             status01: status01,
             statusPA: statusPA,
-            kzvDocumentation: kzvDocumentation,
             zDocumentation: zDocumentation
           });
           debugLog('[Background] Files saved successfully');
@@ -1706,7 +1707,12 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
         updateStatusOverlay('Verarbeitung...', 'Sprache erkannt', 'processing', { step: 2 });
         break;
       } else if (transcriptionResult.status === 'error') {
-        throw new Error(transcriptionResult.error || 'Transkription fehlgeschlagen');
+        const errMsg = transcriptionResult.error || 'Transkription fehlgeschlagen';
+        // AssemblyAI returns English error for no speech with language_detection enabled
+        if (errMsg.includes('no spoken audio') || errMsg.includes('language_detection')) {
+          throw new Error('Keine Sprache erkannt. Bitte sprechen Sie deutlich ins Mikrofon und versuchen Sie es erneut.');
+        }
+        throw new Error(errMsg);
       }
 
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1782,7 +1788,6 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     const detection = docResponse.detection || null;
     const status01 = docResponse.status01 || null;
     const statusPA = docResponse.statusPA || null;
-    const kzvDocumentation = docResponse.kzvDocumentation || null;
     const zDocumentation = docResponse.zDocumentation || null;
 
     // Store for potential retry/copy
@@ -1794,7 +1799,6 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
     lastDetection = detection;
     lastStatus01 = status01;
     lastStatusPA = statusPA;
-    lastKzvDocumentation = kzvDocumentation;
     lastZDocumentation = zDocumentation;
     store.set('lastDocumentationTime', new Date().toISOString());
 
@@ -1815,7 +1819,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       'Fertig!',
       'Dokumentation in Zwischenablage kopiert (Strg+V)',
       'success',
-      { documentation, kzvDocumentation, zDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
+      { documentation, zDocumentation, transcript: finalTranscript, autoClose, reconstructedTranscript, transcriptWithSpeakers, recognizedSpeakers, detection, status01, statusPA }
     );
 
     // Increment today's recording count
@@ -1897,7 +1901,6 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
             recognizedSpeakers: recognizedSpeakers,
             status01: status01,
             statusPA: statusPA,
-            kzvDocumentation: kzvDocumentation,
             zDocumentation: zDocumentation
           });
           console.log('  [Background] Dateien gespeichert!');
@@ -1977,6 +1980,38 @@ async function startRecording() {
   if (isTrialUser && minutesRemaining <= 0 && !hasActiveSubscription) {
     updateStatusOverlay('Testphase beendet', 'Bitte abonnieren Sie DentDoc Pro um fortzufahren.', 'error');
     return;
+  }
+
+  // Claim recording slot in background (non-blocking!)
+  // Recording starts immediately — if rejected, it gets cancelled after ~200ms
+  const deviceId = store.get('deviceId');
+  recordingSlotPending = true; // Mark that we intend to record (isRecording is set later by VAD/iPhone/Standard)
+  if (deviceId && token) {
+    recordingSlot.claimSlot(token, deviceId).then(result => {
+      // Check if recording was cancelled before claim resolved
+      // Use both flags: isRecording (set by VAD/iPhone/Standard) OR recordingSlotPending (set above, cleared on cancel)
+      if (!isRecording && !recordingSlotPending) {
+        recordingSlot.releaseSlot(token, result.recordingId).catch(e =>
+          console.warn('[RecordingSlot] Release after early-stop:', e.message));
+        return;
+      }
+      currentRecordingSlotId = result.recordingId;
+      recordingSlot.startHeartbeat(token, currentRecordingSlotId);
+      console.log('[RecordingSlot] Slot claimed:', currentRecordingSlotId);
+    }).catch(err => {
+      if (err.message && err.message.includes('MAX_RECORDINGS')) {
+        console.log('[RecordingSlot] Max recordings reached, cancelling recording');
+        cancelCurrentRecording().then(() => {
+          hideStatusOverlay();
+          updateStatusOverlay('Alle Lizenzen belegt',
+            'Es läuft bereits eine Aufnahme auf einem anderen Gerät. Bitte stoppen Sie diese zuerst.', 'error');
+        });
+        return;
+      }
+      // Network error: proceed with recording (graceful degradation)
+      console.warn('[RecordingSlot] Claim failed, proceeding anyway:', err.message);
+      currentRecordingSlotId = null;
+    });
   }
 
   // Check if transcript folder is accessible (only if we're saving something)
@@ -2556,7 +2591,19 @@ async function stopRecordingWithIphone() {
     iphoneFfmpegProcess = null;
     iphoneRecordingPath = null;
     isRecording = false;
+    recordingSlotPending = false;
     trayModule.updateTrayMenu();
+
+    // Release recording slot (license enforcement)
+    if (currentRecordingSlotId) {
+      const token = store.get('authToken');
+      if (token) {
+        recordingSlot.releaseSlot(token, currentRecordingSlotId).catch(e =>
+          console.warn('[RecordingSlot] Release failed:', e.message));
+      }
+      recordingSlot.stopHeartbeat();
+      currentRecordingSlotId = null;
+    }
 
     // Reset tray
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2595,7 +2642,19 @@ async function stopRecordingWithIphone() {
 
     isIphoneSession = false;
     isRecording = false;
+    recordingSlotPending = false;
     trayModule.updateTrayMenu();
+
+    // Release recording slot on error
+    if (currentRecordingSlotId) {
+      const slotToken = store.get('authToken');
+      if (slotToken) {
+        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
+          console.warn('[RecordingSlot] Release failed on iPhone error:', e.message));
+      }
+      recordingSlot.stopHeartbeat();
+      currentRecordingSlotId = null;
+    }
 
     throw error;
   }
@@ -2700,7 +2759,7 @@ async function stopRecordingWithVAD() {
     tray.setToolTip('DentDoc - Stoppe Aufnahme...');
 
     // Immediate visual feedback so user knows F9 was registered
-    updateStatusOverlay('Aufnahme wird gestoppt', 'Segmente werden zusammengefügt...', 'processing');
+    updateStatusOverlay('Aufnahme wird gestoppt', 'Segmente zusammenfügen...', 'processing');
 
     // Notify dashboard to stop audio monitoring
     console.log('[VAD] Sending recording-stopped to dashboard');
@@ -2733,6 +2792,7 @@ async function stopRecordingWithVAD() {
     // IMMEDIATELY transition to processing state (before downsampling)
     // This prevents double F9 press issues during long downsampling
     isRecording = false;
+    recordingSlotPending = false;
     isVadSession = false;
     isProcessing = true;
     isPaused = false;  // Reset pause state
@@ -2740,6 +2800,17 @@ async function stopRecordingWithVAD() {
     pauseStartTime = null;
     pauseToggleInProgress = false;  // Reset lock
     trayModule.updateTrayMenu();
+
+    // Release recording slot (license enforcement)
+    if (currentRecordingSlotId) {
+      const token = store.get('authToken');
+      if (token) {
+        recordingSlot.releaseSlot(token, currentRecordingSlotId).catch(e =>
+          console.warn('[RecordingSlot] Release failed:', e.message));
+      }
+      recordingSlot.stopHeartbeat();
+      currentRecordingSlotId = null;
+    }
 
     // Safety timeout: auto-reset isProcessing after 10 minutes in case of unexpected hang
     // (Long recordings 50+ min can take 6+ minutes to process: VAD + Upload + Transcription + Documentation)
@@ -2796,9 +2867,21 @@ async function stopRecordingWithVAD() {
 
     // Reset ALL state on error
     isRecording = false;
+    recordingSlotPending = false;
     isVadSession = false;
     isProcessing = false;
     trayModule.updateTrayMenu();
+
+    // Release recording slot on error
+    if (currentRecordingSlotId) {
+      const slotToken = store.get('authToken');
+      if (slotToken) {
+        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
+          console.warn('[RecordingSlot] Release failed on VAD error:', e.message));
+      }
+      recordingSlot.stopHeartbeat();
+      currentRecordingSlotId = null;
+    }
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2863,10 +2946,22 @@ async function stopRecording() {
     // Recording is now 16kHz directly - no downsample needed
 
     isRecording = false;
+    recordingSlotPending = false;
     isPaused = false;
     pausedTime = 0;
     pauseStartTime = null;
     trayModule.updateTrayMenu();
+
+    // Release recording slot (license enforcement)
+    if (currentRecordingSlotId) {
+      const slotToken = store.get('authToken');
+      if (slotToken) {
+        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
+          console.warn('[RecordingSlot] Release failed:', e.message));
+      }
+      recordingSlot.stopHeartbeat();
+      currentRecordingSlotId = null;
+    }
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2884,12 +2979,24 @@ async function stopRecording() {
 
     // Reset state on error
     isRecording = false;
+    recordingSlotPending = false;
     isProcessing = false;
     isPaused = false;
     pausedTime = 0;
     pauseStartTime = null;
     pauseToggleInProgress = false;
     trayModule.updateTrayMenu();
+
+    // Release recording slot on error
+    if (currentRecordingSlotId) {
+      const slotToken = store.get('authToken');
+      if (slotToken) {
+        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
+          console.warn('[RecordingSlot] Release failed on error:', e.message));
+      }
+      recordingSlot.stopHeartbeat();
+      currentRecordingSlotId = null;
+    }
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2965,7 +3072,7 @@ function getOverlaySizeForState(type, extra = {}) {
       return { width: 402, height: 96 };
 
     case 'processing':
-      return { width: 402, height: 151 };
+      return { width: 402, height: 170 };
 
     case 'waiting-iphone':
       // Larger to accommodate QR code
@@ -2973,20 +3080,17 @@ function getOverlaySizeForState(type, extra = {}) {
 
     case 'success':
       // Calculate height based on which sections are visible
-      const hasKzv = !!extra.kzvDocumentation;
       const hasBefund = extra.status01 || extra.statusPA;
 
       // Base height: 300 (header + 2 main buttons)
-      // + 70 for KZV section
       // + 85 for befund section
       let successHeight = 300;
-      if (hasKzv) successHeight += 70;
       if (hasBefund) successHeight += 85;
 
       return { width: 402, height: successHeight };
 
     case 'error':
-      return { width: 402, height: 141 };
+      return { width: 402, height: 200 };
 
     default:
       return { width: 402, height: 121 };
@@ -3164,9 +3268,29 @@ function updateStatusOverlay(title, message, type, extra = {}) {
 
   const overlay = createStatusOverlay();
 
-  // Set correct size for this state (pass extra for success size calculation)
+  // Set initial size estimate, then auto-correct from actual content
   const { width, height } = getOverlaySizeForState(type, extra);
   overlay.setSize(width, height, false);
+
+  // Auto-resize: query actual content size from renderer after DOM update
+  const autoResizeOverlay = () => {
+    if (!overlay || overlay.isDestroyed() || !overlay.webContents || overlay.webContents.isDestroyed()) return;
+    overlay.webContents.executeJavaScript(`
+      (function() {
+        const el = document.querySelector('.container');
+        if (!el) return JSON.stringify(null);
+        return JSON.stringify({ w: Math.ceil(el.offsetWidth) + 4, h: Math.ceil(el.offsetHeight) + 4 });
+      })()
+    `).then(result => {
+      const size = JSON.parse(result);
+      if (!size || overlay.isDestroyed()) return;
+      const [curX, curY] = overlay.getPosition();
+      overlay.setBounds({ x: curX, y: curY, width: size.w, height: size.h });
+    }).catch(() => {});
+  };
+  // Run after DOM has updated (100ms + 400ms for safety)
+  setTimeout(autoResizeOverlay, 150);
+  setTimeout(autoResizeOverlay, 500);
 
   const statusData = {
     title,
@@ -3176,7 +3300,6 @@ function updateStatusOverlay(title, message, type, extra = {}) {
     uploadProgress: extra.uploadProgress,
     progressPercent: extra.progressPercent || null,
     documentation: extra.documentation || null,
-    kzvDocumentation: extra.kzvDocumentation || null,
     zDocumentation: extra.zDocumentation || null,
     transcript: extra.transcript || null,
     micUrl: extra.micUrl || null,
@@ -3245,7 +3368,6 @@ function showLastResult() {
     'success',
     {
       documentation: lastDocumentation,
-      kzvDocumentation: lastKzvDocumentation,
       zDocumentation: lastZDocumentation,
       transcript: lastTranscript,
       reconstructedTranscript: lastReconstructedTranscript,
@@ -3270,13 +3392,12 @@ ipcMain.on('overlay:resize', (event, { width, height }) => {
   // Get current position to maintain it during resize
   const [currentX, currentY] = statusOverlay.getPosition();
 
-  // Set new bounds with animation
   statusOverlay.setBounds({
     x: currentX,
     y: currentY,
-    width: Math.max(100, width),   // Minimum width
-    height: Math.max(50, height)   // Minimum height
-  }, true); // animate = true for smooth transition
+    width: Math.max(100, width),
+    height: Math.max(50, height)
+  });
 
   // Validate position after resize to ensure window stays on screen
   setTimeout(validateOverlayPosition, 50);
@@ -3332,6 +3453,98 @@ ipcMain.on('open-tooth-chart', (event, data) => {
   setTimeout(sendToothChartEvent, 500);
 });
 
+// Cancel an active recording, clean up all state and resources
+// Used by both the IPC cancel-recording handler and the recording slot rejection
+async function cancelCurrentRecording() {
+  if (!isRecording) return;
+
+  console.log('[Cancel] Cancelling active recording...');
+
+  // Notify dashboard to stop audio monitoring
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('recording-stopped');
+  }
+
+  try {
+    // Stop the audio recorder - use forceStop to ensure FFmpeg is fully killed
+    await audioRecorder.forceStop();
+  } catch (error) {
+    console.log('Error stopping recorder:', error);
+  }
+
+  // Clean up iPhone connection if active
+  if (isIphoneSession) {
+    if (iphoneHeartbeatInterval) {
+      clearInterval(iphoneHeartbeatInterval);
+      iphoneHeartbeatInterval = null;
+    }
+    if (iphoneRelayWs) {
+      try {
+        // Send STOP to iPhone BEFORE closing connection
+        if (iphoneRelayWs.readyState === 1) { // WebSocket.OPEN
+          console.log('[iPhone] Sending STOP before cancel');
+          iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
+        }
+        iphoneRelayWs.close();
+      } catch (e) {
+        debugLog(`[iPhone] WebSocket cleanup error during cancel: ${e.message}`);
+      }
+      iphoneRelayWs = null;
+    }
+    if (iphoneFfmpegProcess) {
+      try {
+        iphoneFfmpegProcess.stdin.end();
+        iphoneFfmpegProcess.kill();
+      } catch (e) {
+        debugLog(`[iPhone] FFmpeg cleanup error during cancel: ${e.message}`);
+      }
+      iphoneFfmpegProcess = null;
+    }
+    isIphoneSession = false;
+    iphoneRecordingPath = null;
+    console.log('[iPhone] Recording cancelled');
+  }
+
+  // Delete temp recording file (not needed when cancelled)
+  if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
+    try {
+      fs.unlinkSync(currentRecordingPath);
+      console.log('[Cancel] Deleted temp file:', currentRecordingPath);
+    } catch (e) {
+      console.warn('[Cancel] Could not delete temp file:', e.message);
+    }
+  }
+
+  // Release recording slot if active
+  if (currentRecordingSlotId) {
+    const token = store.get('authToken');
+    if (token) {
+      recordingSlot.releaseSlot(token, currentRecordingSlotId).catch(e =>
+        console.warn('[RecordingSlot] Release failed during cancel:', e.message));
+    }
+    recordingSlot.stopHeartbeat();
+    currentRecordingSlotId = null;
+  }
+
+  isRecording = false;
+  recordingSlotPending = false;
+  isVadSession = false;
+  isProcessing = false;
+  isPaused = false;
+  pausedTime = 0;
+  pauseStartTime = null;
+  pauseToggleInProgress = false;
+  currentRecordingPath = null;
+
+  // Reset tray icon
+  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  tray.setImage(iconPath);
+  tray.setToolTip('DentDoc - Bereit');
+  trayModule.updateTrayMenu();
+
+  console.log('[Cancel] Recording cancelled');
+}
+
 // IPC handler for cancelling recording (X button during recording or waiting-iphone)
 ipcMain.on('cancel-recording', async () => {
   console.log('[Cancel] Cancel requested - isRecording:', isRecording, 'isProcessing:', isProcessing);
@@ -3371,83 +3584,12 @@ ipcMain.on('cancel-recording', async () => {
   // Set flag to abort startup if recording hasn't started yet
   if (!isRecording) {
     recordingStartCancelled = true;
+    recordingSlotPending = false;
     console.log('[Cancel] Recording start cancelled (was in startup phase)');
     return;
   }
 
-  if (isRecording) {
-    // Notify dashboard to stop audio monitoring
-    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-      dashboardWindow.webContents.send('recording-stopped');
-    }
-
-    try {
-      // Stop the audio recorder - use forceStop to ensure FFmpeg is fully killed
-      await audioRecorder.forceStop();
-    } catch (error) {
-      console.log('Error stopping recorder:', error);
-    }
-
-    // Clean up iPhone connection if active
-    if (isIphoneSession) {
-      if (iphoneHeartbeatInterval) {
-        clearInterval(iphoneHeartbeatInterval);
-        iphoneHeartbeatInterval = null;
-      }
-      if (iphoneRelayWs) {
-        try {
-          // Send STOP to iPhone BEFORE closing connection
-          if (iphoneRelayWs.readyState === 1) { // WebSocket.OPEN
-            console.log('[iPhone] Sending STOP before cancel');
-            iphoneRelayWs.send(JSON.stringify({ type: 'STOP' }));
-          }
-          iphoneRelayWs.close();
-        } catch (e) {
-          debugLog(`[iPhone] WebSocket cleanup error during cancel: ${e.message}`);
-        }
-        iphoneRelayWs = null;
-      }
-      if (iphoneFfmpegProcess) {
-        try {
-          iphoneFfmpegProcess.stdin.end();
-          iphoneFfmpegProcess.kill();
-        } catch (e) {
-          debugLog(`[iPhone] FFmpeg cleanup error during cancel: ${e.message}`);
-        }
-        iphoneFfmpegProcess = null;
-      }
-      isIphoneSession = false;
-      iphoneRecordingPath = null;
-      console.log('[iPhone] Recording cancelled by user');
-    }
-
-    // Delete temp recording file (not needed when cancelled)
-    if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
-      try {
-        fs.unlinkSync(currentRecordingPath);
-        console.log('[Cancel] Deleted temp file:', currentRecordingPath);
-      } catch (e) {
-        console.warn('[Cancel] Could not delete temp file:', e.message);
-      }
-    }
-
-    isRecording = false;
-    isVadSession = false;  // Reset VAD session flag
-    isProcessing = false;
-    isPaused = false;      // Reset pause state
-    pausedTime = 0;
-    pauseStartTime = null;
-    pauseToggleInProgress = false;  // Reset lock
-    currentRecordingPath = null;
-
-    // Reset tray icon
-    const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-    tray.setImage(iconPath);
-    tray.setToolTip('DentDoc - Bereit');
-    trayModule.updateTrayMenu();
-
-    console.log('Recording cancelled by user');
-  }
+  await cancelCurrentRecording();
 });
 
 // IPC handlers for status overlay
@@ -3694,7 +3836,7 @@ ipcMain.handle('get-subscription-status', () => {
     label = `Abo endet am ${endDate}`;
     type = 'warning';
   } else if (hasActiveSubscription) {
-    label = `DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`;
+    label = `DentDoc Pro (${user?.maxDevices || 1} Lizenz${(user?.maxDevices || 1) !== 1 ? 'en' : ''})`;
     type = 'success';
   } else if (isRealTrial) {
     label = `Testphase: ${minutesRemaining} Min`;
@@ -3711,6 +3853,25 @@ ipcMain.handle('get-subscription-status', () => {
   }
 
   return { label, type };
+});
+
+// Get active recording count for sidebar badge
+ipcMain.handle('get-active-recordings', async () => {
+  const token = store.get('authToken');
+  if (!token) return { activeRecordings: 0, maxRecordings: 0 };
+
+  try {
+    const axios = require('axios');
+    const API_BASE_URL = apiClient.getBaseUrl();
+    const response = await axios.get(`${API_BASE_URL}api/recording/active`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      timeout: 5000,
+    });
+    return response.data;
+  } catch (error) {
+    console.warn('[ActiveRecordings] Fetch failed:', error.message);
+    return { activeRecordings: 0, maxRecordings: 0 };
+  }
 });
 
 // Get subscription details with device info for dashboard
@@ -3799,7 +3960,7 @@ ipcMain.handle('get-subscription-details', async () => {
   if (hasActiveSubscription) {
     const basePlanName = user?.planName || 'DentDoc Pro';
     const deviceCount = maxDevices || user?.maxDevices || 1;
-    planName = `${basePlanName} (${deviceCount} Arbeitsplatz${deviceCount !== 1 ? 'e' : ''})`;
+    planName = `${basePlanName} (${deviceCount} Lizenz${deviceCount !== 1 ? 'en' : ''})`;
   } else if (isRealTrial) {
     planName = 'Testphase';
   }
@@ -4051,6 +4212,17 @@ ipcMain.on('minimize-window', (event) => {
   if (window) window.minimize();
 });
 
+ipcMain.on('maximize-window', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+  }
+});
+
 ipcMain.on('close-window', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (window) window.close();
@@ -4166,7 +4338,7 @@ ipcMain.handle('login', async (event, email, password) => {
       );
     } else if (hasActiveSubscription) {
       // Pro user
-      showCustomNotification('Angemeldet', `Willkommen! DentDoc Pro (${user?.maxDevices || 1} Arbeitsplatz${(user?.maxDevices || 1) !== 1 ? 'e' : ''})`, 'success');
+      showCustomNotification('Angemeldet', `Willkommen! DentDoc Pro (${user?.maxDevices || 1} Lizenz${(user?.maxDevices || 1) !== 1 ? 'en' : ''})`, 'success');
     } else {
       // Normal welcome
       showCustomNotification('Angemeldet', `Willkommen ${response.user.email}!`, 'success');
@@ -4176,11 +4348,6 @@ ipcMain.handle('login', async (event, email, password) => {
   } catch (error) {
     console.error('[Login] IPC error:', error.message);
     autoUploadDebugLogs('login-error');
-    // Check for max devices error
-    if (error.message.startsWith('MAX_DEVICES:')) {
-      const message = error.message.substring('MAX_DEVICES:'.length);
-      return { success: false, error: message, code: 'MAX_DEVICES' };
-    }
     return { success: false, error: error.message };
   }
 });
@@ -4242,7 +4409,6 @@ ipcMain.handle('get-settings', async () => {
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
     keepAudio: store.get('keepAudio', true),
-    docMode: validateDocMode(store.get('docMode', 'agent-v2.1')),
     theme: store.get('theme', 'dark'),
     vadEnabled: store.get('vadEnabled', true)  // VAD enabled by default
   };
@@ -4293,12 +4459,6 @@ ipcMain.handle('save-settings', async (event, settings) => {
   if (settings.vadEnabled !== undefined) {
     store.set('vadEnabled', settings.vadEnabled);
     console.log('Saved vadEnabled:', settings.vadEnabled);
-  }
-
-  // Save docMode setting
-  if (settings.docMode !== undefined) {
-    store.set('docMode', settings.docMode);
-    console.log('Saved docMode:', settings.docMode);
   }
 
   // Save microphone source (desktop/iphone)
@@ -5260,6 +5420,98 @@ ipcMain.handle('delete-voice-profile', async (event, id) => {
 
 ipcMain.handle('rename-voice-profile', async (event, { id, newName }) => {
   return await voiceProfiles.updateProfile(id, { name: newName });
+});
+
+// ============================================================================
+// Format Block (kundenspezifisches Dokumentationsformat)
+// ============================================================================
+
+ipcMain.handle('confirm-format-reset', async () => {
+  const result = await dialog.showMessageBox(dashboardWindow, {
+    type: 'question',
+    buttons: ['Zurücksetzen', 'Abbrechen'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Dokumentationsformat zurücksetzen',
+    message: 'Möchten Sie Ihr Dokumentationsformat wirklich auf den Standard zurücksetzen?',
+    detail: 'Ihre aktuelle Version wird in der Historie gespeichert.'
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('get-format-block', async () => {
+  try {
+    const token = store.get('authToken');
+    if (!token) return { error: 'Nicht angemeldet' };
+    const result = await apiClient.getFormatBlock(token);
+    console.log('[get-format-block] Success:', result?.block?.substring(0, 50));
+    return result;
+  } catch (error) {
+    console.error('[get-format-block] Error:', error.message);
+    return { error: error.message || 'Unbekannter Fehler' };
+  }
+});
+
+ipcMain.handle('update-format-block', async (event, changeRequest) => {
+  const token = store.get('authToken');
+  if (!token) throw new Error('Nicht angemeldet');
+  return await apiClient.updateFormatBlock(token, changeRequest);
+});
+
+ipcMain.handle('reset-format-block', async () => {
+  const token = store.get('authToken');
+  if (!token) throw new Error('Nicht angemeldet');
+  return await apiClient.resetFormatBlock(token);
+});
+
+ipcMain.handle('get-format-history', async () => {
+  const token = store.get('authToken');
+  if (!token) throw new Error('Nicht angemeldet');
+  return await apiClient.getFormatHistory(token);
+});
+
+ipcMain.handle('preview-format-block', async (event, block, isExpertMode) => {
+  try {
+    const token = store.get('authToken');
+    if (!token) return { error: 'Nicht angemeldet' };
+    return await apiClient.previewFormatBlock(token, block, isExpertMode || false);
+  } catch (error) {
+    console.error('[preview-format-block] Error:', error.message);
+    return { error: error.message || 'Vorschau fehlgeschlagen' };
+  }
+});
+
+ipcMain.handle('set-format-mode', async (event, mode) => {
+  try {
+    const token = store.get('authToken');
+    if (!token) return { error: 'Nicht angemeldet' };
+    return await apiClient.setFormatMode(token, mode);
+  } catch (error) {
+    console.error('[set-format-mode] Error:', error.message);
+    return { error: error.message || 'Modus-Wechsel fehlgeschlagen' };
+  }
+});
+
+ipcMain.handle('save-custom-prompt', async (event, prompt) => {
+  try {
+    const token = store.get('authToken');
+    if (!token) return { error: 'Nicht angemeldet' };
+    return await apiClient.saveCustomPrompt(token, prompt);
+  } catch (error) {
+    console.error('[save-custom-prompt] Error:', error.message);
+    return { error: error.message || 'Speichern fehlgeschlagen' };
+  }
+});
+
+ipcMain.handle('revert-format-block', async (event, version) => {
+  try {
+    const token = store.get('authToken');
+    if (!token) return { error: 'Nicht angemeldet' };
+    return await apiClient.revertFormatBlock(token, version);
+  } catch (error) {
+    console.error('[revert-format-block] Error:', error.message);
+    return { error: error.message || 'Zurücksetzen fehlgeschlagen' };
+  }
 });
 
 // Add utterance audio segment to voice profile (or create new profile)
@@ -6545,6 +6797,9 @@ app.whenReady().then(() => {
     createLoginWindow
   });
 
+  // Initialize recording slot module (license enforcement)
+  recordingSlot.init(apiClient.getBaseUrl());
+
   // Initialize VAD Controller
   vadController.initialize();
   console.log('[App] VAD Controller initialized');
@@ -6737,6 +6992,20 @@ app.on('will-quit', async () => {
     } catch (err) {
       console.error('[Quit] Error stopping recording:', err);
     }
+  }
+
+  // Release recording slot if active (best-effort, server has 2-min timeout as fallback)
+  if (currentRecordingSlotId) {
+    const token = store.get('authToken');
+    if (token) {
+      try {
+        await recordingSlot.releaseSlot(token, currentRecordingSlotId);
+      } catch (e) {
+        console.warn('[Quit] Recording slot release failed:', e.message);
+      }
+    }
+    recordingSlot.stopHeartbeat();
+    currentRecordingSlotId = null;
   }
 
   // Clean up mic test file

@@ -286,6 +286,21 @@ p {
   box-shadow: none;
 }
 
+#view-format .card {
+  transition: none;
+}
+
+#view-format .card:hover {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  transform: none;
+  box-shadow: none;
+}
+
+#view-format .card::before {
+  display: none;
+}
+
 /* ===== Buttons ===== */
 .btn {
   display: inline-flex;

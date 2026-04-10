@@ -43,12 +43,14 @@ function showCustomNotification(title, body, type = 'warning', onClick = null) {
 
   // Close existing popup if any
   if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
-    notificationPopupWindow.close();
+    const oldWindow = notificationPopupWindow;
+    notificationPopupWindow = null;
+    oldWindow.close();
   }
 
   notificationClickCallback = onClick;
 
-  notificationPopupWindow = new BrowserWindow({
+  const newWindow = new BrowserWindow({
     width: 380,
     height: 160,
     x: workArea.x + workArea.width - 400,
@@ -65,23 +67,20 @@ function showCustomNotification(title, body, type = 'warning', onClick = null) {
     }
   });
 
-  notificationPopupWindow.loadFile(path.join(__dirname, 'notification-popup.html'));
+  notificationPopupWindow = newWindow;
 
-  notificationPopupWindow.webContents.on('did-finish-load', () => {
-    // Check if window still exists (could be closed rapidly)
-    if (notificationPopupWindow && !notificationPopupWindow.isDestroyed()) {
-      notificationPopupWindow.webContents.send('show-notification', {
-        title,
-        body,
-        type,
-        hasClickAction: !!onClick
-      });
-    }
+  // Pass data via query params to avoid IPC timing issues
+  const notifData = encodeURIComponent(JSON.stringify({ title, body, type, hasClickAction: !!onClick }));
+  newWindow.loadFile(path.join(__dirname, 'notification-popup.html'), {
+    query: { data: notifData }
   });
 
-  notificationPopupWindow.on('closed', () => {
-    notificationPopupWindow = null;
-    notificationClickCallback = null;
+  newWindow.on('closed', () => {
+    // Only nullify if this is still the current window (avoid race condition)
+    if (notificationPopupWindow === newWindow) {
+      notificationPopupWindow = null;
+      notificationClickCallback = null;
+    }
   });
 }
 
