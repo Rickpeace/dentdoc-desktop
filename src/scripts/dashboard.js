@@ -355,15 +355,16 @@ ipcRenderer.on('recording-started', async (event, options) => {
   // Refresh active recordings badge (with small delay to let claim resolve)
   setTimeout(() => loadActiveRecordingsBadge(), 1000);
 
-  // Always start F9 audio monitoring for status bar levels (lightweight, reliable fallback)
-  await startF9AudioMonitoring(options?.microphoneId);
-
   if (options?.vadMode) {
-    // Also start VAD integration for speech marker detection
-    console.log('[VAD] VAD mode - starting VAD integration alongside F9 monitoring...');
+    // VAD mode: VAD sends audio levels directly via notifyRenderer — no F9 monitoring needed
+    // (F9 getUserMedia often gets wrong device or near-zero levels, flooding the overlay with zeros)
+    console.log('[VAD] VAD mode - starting VAD integration (VAD handles audio levels)...');
     startVADIntegration(options?.microphoneId).catch(err => {
       console.error('[VAD] startVADIntegration error:', err);
     });
+  } else {
+    // Non-VAD mode: use F9 audio monitoring as fallback for status bar levels
+    await startF9AudioMonitoring(options?.microphoneId);
   }
 });
 

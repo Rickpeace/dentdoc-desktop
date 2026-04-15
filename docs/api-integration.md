@@ -347,6 +347,15 @@ autoUploadDebugLogs('startup');
 | `/api/subscription` | GET | Abo-Status |
 | `/api/subscription/portal` | GET | Stripe Portal URL |
 
+### Recording Slots (Lizenz-Enforcement)
+
+| Endpoint | Method | Beschreibung |
+|----------|--------|--------------|
+| `/api/recording/claim` | POST | Slot reservieren (1 pro User gleichzeitig) |
+| `/api/recording/heartbeat` | POST | Keep-Alive (alle 60s vom Desktop) |
+| `/api/recording/release` | POST | Slot freigeben (idempotent) |
+| `/api/recording/active` | GET | Aktive Slots des Users abrufen |
+
 ### Voice Profiles
 
 | Endpoint | Method | Beschreibung |
@@ -431,6 +440,60 @@ await apiClient.deleteVoiceProfile(token, 5);
 DELETE /api/voice-profiles/{id}
 Authorization: Bearer <token>
 ```
+
+---
+
+### Recording Slots
+
+#### Claim Slot
+
+```javascript
+const result = await recordingSlot.claimSlot(token, deviceId);
+// result: { recordingId: 12345 }
+```
+
+**Request:**
+```http
+POST /api/recording/claim
+Authorization: Bearer <token>
+{ "deviceId": "uuid", "deviceName": "DESKTOP-ABC" }
+```
+
+**Fehler:**
+- `403 max_recordings_reached` — Alle Lizenzen belegt
+- Crash-Recovery: Stale Slots vom selben Gerät werden automatisch released
+
+#### Heartbeat
+
+```javascript
+recordingSlot.startHeartbeat(token, recordingId, (reason) => {
+  // reason: 'expired' (404) oder 'error' (Netzwerk)
+});
+```
+
+**Request (alle 60s):**
+```http
+POST /api/recording/heartbeat
+Authorization: Bearer <token>
+{ "recordingId": 12345 }
+```
+
+**Server-Timeout:** 2 Min ohne Heartbeat → Slot gilt als verfallen
+
+#### Release
+
+```javascript
+await recordingSlot.releaseSlot(token, recordingId);
+```
+
+**Request:**
+```http
+POST /api/recording/release
+Authorization: Bearer <token>
+{ "recordingId": 12345 }
+```
+
+**Idempotent:** Kann mehrfach aufgerufen werden (z.B. bei Retry)
 
 ---
 

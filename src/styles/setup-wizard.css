@@ -69,10 +69,7 @@
 }
 
 .wizard-progress-text {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-  min-width: 80px;
-  text-align: right;
+  display: none;
 }
 
 .wizard-progress-bar {
@@ -137,17 +134,22 @@
   display: none;
   max-width: 600px;
   width: 100%;
-  animation: wizardFadeIn 0.4s ease-out;
+  animation: wizardSlideIn 0.4s ease-out;
 }
 
 .wizard-step.active {
   display: block;
 }
 
-@keyframes wizardFadeIn {
+/* Also animate mic substeps */
+.wizard-mic-substep {
+  animation: wizardSlideIn 0.3s ease-out;
+}
+
+@keyframes wizardSlideIn {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateX(30px);
   }
   to {
     opacity: 1;
@@ -291,7 +293,7 @@
 
 .wizard-mic-level {
   flex: 1;
-  height: 12px;
+  height: 18px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-full);
@@ -353,13 +355,22 @@
 
 .wizard-shortcut-key {
   font-family: var(--font-mono);
-  font-size: 2rem;
+  font-size: 2.5rem;
   font-weight: 700;
   color: var(--primary-500);
-  padding: var(--space-3) var(--space-5);
-  background: linear-gradient(135deg, rgba(249, 115, 22, 0.2), rgba(249, 115, 22, 0.05));
+  padding: var(--space-4) var(--space-6);
+  background: linear-gradient(180deg, rgba(249, 115, 22, 0.15) 0%, rgba(249, 115, 22, 0.05) 100%);
   border: 2px solid rgba(249, 115, 22, 0.3);
+  border-bottom: 4px solid rgba(249, 115, 22, 0.4);
   border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  text-shadow: 0 0 20px rgba(249, 115, 22, 0.3);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.wizard-shortcut-key:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(249, 115, 22, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .wizard-shortcut-display.recording {
@@ -584,6 +595,7 @@
   display: flex;
   gap: var(--space-3);
   margin-top: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 [data-theme="light"] .wizard-info {
@@ -852,6 +864,70 @@
   100% { opacity: 1; transform: scale(1); }
 }
 
+/* Confetti particles */
+.wizard-completion-animation::before,
+.wizard-completion-animation::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: confetti 1s ease-out 0.5s both;
+}
+
+.wizard-completion-animation::before {
+  background: var(--primary-500);
+  left: calc(50% - 40px);
+  top: 20px;
+  animation-delay: 0.4s;
+}
+
+.wizard-completion-animation::after {
+  background: var(--success-500);
+  left: calc(50% + 35px);
+  top: 25px;
+  animation-delay: 0.6s;
+}
+
+.wizard-checkmark::before,
+.wizard-checkmark::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: confetti 1.2s ease-out both;
+}
+
+.wizard-checkmark::before {
+  background: #f59e0b;
+  left: -15px;
+  top: 30px;
+  animation-delay: 0.5s;
+}
+
+.wizard-checkmark::after {
+  background: #3b82f6;
+  right: -15px;
+  top: 20px;
+  animation-delay: 0.7s;
+}
+
+@keyframes confetti {
+  0% {
+    opacity: 1;
+    transform: scale(0) translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.5) translateY(-30px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5) translateY(-60px);
+  }
+}
+
 /* Responsive */
 @media (max-width: 700px) {
   .wizard-welcome-features {
@@ -875,10 +951,7 @@
    Microphone Decision Tree Sub-Steps
    =========================================== */
 
-/* Sub-step containers */
-.wizard-mic-substep {
-  animation: fadeInUp 0.3s ease-out;
-}
+/* Sub-step containers — uses wizardSlideIn from above */
 
 @keyframes fadeInUp {
   from {
@@ -1564,4 +1637,210 @@
 
 .wizard-phone-test-container.recording .wizard-btn:hover {
   background: var(--error-600);
+}
+
+/* ===========================================
+   Microphone Recommendations (collapsible)
+   =========================================== */
+
+.wizard-recommendations {
+  margin-top: var(--space-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.wizard-recommendations-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  color: var(--primary-500);
+  font-size: 0.875rem;
+  font-weight: 500;
+  list-style: none;
+}
+
+.wizard-recommendations-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.wizard-recommendations-toggle::after {
+  content: '';
+  margin-left: auto;
+  border: 5px solid transparent;
+  border-top-color: var(--primary-500);
+  transition: transform 0.2s;
+}
+
+.wizard-recommendations[open] .wizard-recommendations-toggle::after {
+  transform: rotate(180deg);
+}
+
+.wizard-recommendations-content {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.wizard-rec-card {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  position: relative;
+}
+
+.wizard-rec-card.wizard-rec-best {
+  border-color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.05);
+}
+
+.wizard-rec-badge {
+  position: absolute;
+  top: -10px;
+  right: 16px;
+  background: var(--primary-500);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+
+.wizard-rec-card h4 {
+  color: var(--text-primary);
+  margin: 0 0 var(--space-2) 0;
+  font-size: 1rem;
+}
+
+.wizard-rec-card p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0 0 var(--space-2) 0;
+}
+
+.wizard-rec-card ul {
+  padding-left: var(--space-4);
+  margin: var(--space-2) 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.wizard-rec-card ul li {
+  margin-bottom: 4px;
+}
+
+.wizard-rec-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+  font-size: 0.8125rem;
+}
+
+.wizard-rec-warning strong {
+  color: #f59e0b;
+}
+
+.wizard-rec-warning ul {
+  margin: var(--space-1) 0 0 0;
+}
+
+.wizard-rec-example {
+  color: var(--text-tertiary);
+  font-size: 0.8125rem;
+  font-style: italic;
+}
+
+/* ===========================================
+   Microphone List (replaces dropdown in wizard)
+   =========================================== */
+
+.wizard-mic-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.wizard-mic-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.wizard-mic-item:hover {
+  border-color: rgba(249, 115, 22, 0.4);
+  background: rgba(249, 115, 22, 0.05);
+}
+
+.wizard-mic-item.selected {
+  border-color: var(--primary-500);
+  background: rgba(249, 115, 22, 0.1);
+}
+
+.wizard-mic-item-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.wizard-mic-item.selected .wizard-mic-item-icon {
+  background: var(--primary-500);
+  color: white;
+}
+
+.wizard-mic-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.wizard-mic-item-name {
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wizard-mic-item-check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.wizard-mic-item.selected .wizard-mic-item-check {
+  border-color: var(--primary-500);
+  background: var(--primary-500);
+}
+
+.wizard-mic-item.selected .wizard-mic-item-check svg {
+  display: block;
+}
+
+.wizard-mic-item-check svg {
+  display: none;
+  width: 14px;
+  height: 14px;
+  color: white;
 }

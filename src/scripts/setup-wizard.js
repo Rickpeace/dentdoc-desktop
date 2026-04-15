@@ -14,7 +14,8 @@ const wizardAudioUtils = require('./scripts/audio-utils');
 class SetupWizard {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 8; // 0-7 (removed KI-Dokumentation step)
+    this.totalSteps = 9; // 0-8 (Welcome, Mic, Shortcut, Storage, Path, DSGVO, Dashboard, Trial, Done)
+    this.isTrialUser = false;
     this.settings = {
       microphoneId: null, // Windows device name for FFmpeg
       microphoneSource: 'desktop', // 'desktop' or 'iphone'
@@ -26,12 +27,14 @@ class SetupWizard {
 
     // Audio test state - uses shared MicTester from audio-utils
     this.micTester = null;  // Created on first use
+    this.autoTestMonitor = null; // AudioMonitor for auto mic test
+    this.autoTestDetected = false; // Whether mic signal was detected
 
     // Shortcut recording state
     this.isRecordingShortcut = false;
 
     // Mic wizard substep state machine
-    this.micWizardState = 'initial_question'; // initial_question, has_mic, phone_question, phone_pairing, phone_test, no_mic
+    this.micWizardState = 'initial_question'; // initial_question, connect, has_mic, mic_test, phone_question, phone_pairing, phone_test, no_mic
     this.phonePairingId = null;
     this.phonePairingPollInterval = null;
     this.isPhoneConnected = false;
@@ -61,6 +64,14 @@ class SetupWizard {
       this.settings.microphoneId = settings.microphoneId || null; // Windows device name
       this.settings.autoExport = settings.autoExport !== false;
       this.settings.keepAudio = settings.keepAudio !== false; // Default true
+
+      // Check if user is on free trial (for Trial info step)
+      try {
+        const subStatus = await ipcRenderer.invoke('get-subscription-status');
+        this.isTrialUser = subStatus.type === 'trial';
+      } catch (e) {
+        this.isTrialUser = false;
+      }
 
       // Update path input fields with actual paths
       this.updatePathDisplays();
@@ -123,8 +134,28 @@ class SetupWizard {
     // Close button
     document.getElementById('wizardCloseBtn')?.addEventListener('click', () => this.closeWizard());
 
-    // Skip setup button (on welcome page)
-    document.getElementById('wizardSkipSetupBtn')?.addEventListener('click', () => this.skipSetup());
+    // Trial upgrade link
+    document.getElementById('wizardTrialUpgradeLink')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const baseUrl = await ipcRenderer.invoke('get-base-url');
+      ipcRenderer.invoke('open-external-url', baseUrl + '/dashboard/subscription');
+    });
+
+    // DSGVO copy button
+    document.getElementById('wizardCopyDsgvoBtn')?.addEventListener('click', () => {
+      const text = 'Sprachaufzeichnung / KI-Dokumentation (DentDoc)\n\nZur Unterstützung der Behandlungsdokumentation können über die DentDoc-Desktop-App Sprachaufzeichnungen erstellt und transkribiert werden. Die verschlüsselte Verarbeitung erfolgt über DentDoc (Auftragsverarbeiter); hierfür können Unterauftragnehmer zur Transkription eingesetzt werden. Audiodaten werden beim Transkriptionsdienst nur für die Verarbeitung vorgehalten und anschließend gelöscht; lokal in der Praxis gespeicherte Audio- und Transkriptionsdaten werden spätestens nach 30 Tagen gelöscht.\n\nRechtsgrundlage: Art. 6 Abs. 1 lit. b, Art. 9 Abs. 2 lit. h DSGVO.';
+      navigator.clipboard.writeText(text);
+      const status = document.getElementById('wizardDsgvoCopyStatus');
+      if (status) {
+        status.style.display = 'inline';
+        setTimeout(() => { status.style.display = 'none'; }, 2000);
+      }
+    });
+
+    // "No mic" → phone button
+    document.getElementById('wizardNoMicPhoneBtn')?.addEventListener('click', () => {
+      this.setMicWizardState('phone_question');
+    });
 
     // Microphone
     document.getElementById('wizardMicSelect')?.addEventListener('change', async (e) => {
@@ -280,10 +311,9 @@ class SetupWizard {
   // ==========================================
 
   bindMicWizardEvents() {
-    // Q1: Has USB Mic? - Yes
+    // Q1: Has USB Mic? - Yes → go to "connect" screen first
     document.getElementById('wizardMicHasYes')?.addEventListener('click', () => {
-      this.setMicWizardState('has_mic');
-      this.loadMicrophones();
+      this.setMicWizardState('connect');
     });
 
     // Q1: Has USB Mic? - No
@@ -324,9 +354,17 @@ class SetupWizard {
     });
 
     // Back buttons
-    document.getElementById('wizardMicBackToQuestion')?.addEventListener('click', () => {
-      this.stopMicTest();
+    document.getElementById('wizardConnectBackToQuestion')?.addEventListener('click', () => {
       this.setMicWizardState('initial_question');
+    });
+
+    document.getElementById('wizardMicBackToQuestion')?.addEventListener('click', () => {
+      this.setMicWizardState('connect');
+    });
+
+    document.getElementById('wizardTestBackToSelect')?.addEventListener('click', () => {
+      this.stopMicTest();
+      this.setMicWizardState('has_mic');
     });
 
     document.getElementById('wizardPhoneBackToQuestion')?.addEventListener('click', () => {
@@ -349,9 +387,17 @@ class SetupWizard {
   }
 
   setMicWizardState(newState) {
+    // Stop auto mic test when leaving mic_test state
+    if (this.micWizardState === 'mic_test' && newState !== 'mic_test') {
+      this.stopAutoMicTest();
+    }
     this.micWizardState = newState;
     this.updateMicSubstepVisibility();
     this.updateMicNavigation();
+    // Start auto mic test when entering mic_test state
+    if (newState === 'mic_test') {
+      this.startAutoMicTest();
+    }
   }
 
   updateMicSubstepVisibility() {
@@ -363,7 +409,9 @@ class SetupWizard {
     // Show the appropriate substep
     const substepMap = {
       'initial_question': 'wizardMicSubstepInitial',
+      'connect': 'wizardMicSubstepConnect',
       'has_mic': 'wizardMicSubstepHasMic',
+      'mic_test': 'wizardMicSubstepTest',
       'phone_question': 'wizardMicSubstepPhoneQuestion',
       'phone_already_paired': 'wizardMicSubstepPhoneAlreadyPaired',
       'phone_pairing': 'wizardMicSubstepPhonePairing',
@@ -401,49 +449,28 @@ class SetupWizard {
       return;
     }
 
-    // Step 1: Disable next button on question states (must make a choice)
-    if (this.micWizardState === 'initial_question' ||
-        this.micWizardState === 'phone_question' ||
-        this.micWizardState === 'phone_already_paired') {
-      // Disable navigation on these screens (user makes choice via substep buttons)
+    // Disable states: user must make a choice via substep buttons
+    const disabledStates = ['initial_question', 'phone_question', 'phone_already_paired', 'phone_pairing'];
+    // Enabled states: Weiter button works (advances within mic sub-steps or to next wizard step)
+    const enabledStates = ['connect', 'has_mic', 'mic_test', 'phone_test', 'no_mic'];
+
+    if (disabledStates.includes(this.micWizardState)) {
       if (nextBtn) {
         nextBtn.disabled = true;
         nextBtn.style.opacity = '0.5';
         nextBtn.style.pointerEvents = 'none';
-        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
       }
-      if (skipBtn) skipBtn.style.display = 'none';
-    } else if (this.micWizardState === 'phone_pairing') {
-      // Phone pairing - show skip button so user can skip if pairing doesn't work
-      if (nextBtn) {
-        nextBtn.disabled = true;
-        nextBtn.style.opacity = '0.5';
-        nextBtn.style.pointerEvents = 'none';
-        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
-      }
-      if (skipBtn) skipBtn.style.display = 'block';
-    } else if (this.micWizardState === 'no_mic') {
-      // No mic - enable buttons, change text to "Trotzdem fortfahren"
-      if (nextBtn) {
-        nextBtn.disabled = false;
-        nextBtn.style.opacity = '1';
-        nextBtn.style.pointerEvents = 'auto';
-        nextBtn.style.display = 'flex';
-        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Trotzdem fortfahren';
-      }
-      if (backBtn) backBtn.style.display = 'flex';
-      if (skipBtn) skipBtn.style.display = 'none';
     } else {
-      // Enable navigation for has_mic and phone_test states
       if (nextBtn) {
         nextBtn.disabled = false;
         nextBtn.style.opacity = '1';
         nextBtn.style.pointerEvents = 'auto';
         nextBtn.style.display = 'flex';
-        nextBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
+        nextBtn.innerHTML = this.micWizardState === 'no_mic'
+          ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter ohne Mikrofon'
+          : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Weiter';
       }
       if (backBtn) backBtn.style.display = 'flex';
-      if (skipBtn) skipBtn.style.display = 'none';
     }
   }
 
@@ -1249,39 +1276,138 @@ class SetupWizard {
       this.settings.microphoneId = result.deviceId;
       this.settings.microphoneName = result.deviceName;
     }
+    this.renderMicList();
     this.loadWizardMicVolume();
   }
 
-  async loadWizardMicVolume() {
-    const container = document.getElementById('wizardMicVolumeContainer');
-    const slider = document.getElementById('wizardMicVolumeSlider');
-    const valueDisplay = document.getElementById('wizardMicVolumeValue');
-    if (!container || !slider || !valueDisplay) return;
+  renderMicList() {
+    const select = document.getElementById('wizardMicSelect');
+    const listContainer = document.getElementById('wizardMicList');
+    if (!select || !listContainer) return;
 
-    // Don't show volume if no mic is selected/connected
-    const micSelect = document.getElementById('wizardMicSelect');
-    if (!micSelect || !micSelect.value) {
-      container.style.display = 'none';
+    listContainer.innerHTML = '';
+
+    const options = Array.from(select.options).filter(o => o.value); // skip empty placeholder
+    if (options.length === 0) {
+      listContainer.innerHTML = '<p style="color: var(--text-tertiary); text-align: center; padding: var(--space-4);">Keine Mikrofone gefunden</p>';
       return;
     }
 
+    options.forEach(option => {
+      const item = document.createElement('div');
+      item.className = 'wizard-mic-item' + (option.selected ? ' selected' : '');
+      item.dataset.value = option.value;
+
+      // Clean up the mic name for display
+      const fullName = option.textContent;
+      const cleanName = fullName.replace(/^\d+-\s*/, '').replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, '').trim();
+
+      item.innerHTML = `
+        <div class="wizard-mic-item-icon">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          </svg>
+        </div>
+        <div class="wizard-mic-item-info">
+          <div class="wizard-mic-item-name">${cleanName || fullName}</div>
+        </div>
+        <div class="wizard-mic-item-check">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+      `;
+
+      item.addEventListener('click', () => {
+        // Deselect all
+        listContainer.querySelectorAll('.wizard-mic-item').forEach(el => el.classList.remove('selected'));
+        // Select this one
+        item.classList.add('selected');
+        // Sync to hidden select and trigger change
+        select.value = option.value;
+        select.dispatchEvent(new Event('change'));
+      });
+
+      listContainer.appendChild(item);
+    });
+  }
+
+  async loadWizardMicVolume() {
+    // Auto-set mic volume to 100% (no slider shown to user)
+    if (!this.settings.microphoneName) return;
+
     try {
-      const result = await ipcRenderer.invoke('get-mic-volume', this.settings.microphoneName);
-      if (result.error) {
-        container.style.display = 'none';
-        return;
-      }
-      if (result.muted) {
-        valueDisplay.textContent = 'Stumm';
-      } else {
-        valueDisplay.textContent = result.volume + '%';
-      }
-      slider.value = result.volume;
-      slider.style.setProperty('--fill', result.volume + '%');
-      container.style.display = '';
+      await ipcRenderer.invoke('set-mic-volume', 100, this.settings.microphoneName);
+      console.log('[Wizard] Mic volume auto-set to 100%');
     } catch (err) {
-      console.error('[Wizard MicVolume] Failed to load:', err);
-      container.style.display = 'none';
+      console.warn('[Wizard MicVolume] Failed to set 100%:', err.message);
+    }
+  }
+
+  // Auto mic test — starts monitoring when test substep is shown
+  async startAutoMicTest() {
+    this.stopAutoMicTest(); // Clean up any previous
+    this.autoTestDetected = false;
+
+    const levelBar = document.getElementById('wizardMicLevelBar');
+    const statusEl = document.getElementById('wizardAutoTestStatus');
+    const hintEl = document.getElementById('wizardAutoTestHint');
+    const troubleshootEl = document.getElementById('wizardMicTroubleshoot');
+    if (statusEl) statusEl.innerHTML = '<span style="color: var(--text-tertiary);">Warte auf Signal...</span>';
+    if (hintEl) hintEl.textContent = 'Sprechen Sie laut und deutlich in Ihr Mikrofon — der Balken sollte sich bewegen.';
+    if (troubleshootEl) troubleshootEl.style.display = 'none';
+
+    // Show troubleshooting tips after 5 seconds if no signal detected
+    this.autoTestTroubleshootTimer = setTimeout(() => {
+      if (!this.autoTestDetected && troubleshootEl) {
+        troubleshootEl.style.display = 'block';
+      }
+    }, 5000);
+
+    let thresholdStart = null;
+    const THRESHOLD = 5;
+    const MIN_DURATION = 400; // 0.4 seconds
+
+    this.autoTestMonitor = new wizardAudioUtils.AudioMonitor();
+
+    try {
+      await this.autoTestMonitor.start(this.settings.microphoneId, (level) => {
+        if (levelBar) levelBar.style.width = level + '%';
+
+        if (this.autoTestDetected) return; // Already detected
+
+        if (level > THRESHOLD) {
+          if (!thresholdStart) {
+            thresholdStart = Date.now();
+          } else if (Date.now() - thresholdStart > MIN_DURATION) {
+            this.autoTestDetected = true;
+            if (statusEl) {
+              statusEl.innerHTML = '<span style="color: #22c55e; font-weight: 600;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#22c55e" stroke-width="2.5" style="vertical-align: middle; margin-right: 6px;"><polyline points="20 6 9 17 4 12"/></svg>Mikrofon funktioniert!</span>';
+            }
+            if (hintEl) hintEl.textContent = 'Ihr Mikrofon nimmt auf. Sie können fortfahren.';
+            if (troubleshootEl) troubleshootEl.style.display = 'none';
+          }
+        } else {
+          thresholdStart = null;
+        }
+      });
+    } catch (err) {
+      console.warn('[Wizard AutoTest] Failed to start:', err.message);
+      if (statusEl) {
+        statusEl.innerHTML = '<span style="color: var(--error-500);">Mikrofon konnte nicht gestartet werden. Bitte prüfen Sie die Verbindung.</span>';
+      }
+    }
+  }
+
+  stopAutoMicTest() {
+    if (this.autoTestTroubleshootTimer) {
+      clearTimeout(this.autoTestTroubleshootTimer);
+      this.autoTestTroubleshootTimer = null;
+    }
+    if (this.autoTestMonitor) {
+      this.autoTestMonitor.stop();
+      this.autoTestMonitor = null;
     }
   }
 
@@ -1365,6 +1491,7 @@ class SetupWizard {
     if (this.micTester) {
       this.micTester.stop();
     }
+    this.stopAutoMicTest();
     this.resetMicTestUI();
   }
 
@@ -1506,7 +1633,6 @@ class SetupWizard {
     this.updateProgress();
     this.updateNavigation();
     this.updateMicNavigation(); // Reset mic-specific navigation state
-    this.updateSummary();
 
     // Scroll to top of wizard content
     const wizardContent = document.querySelector('.wizard-content');
@@ -1514,13 +1640,8 @@ class SetupWizard {
       wizardContent.scrollTop = 0;
     }
 
-    // Load existing voice profiles when showing step 6
-    if (index === 6) {
-      this.loadExistingProfiles();
-    }
-
     // Update shortcut display on final step
-    if (index === 9) {
+    if (index === 8) {
       const shortcutEl = document.getElementById('wizardFinalShortcut');
       if (shortcutEl) {
         shortcutEl.textContent = this.settings.shortcut || 'F9';
@@ -1540,22 +1661,11 @@ class SetupWizard {
     if (text) {
       text.textContent = `Schritt ${this.currentStep + 1} von ${this.totalSteps}`;
     }
-
-    // Update dots
-    document.querySelectorAll('.wizard-dot').forEach((dot, i) => {
-      dot.classList.remove('active', 'completed');
-      if (i < this.currentStep) {
-        dot.classList.add('completed');
-      } else if (i === this.currentStep) {
-        dot.classList.add('active');
-      }
-    });
   }
 
   updateNavigation() {
     const backBtn = document.getElementById('wizardBackBtn');
     const nextBtn = document.getElementById('wizardNextBtn');
-    const skipBtn = document.getElementById('wizardSkipBtn');
     const finishBtn = document.getElementById('wizardFinishBtn');
     const startBtn = document.getElementById('wizardStartBtn');
 
@@ -1563,17 +1673,15 @@ class SetupWizard {
     if (this.currentStep === 0) {
       backBtn.style.display = 'none';
       nextBtn.style.display = 'none';
-      skipBtn.style.display = 'none';
       finishBtn.style.display = 'none';
       startBtn.style.display = 'flex';
       return;
     }
 
-    // Final step - show back button so user can go back and change things
+    // Final step (8 = Done)
     if (this.currentStep === this.totalSteps - 1) {
       backBtn.style.display = 'flex';
       nextBtn.style.display = 'none';
-      skipBtn.style.display = 'none';
       startBtn.style.display = 'none';
       finishBtn.style.display = 'flex';
       return;
@@ -1584,10 +1692,6 @@ class SetupWizard {
     finishBtn.style.display = 'none';
     backBtn.style.display = 'flex';
     nextBtn.style.display = 'flex';
-
-    // Skip button - show for optional steps (shortcut, AI mode, transcripts, audio, profiles)
-    const optionalSteps = [2, 3, 4, 5, 6]; // Shortcut, AI Mode, Transcripts, Audio, Profiles
-    skipBtn.style.display = optionalSteps.includes(this.currentStep) ? 'block' : 'none';
 
     // Apply mic wizard navigation rules for step 1
     if (this.currentStep === 1) {
@@ -1630,15 +1734,43 @@ class SetupWizard {
     return 'Standard';
   }
 
+  shouldSkipStep(step) {
+    // Skip "Where to save" (step 4) if both storage options are off
+    if (step === 4 && !this.settings.autoExport && !this.settings.keepAudio) {
+      return true;
+    }
+    // Skip Trial step (step 7) if user is not on free trial
+    if (step === 7 && !this.isTrialUser) {
+      return true;
+    }
+    return false;
+  }
+
   nextStep() {
-    // If on step 1 with no_mic state, clear microphone settings
-    if (this.currentStep === 1 && this.micWizardState === 'no_mic') {
-      this.settings.microphoneSource = 'none';
-      this.settings.microphoneId = null;
+    // Step 1: advance through mic sub-steps before going to step 2
+    if (this.currentStep === 1) {
+      if (this.micWizardState === 'connect') {
+        this.setMicWizardState('has_mic');
+        this.loadMicrophones();
+        return;
+      }
+      if (this.micWizardState === 'has_mic') {
+        this.setMicWizardState('mic_test');
+        return;
+      }
+      if (this.micWizardState === 'no_mic') {
+        this.settings.microphoneSource = 'none';
+        this.settings.microphoneId = null;
+      }
+      // mic_test, phone_test, no_mic → advance to next wizard step
     }
 
-    if (this.currentStep < this.totalSteps - 1) {
-      this.showStep(this.currentStep + 1);
+    let next = this.currentStep + 1;
+    while (next < this.totalSteps && this.shouldSkipStep(next)) {
+      next++;
+    }
+    if (next < this.totalSteps) {
+      this.showStep(next);
     }
   }
 
@@ -1647,8 +1779,14 @@ class SetupWizard {
     if (this.currentStep === 1) {
       // Navigate back within mic substeps first
       switch (this.micWizardState) {
-        case 'has_mic':
+        case 'mic_test':
           this.stopMicTest();
+          this.setMicWizardState('has_mic');
+          return;
+        case 'has_mic':
+          this.setMicWizardState('connect');
+          return;
+        case 'connect':
           this.setMicWizardState('initial_question');
           return;
         case 'phone_question':
@@ -1673,8 +1811,12 @@ class SetupWizard {
       }
     }
 
-    if (this.currentStep > 0) {
-      this.showStep(this.currentStep - 1);
+    let prev = this.currentStep - 1;
+    while (prev > 0 && this.shouldSkipStep(prev)) {
+      prev--;
+    }
+    if (prev >= 0) {
+      this.showStep(prev);
     }
   }
 
@@ -1748,6 +1890,14 @@ async function restartSetupWizard() {
       window.setupWizard.settings.autoExport = settings.autoExport !== false;
       window.setupWizard.settings.keepAudio = settings.keepAudio !== false;
 
+      // Check trial status
+      try {
+        const subStatus = await ipcRenderer.invoke('get-subscription-status');
+        window.setupWizard.isTrialUser = subStatus.type === 'trial';
+      } catch (e) {
+        window.setupWizard.isTrialUser = false;
+      }
+
       // Update UI elements to match settings
       const shortcutKeyEl = document.getElementById('wizardShortcutKey');
       if (shortcutKeyEl) shortcutKeyEl.textContent = window.setupWizard.settings.shortcut;
@@ -1765,11 +1915,6 @@ async function restartSetupWizard() {
       }
       if (audioToggle) {
         audioToggle.classList.toggle('active', window.setupWizard.settings.keepAudio);
-      }
-
-      const transcriptPathSection = document.getElementById('wizardTranscriptPathSection');
-      if (transcriptPathSection) {
-        transcriptPathSection.style.display = window.setupWizard.settings.autoExport ? 'block' : 'none';
       }
 
       // Show wizard at step 0

@@ -116,6 +116,49 @@ trayModule.getTray()          // Returns Tray-Instanz
 - Beenden
 - Versionsnummer
 
+### 4. recordingSlot.js
+
+**Pfad:** `src/recordingSlot.js`
+
+**Funktionen:**
+```javascript
+init(baseUrl)                                    // API Base URL setzen
+claimSlot(token, deviceId)                       // Slot reservieren → {recordingId}
+startHeartbeat(token, recordingId, warningCb)    // Keep-Alive alle 60s
+releaseSlot(token, recordingId)                  // Slot freigeben (idempotent)
+stopHeartbeat()                                  // Heartbeat stoppen + State cleanup
+```
+
+**Lizenz-Enforcement:**
+- 1 aktive Aufnahme = 1 Lizenz (`user.maxDevices`)
+- Heartbeat alle 60s, Server-Timeout nach 2 Min ohne Heartbeat
+- Skip-if-pending: verhindert parallele Heartbeat-Requests
+- Failure-Counter: nach 2 aufeinanderfolgenden Fehlern → Callback mit Reason (`'expired'` | `'error'`)
+- 404 vom Heartbeat = Slot verfallen (z.B. nach Netzwerkausfall)
+
+**Crash-Recovery:** Beim Claim werden eigene stale Slots vom selben Gerät automatisch released (Backend).
+
+---
+
+### releaseCurrentRecordingSlot() (main.js, Zeile ~282)
+
+Deduplizierte Helper-Funktion für alle Release-Pfade (Stop, Error, Cancel, Logout, Quit):
+
+```javascript
+function releaseCurrentRecordingSlot() {
+  if (!currentRecordingSlotId) return;
+  // Token aus Claim-Zeitpunkt oder Store (Fallback)
+  const token = currentRecordingSlotToken || store.get('authToken');
+  // Release mit 1x Retry nach 2s
+  recordingSlot.releaseSlot(token, slotId).catch(() => {
+    setTimeout(() => recordingSlot.releaseSlot(token, slotId).catch(() => {}), 2000);
+  });
+  recordingSlot.stopHeartbeat();
+  currentRecordingSlotId = null;
+  currentRecordingSlotToken = null;
+}
+```
+
 ---
 
 ## State-Variablen (main.js)
@@ -126,6 +169,13 @@ let isRecording = false;           // Aufnahme aktiv?
 let isProcessing = false;          // Verarbeitung läuft?
 let isEnrolling = false;           // Stimmprofil-Enrollment?
 let currentRecordingPath = null;   // Pfad zur aktuellen Aufnahme
+```
+
+### Recording Slot State (Lizenz-Enforcement)
+```javascript
+let currentRecordingSlotId = null;      // Backend Recording Slot ID
+let currentRecordingSlotToken = null;   // Token beim Claim (überlebt Logout)
+let recordingSlotPending = false;       // True während Claim in-flight
 ```
 
 ### Session State
@@ -406,10 +456,13 @@ app.whenReady().then(() => {
   // 3. Session-Modul initialisieren
   session.init({ ... });
 
-  // 4. VAD Controller initialisieren
+  // 4. Recording Slot Module initialisieren
+  recordingSlot.init(apiClient.getBaseUrl());
+
+  // 5. VAD Controller initialisieren
   vadController.initialize();
 
-  // 5. Voice Profiles initialisieren (Backend DB)
+  // 6. Voice Profiles initialisieren (Backend DB)
   await voiceProfiles.init(apiClient, () => store.get('authToken'));
 
   // 6. Shortcut registrieren

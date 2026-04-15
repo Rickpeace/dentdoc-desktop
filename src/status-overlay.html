@@ -1415,7 +1415,7 @@
       }
     });
 
-    copyFullBtn.addEventListener('click', () => {
+    if (copyFullBtn) copyFullBtn.addEventListener('click', () => {
       let fullText = '';
 
       // 1. Zusammenfassung (Dokumentation) - already includes "Erkannte Personen" from backend
@@ -1482,27 +1482,30 @@
     });
 
     // Copy Z-Doku button
-    document.getElementById('copyZDokuBtn').addEventListener('click', () => {
+    const copyZDokuBtn = document.getElementById('copyZDokuBtn');
+    if (copyZDokuBtn) copyZDokuBtn.addEventListener('click', () => {
       if (currentZDocumentation) {
         ipcRenderer.invoke('copy-to-clipboard', currentZDocumentation);
-        showCopied(document.getElementById('copyZDokuBtn'));
+        showCopied(copyZDokuBtn);
         lastClickedDoc = 'zdoku';
         saveLastClickedDoc();
       }
     });
 
     // Copy Custom Doku button
-    document.getElementById('copyCustomDokuBtn').addEventListener('click', () => {
+    const copyCustomDokuBtn = document.getElementById('copyCustomDokuBtn');
+    if (copyCustomDokuBtn) copyCustomDokuBtn.addEventListener('click', () => {
       if (currentCustomDocumentation) {
         ipcRenderer.invoke('copy-to-clipboard', currentCustomDocumentation);
-        showCopied(document.getElementById('copyCustomDokuBtn'));
+        showCopied(copyCustomDokuBtn);
         lastClickedDoc = 'custom';
         saveLastClickedDoc();
       }
     });
 
     // Copy Normalized Transcript button
-    document.getElementById('copyNormalizedBtn').addEventListener('click', () => {
+    const copyNormalizedBtn = document.getElementById('copyNormalizedBtn');
+    if (copyNormalizedBtn) copyNormalizedBtn.addEventListener('click', () => {
       if (currentReconstructedTranscript) {
         ipcRenderer.invoke('copy-to-clipboard', currentReconstructedTranscript);
         showCopied(document.getElementById('copyNormalizedBtn'));

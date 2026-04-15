@@ -74,13 +74,11 @@ Das Dashboard ist ein Single-Page-App mit Tab-Navigation:
 - Mikrofon-Eingangslautstärke (Slider)
 - Über/Version
 
-**Ungespeicherte Änderungen:**
-- `settingsHasUnsavedChanges` Flag trackt ob Änderungen vorliegen
-- Bei Navigation weg von Settings → Dialog mit 3 Optionen:
-  - **Speichern** - Änderungen speichern
-  - **Verwerfen** - Änderungen verwerfen
-  - **Abbrechen** - Auf Settings bleiben
-- Auch bei Minimize/Close-Button wird geprüft
+**Auto-Save Einstellungen (ab v1.9.0):**
+- Alle Einstellungen speichern sofort bei Änderung via `autoSaveSetting()` Helper
+- Kein Speichern/Abbrechen-Dialog, keine Unsaved-Changes-Warnung
+- Jede Änderung sendet sofort `ipcRenderer.invoke('save-settings', { key: value })`
+- Shortcut-Registrierung mit Fehlerbehandlung: bei Fehlschlag wird UI zurückgesetzt
 
 **Ordner-Validierung:**
 - Browse-Buttons verwenden `select-folder-with-validation`
@@ -198,13 +196,17 @@ async function leaveSettingsView() {
 Der Einrichtungsassistent führt neue User durch die Konfiguration:
 
 ```
-Schritt 1: Willkommen
-Schritt 2: Mikrofon-Auswahl + Test
-Schritt 3: Shortcut-Konfiguration
-Schritt 4: Export-Einstellungen
+Schritt 0: Willkommen
+Schritt 1: Mikrofon-Auswahl + Test
+Schritt 2: Shortcut-Konfiguration
+Schritt 3: Export-Einstellungen (Transkripte + Audio)
+Schritt 4: iPhone-Setup (optional)
 Schritt 5: DSGVO-Hinweis
-Schritt 6: Zusammenfassung
+Schritt 6: Auto-Close Overlay
+Schritt 7: Zusammenfassung
 ```
+
+> **Hinweis:** KI-Dokumentation Step wurde in v1.9.0 entfernt (nur Agent V2.1 aktiv)
 
 ### Klasse: SetupWizard
 
@@ -212,15 +214,14 @@ Schritt 6: Zusammenfassung
 class SetupWizard {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 6;
+    this.totalSteps = 8; // 0-7
     this.settings = {
-      microphone: null,
+      microphoneId: null,
+      microphoneSource: 'desktop',
       shortcut: 'F9',
-      autoExport: false,
-      transcriptSavePath: '',
-      keepAudio: false,
-      audioSavePath: '',
-      dsgvoAccepted: false
+      autoExport: true,
+      transcriptPath: '',
+      keepAudio: true
     };
   }
 

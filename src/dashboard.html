@@ -202,17 +202,7 @@
         <!-- Onboarding Tutorial Card - shown for new users -->
         <div class="onboarding-card" id="onboardingCard" style="display: none;">
           <div class="onboarding-header">
-            <div class="onboarding-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                <path d="M2 17l10 5 10-5"/>
-                <path d="M2 12l10 5 10-5"/>
-              </svg>
-            </div>
-            <div class="onboarding-title">
-              <h3>Wichtig: So nutzen Sie DentDoc richtig</h3>
-              <p>Kurzanleitung in 4 Schritten - bitte lesen!</p>
-            </div>
+              <h3>Kurzanleitung</h3>
           </div>
 
           <div class="onboarding-content">
@@ -221,14 +211,8 @@
               <div class="onboarding-step-number">1</div>
               <div class="onboarding-step-content">
                 <h4>DentDoc läuft im System-Tray</h4>
-                <p>Schließen Sie dieses Fenster und arbeiten Sie ungestört. DentDoc läuft leise im Hintergrund, startet automatisch mit Ihrem PC und ist bei Bedarf nur einen Klick entfernt - <strong>Linksklick</strong> für das Dashboard, <strong>Rechtsklick</strong> für ein Schnellwahlmenü.</p>
-                <div class="onboarding-tray-hint">
-                  <div class="tray-visual">
-                    <span class="tray-arrow">^</span>
-                    <span class="tray-text">Klicken Sie hier in der Taskleiste</span>
-                  </div>
-                  <p class="tray-instruction"><strong>Wichtig:</strong> Ziehen Sie das DentDoc-Symbol aus dem versteckten Bereich (^) in die sichtbare Taskleiste, damit Sie es immer sehen können.</p>
-                </div>
+                <p>DentDoc läuft im Hintergrund und startet automatisch mit Ihrem PC. <strong>Linksklick</strong> auf das Tray-Symbol öffnet das Dashboard, <strong>Rechtsklick</strong> das Schnellmenü.</p>
+                <p><strong>Tipp:</strong> Ziehen Sie das DentDoc-Symbol aus dem versteckten Bereich in die sichtbare Taskleiste.</p>
               </div>
             </div>
 
@@ -238,7 +222,6 @@
               <div class="onboarding-step-content">
                 <h4>Aufnahme starten</h4>
                 <p>Drücken Sie <kbd id="onboardingShortcutStart">F9</kbd> zu Beginn der Behandlung. Ein Statusfenster erscheint und zeigt den Aufnahmefortschritt.</p>
-                <p class="onboarding-note">Das Statusfenster ist verschiebbar und merkt sich seine Position.</p>
               </div>
             </div>
 
@@ -257,7 +240,6 @@
               <div class="onboarding-step-content">
                 <h4>Dokumentation einfügen</h4>
                 <p>Die Zusammenfassung wird automatisch in die <strong>Zwischenablage</strong> kopiert. Wechseln Sie zu Ihrer PVS-Software und drücken Sie <kbd>Strg+V</kbd> zum Einfügen.</p>
-                <p class="onboarding-note">Im Statusfenster können Sie verschiedene Zusammenfassungsarten wählen. Ihre Auswahl wird für zukünftige Aufnahmen gespeichert.</p>
               </div>
             </div>
           </div>
@@ -321,7 +303,7 @@
                 </svg>
                 <span id="upgradeBannerBtnText">Jetzt DentDoc Pro holen</span>
               </button>
-              <p class="upgrade-banner-price">Ab 49 &euro; / Monat pro Lizenz, zzgl. MwSt. &middot; Monatlich k&uuml;ndbar</p>
+              <p class="upgrade-banner-price">55 &euro; / Monat pro Lizenz, inkl. MwSt. &middot; Monatlich k&uuml;ndbar</p>
             </div>
           </div>
         </div>
@@ -854,8 +836,9 @@
                   <span>Kein USB-Mikrofon gefunden</span>
                 </div>
                 <p class="no-mic-hint-text">
-                  Für beste Ergebnisse empfehlen wir ein USB-Konferenzmikrofon wie das
-                  <a href="https://www.amazon.de/s?k=Beyerdynamic+SPACE+USB" target="_blank" rel="noopener">Beyerdynamic SPACE</a>.
+                  Für beste Ergebnisse empfehlen wir das Tischmikrofon
+                  <a href="https://www.amazon.de/s?k=Jabra+Speak2+75" target="_blank" rel="noopener">Jabra Speak2 75</a> oder das Ansteckmikrofon
+                  <a href="https://www.amazon.de/s?k=DJI+Mic+Mini" target="_blank" rel="noopener">DJI Mic Mini</a>.
                 </p>
                 <p class="no-mic-hint-tip">
                   <strong>Tipp:</strong> Rechtsklick auf das Tray-Icon ermöglicht auch das Hochladen von Audio-Dateien.
@@ -1591,7 +1574,7 @@ REIHENFOLGE
             </svg>
           </div>
           <h2>Willkommen bei DentDoc!</h2>
-          <p>Ihr intelligenter Assistent für zahnärztliche Dokumentation. Alle Einstellungen können später jederzeit geändert werden.</p>
+          <p>Wir richten jetzt alles ein — das dauert nur 2 Minuten.</p>
         </div>
 
         <div class="wizard-welcome-features">
@@ -1627,28 +1610,9 @@ REIHENFOLGE
             <p>Text in der Zwischenablage</p>
           </div>
         </div>
-
-        <!-- Skip Setup Option -->
-        <div style="margin-top: var(--space-6); text-align: center;">
-          <button type="button" class="wizard-skip-setup-btn" id="wizardSkipSetupBtn" style="
-            background: transparent;
-            border: 1px solid var(--border-default);
-            color: var(--text-secondary);
-            padding: 10px 20px;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            font-size: 0.875rem;
-            transition: all 0.2s;
-          ">
-            Einrichtung überspringen
-          </button>
-          <p style="font-size: 0.8125rem; color: var(--text-tertiary); margin-top: var(--space-2);">
-            Alle Einstellungen können jederzeit im Dashboard geändert werden.
-          </p>
-        </div>
       </div>
 
-      <!-- Step 1: Microphone (Decision Tree with Sub-Steps) -->
+      <!-- Step 1: Microphone Question -->
       <div class="wizard-step" data-step="1">
 
         <!-- Sub-step 1.0: Initial Question - Do you have a USB microphone? -->
@@ -1663,12 +1627,21 @@ REIHENFOLGE
               </svg>
             </div>
             <h2>Mikrofon einrichten</h2>
-            <p>Für die beste Audioqualität ist ein gutes Mikrofon wichtig.</p>
+            <p>DentDoc kann nur dokumentieren was es hört — ein gutes Mikrofon ist der wichtigste Faktor für genaue Dokumentationen.</p>
+          </div>
+
+          <!-- Compact recommendation — ABOVE the question -->
+          <div class="wizard-info" style="background: rgba(249, 115, 22, 0.1); border-color: rgba(249, 115, 22, 0.3);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2" style="flex-shrink: 0; width: 20px; height: 20px; margin-top: 2px;">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            </svg>
+            <p>Wir empfehlen das <a href="https://www.amazon.de/s?k=Jabra+Speak2+75" target="_blank" rel="noopener" style="color: var(--primary-500); font-weight: 600;">Jabra Speak2 75</a> (Tischmikrofon) oder das <a href="https://www.amazon.de/s?k=DJI+Mic+Mini" target="_blank" rel="noopener" style="color: var(--primary-500); font-weight: 600;">DJI Mic Mini</a> (Ansteckmikrofon).</p>
           </div>
 
           <div class="wizard-card">
             <div class="wizard-question">
-              <h3>Besitzen Sie bereits ein USB-Mikrofon an Ihrem PC?</h3>
+              <h3>Besitzen Sie bereits ein Mikrofon?</h3>
               <p class="wizard-question-hint">(Lavalier, Konferenz-Mikrofon, Headset, oder ähnliches)</p>
             </div>
 
@@ -1701,8 +1674,8 @@ REIHENFOLGE
           </div>
         </div>
 
-        <!-- Sub-step 1a: Has Microphone - Device Selection & Test -->
-        <div class="wizard-mic-substep" id="wizardMicSubstepHasMic" style="display: none;">
+        <!-- Sub-step 1a-1: Connect your microphone -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepConnect" style="display: none;">
           <div class="wizard-step-header">
             <div class="wizard-step-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1712,75 +1685,98 @@ REIHENFOLGE
                 <line x1="8" y1="23" x2="16" y2="23"/>
               </svg>
             </div>
-            <h2>Mikrofon auswählen</h2>
-            <p>Wählen Sie Ihr Mikrofon aus der Liste und testen Sie es.</p>
+            <h2>Mikrofon anschließen</h2>
+            <p>Bitte stellen Sie sicher, dass Ihr Mikrofon bereit ist.</p>
           </div>
 
           <div class="wizard-card">
-            <div class="wizard-form-group">
-              <label for="wizardMicSelect">Ihr Mikrofon</label>
-              <select id="wizardMicSelect">
-                <option value="">Lade Mikrofone...</option>
-              </select>
-            </div>
-
-            <!-- Mikrofon-Eingangslautstärke (Wizard) -->
-            <div id="wizardMicVolumeContainer" class="mic-volume-container" style="display: none; margin-top: 12px;">
-              <div class="mic-volume-header">
-                <label for="wizardMicVolumeSlider">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" class="mic-volume-icon">
-                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z"/>
-                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-                  </svg>
-                  Eingangslautstärke
-                </label>
-                <span id="wizardMicVolumeValue" class="mic-volume-value">--%</span>
+            <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+              <div style="display: flex; align-items: center; gap: var(--space-3);">
+                <div style="width: 28px; height: 28px; background: var(--primary-500); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <span style="color: var(--text-primary); font-size: 0.9375rem;">Mikrofon ist angeschlossen</span>
               </div>
-              <input type="range" id="wizardMicVolumeSlider" min="0" max="100" value="0" class="mic-volume-slider">
-            </div>
-
-            <div class="wizard-mic-test-section">
-              <h4>Mikrofontest</h4>
-              <p class="wizard-test-instruction">Klicken Sie auf "Test starten" und sprechen Sie einen Satz.</p>
-
-              <div class="wizard-mic-test">
-                <button type="button" class="wizard-btn wizard-btn-primary" id="wizardMicTestBtn">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
-                    <circle cx="12" cy="12" r="10"/>
-                    <circle cx="12" cy="12" r="3" fill="currentColor"/>
-                  </svg>
-                  Test starten (5 Sek.)
-                </button>
+              <div style="display: flex; align-items: center; gap: var(--space-3);">
+                <div style="width: 28px; height: 28px; background: var(--primary-500); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="white" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <span style="color: var(--text-primary); font-size: 0.9375rem;">Mikrofon ist eingeschaltet (falls Schalter vorhanden)</span>
               </div>
-
-              <div class="wizard-mic-level" id="wizardMicLevelContainer">
-                <div class="wizard-mic-level-bar" id="wizardMicLevelBar"></div>
-                <span class="wizard-mic-level-label">Lautstärkepegel</span>
-              </div>
-
-              <div class="wizard-mic-playback" id="wizardMicPlayback" style="display: none;">
-                <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardPlayMicBtn">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 6px;">
-                    <polygon points="5,3 19,12 5,21"/>
-                  </svg>
-                  Aufnahme anhören
-                </button>
-                <audio id="wizardMicAudio" style="display: none;"></audio>
-              </div>
-
-              <div class="wizard-mic-status" id="wizardMicStatus">Bereit für den Test</div>
             </div>
           </div>
 
-          <div class="wizard-info">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 16v-4M12 8h.01"/>
+          <button type="button" class="wizard-back-link" id="wizardConnectBackToQuestion">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"/>
             </svg>
-            <p><strong>Tipp:</strong> Sprechen Sie in normaler Lautstärke. Der Pegel sollte zwischen 30-80% liegen.</p>
+            Zurück
+          </button>
+        </div>
+
+        <!-- Sub-step 1a-2: Select microphone (only dropdown) -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepHasMic" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              </svg>
+            </div>
+            <h2>Mikrofon auswählen</h2>
+            <p>Welches Mikrofon möchten Sie verwenden?</p>
+          </div>
+
+          <!-- Hidden select for compatibility with existing JS -->
+          <select id="wizardMicSelect" style="display: none;">
+            <option value="">Lade Mikrofone...</option>
+          </select>
+
+          <div class="wizard-mic-list" id="wizardMicList">
+            <p style="color: var(--text-tertiary); text-align: center; padding: var(--space-4);">Mikrofone werden geladen...</p>
           </div>
 
           <button type="button" class="wizard-back-link" id="wizardMicBackToQuestion">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Zurück
+          </button>
+        </div>
+
+        <!-- Sub-step 1a-3: Test microphone (only test) -->
+        <div class="wizard-mic-substep" id="wizardMicSubstepTest" style="display: none;">
+          <div class="wizard-step-header">
+            <div class="wizard-step-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              </svg>
+            </div>
+            <h2>Mikrofontest</h2>
+            <p id="wizardAutoTestHint">Sprechen Sie laut und deutlich in Ihr Mikrofon — der Balken sollte sich bewegen.</p>
+          </div>
+
+          <div class="wizard-card" style="text-align: center;">
+            <div class="wizard-mic-level" id="wizardMicLevelContainer" style="margin-bottom: var(--space-4);">
+              <div class="wizard-mic-level-bar" id="wizardMicLevelBar"></div>
+            </div>
+
+            <div id="wizardAutoTestStatus" style="font-size: 1rem; min-height: 2em;"></div>
+          </div>
+
+          <div id="wizardMicTroubleshoot" style="display: none; margin-top: var(--space-3);">
+            <div class="wizard-card" style="padding: var(--space-3) var(--space-4);">
+              <p style="color: var(--text-secondary); font-size: 0.8125rem; font-weight: 600; margin: 0 0 var(--space-2) 0;">Balken bewegt sich nicht?</p>
+              <ul style="color: var(--text-tertiary); font-size: 0.8125rem; margin: 0; padding-left: var(--space-4); line-height: 1.8;">
+                <li>Prüfen Sie ob das Mikrofon <strong style="color: var(--text-secondary);">eingeschaltet</strong> und <strong style="color: var(--text-secondary);">nicht stumm</strong> ist</li>
+                <li>Stecken Sie das USB-Kabel aus und wieder ein</li>
+                <li>Gehen Sie zurück und wählen Sie ein anderes Mikrofon</li>
+              </ul>
+            </div>
+          </div>
+
+          <button type="button" class="wizard-back-link" id="wizardTestBackToSelect">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="15 18 9 12 15 6"/>
             </svg>
@@ -2065,78 +2061,63 @@ REIHENFOLGE
           </div>
         </div>
 
-        <!-- Sub-step 1c: No Microphone - Product Recommendation -->
+        <!-- Sub-step 1c: No Microphone - Product Recommendations -->
         <div class="wizard-mic-substep" id="wizardMicSubstepNoMic" style="display: none;">
           <div class="wizard-step-header">
-            <div class="wizard-step-icon wizard-step-icon-warning">
+            <div class="wizard-step-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 8v4M12 16h.01"/>
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
               </svg>
             </div>
-            <h2>Kein Mikrofon vorhanden</h2>
-            <p>Sie können trotzdem fortfahren oder sich ein Mikrofon besorgen.</p>
+            <h2>Mikrofon-Empfehlungen</h2>
+            <p>Die Qualität Ihrer Dokumentation hängt direkt von der Audioqualität ab. DentDoc kann nur dokumentieren was es hört.</p>
           </div>
 
           <div class="wizard-card">
-            <!-- Audio Upload Info -->
-            <div class="wizard-tip-card" style="margin: 0 0 var(--space-5) 0;">
-              <div class="wizard-tip-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/>
-                  <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
+            <!-- Jabra Speak2 75 — Hauptempfehlung -->
+            <div class="wizard-rec-card wizard-rec-best" style="margin-bottom: var(--space-4);">
+              <div class="wizard-rec-badge">Unsere Empfehlung</div>
+              <h4>Jabra Speak2 75 (Tischmikrofon)</h4>
+              <p>Hochwertiges USB-Konferenzmikrofon — einfach auf den Schreibtisch stellen und loslegen.</p>
+              <ul><li>Sehr gute Audioqualität</li><li>Plug & Play — einfach anschließen</li><li>Ideal für Behandlungsräume</li></ul>
+              <div class="wizard-rec-warning">
+                <strong>Aufstellung beachten:</strong>
+                <ul><li>So nah wie möglich zum Behandler</li><li>NICHT neben dem PC-Lüfter aufstellen</li><li>NICHT auf der Ablage mit Instrumenten</li><li>Freie Sicht zum Sprecher (kein Bildschirm dazwischen)</li><li>Feste Unterlage (nicht auf Papier oder Tuch)</li></ul>
               </div>
-              <div class="wizard-tip-content">
-                <h4>Audio-Dateien hochladen</h4>
-                <p>Sie können auch ohne Mikrofon arbeiten! <strong>Rechtsklick</strong> auf das DentDoc-Icon im System Tray ermöglicht das Hochladen von Audio-Dateien zur Transkription.</p>
+              <div class="wizard-product-links" style="margin-top: var(--space-3);">
+                <a href="https://www.amazon.de/s?k=Jabra+Speak2+75" target="_blank" rel="noopener" class="wizard-btn wizard-btn-secondary">Amazon</a>
               </div>
             </div>
 
-            <!-- Product Recommendation -->
-            <div class="wizard-product-recommendation">
-              <div class="wizard-product-badge">Empfehlung für später</div>
-              <div class="wizard-product-content">
-                <div class="wizard-product-image">
-                  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                    <line x1="12" y1="19" x2="12" y2="23"/>
-                    <line x1="8" y1="23" x2="16" y2="23"/>
-                  </svg>
-                </div>
-                <div class="wizard-product-info">
-                  <h3>Beyerdynamic SPACE</h3>
-                  <p class="wizard-product-desc">Hochwertiges USB-Konferenzmikrofon. Ideal für medizinische Dokumentation.</p>
-                  <div class="wizard-product-features">
-                    <span class="wizard-product-feature">USB</span>
-                    <span class="wizard-product-feature">Plug & Play</span>
-                    <span class="wizard-product-feature">Premium</span>
-                  </div>
-                </div>
+            <!-- DJI Mic Mini — Alternative -->
+            <div class="wizard-rec-card" style="margin-bottom: var(--space-4);">
+              <h4>DJI Mic Mini (Ansteckmikrofon)</h4>
+              <p>Kabelloses Mikrofon — wird an der Arbeitskleidung befestigt, immer nah am Mund.</p>
+              <ul><li>Beste Audioqualität</li><li>Hände frei während der Behandlung</li><li>Ideal wenn Sie sich viel bewegen</li></ul>
+              <p class="wizard-rec-example">~80 Euro</p>
+              <div class="wizard-product-links" style="margin-top: var(--space-3);">
+                <a href="https://www.amazon.de/s?k=DJI+Mic+Mini" target="_blank" rel="noopener" class="wizard-btn wizard-btn-secondary">Amazon</a>
               </div>
-              <div class="wizard-product-links">
-                <a href="https://www.amazon.de/s?k=Beyerdynamic+SPACE+USB" target="_blank" rel="noopener" class="wizard-btn wizard-btn-secondary">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                    <polyline points="15 3 21 3 21 9"/>
-                    <line x1="10" y1="14" x2="21" y2="3"/>
-                  </svg>
-                  Amazon
-                </a>
-                <a href="https://www.thomann.de/de/search_dir.html?sw=beyerdynamic%20space" target="_blank" rel="noopener" class="wizard-btn wizard-btn-secondary">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                    <polyline points="15 3 21 3 21 9"/>
-                    <line x1="10" y1="14" x2="21" y2="3"/>
-                  </svg>
-                  Thomann
-                </a>
-              </div>
+            </div>
+
+            <!-- Smartphone -->
+            <div class="wizard-rec-card" style="margin-bottom: var(--space-4);">
+              <h4>Zum Testen: Smartphone als Mikrofon</h4>
+              <p>Nutzen Sie Ihr Handy vorübergehend als kabelloses Mikrofon. Nicht für den Dauerbetrieb empfohlen.</p>
+              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardNoMicPhoneBtn" style="margin-top: var(--space-2);">Handy einrichten</button>
+            </div>
+
+            <!-- Audio Upload Hint -->
+            <div class="wizard-info" style="margin-top: 0;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p>Sie können auch ohne Mikrofon starten: <strong>Rechtsklick</strong> auf das DentDoc-Symbol ermöglicht das Hochladen von Audio-Dateien.</p>
             </div>
           </div>
-
         </div>
 
       </div>
@@ -2150,29 +2131,31 @@ REIHENFOLGE
               <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h8M6 16h.01M18 16h.01"/>
             </svg>
           </div>
-          <h2>Tastenkürzel festlegen</h2>
-          <p>Mit einem Tastenkürzel starten und stoppen Sie Ihre Aufnahmen schnell und einfach - auch wenn DentDoc im Hintergrund läuft.</p>
+          <h2>Aufnahme-Taste</h2>
+          <p>Mit dieser Taste starten und stoppen Sie Ihre Aufnahmen — auch wenn DentDoc im Hintergrund läuft.</p>
+        </div>
+
+        <div class="wizard-info" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <p><strong>Wichtig:</strong> Wählen Sie eine Taste die Sie im normalen Arbeitsalltag NICHT verwenden, damit keine Aufnahme versehentlich gestartet wird.</p>
         </div>
 
         <div class="wizard-card">
           <div class="wizard-shortcut-display" id="wizardShortcutDisplay">
             <span class="wizard-shortcut-key" id="wizardShortcutKey">F9</span>
           </div>
+          <p style="text-align: center; color: var(--text-secondary); font-size: 0.875rem; margin: var(--space-3) 0;">Einmal drücken = Aufnahme starten. Nochmal drücken = Aufnahme stoppen.</p>
           <div style="text-align: center;">
-            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardChangeShortcutBtn">Ändern</button>
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardChangeShortcutBtn">Andere Taste wählen</button>
           </div>
-        </div>
-
-        <div class="wizard-info">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-          </svg>
-          <p><strong>So funktioniert's:</strong> Drücken Sie die Taste einmal zum Starten der Aufnahme, und nochmal zum Beenden. Die Dokumentation wird automatisch erstellt und in die Zwischenablage kopiert.</p>
         </div>
       </div>
 
-      <!-- Step 3: Transcripts -->
+      <!-- Step 3: What gets saved -->
       <div class="wizard-step" data-step="3">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
@@ -2181,157 +2164,48 @@ REIHENFOLGE
               <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
             </svg>
           </div>
-          <h2>Lokale Datenspeicherung</h2>
-          <p>Speichern Sie Dokumentationen und Audiodateien <strong>lokal auf Ihrem Computer</strong> für späteres Nachhören und zur Qualitätskontrolle.</p>
+          <h2>Was wird gespeichert?</h2>
+          <p>Nach jeder Aufnahme erstellt DentDoc eine Dokumentation und kopiert sie automatisch in Ihre Zwischenablage — bereit zum Einfügen in Ihr PVS (z.B. Charly, Z1).</p>
+        </div>
+
+        <div class="wizard-info" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <p style="color: var(--text-primary);"><strong>Empfohlen:</strong> Beides aktiviert lassen. So haben Sie jederzeit Zugriff auf Ihre Dokumentationen und können die Aufnahmen nachhören.</p>
         </div>
 
         <div class="wizard-card">
+          <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: var(--space-4);">Zusätzlich können Sie folgende Dateien lokal auf Ihrem Computer speichern:</p>
+
           <div class="wizard-toggle active" id="wizardTranscriptToggle">
             <div class="wizard-toggle-content">
-              <h4>Dokumentationen lokal speichern (Empfohlen)</h4>
-              <p>Speichert den Text jeder Dokumentation auf Ihrem Computer</p>
+              <h4>Dokumentationen speichern</h4>
+              <p>Speichert den fertigen Text als Datei. So können Sie frühere Dokumentationen im DentDoc-Archiv jederzeit nachlesen.</p>
             </div>
             <div class="wizard-toggle-switch"></div>
           </div>
 
           <div class="wizard-toggle active" id="wizardAudioToggle" style="margin-top: var(--space-3);">
             <div class="wizard-toggle-content">
-              <h4>Audiodateien lokal speichern (Empfohlen)</h4>
-              <p>Ermöglicht das Nachhören der Sprachaufnahme im Dashboard</p>
+              <h4>Audio-Aufnahmen speichern</h4>
+              <p>Speichert die Sprachaufnahme als Datei. So können Sie im Archiv nachhören was gesprochen wurde — ideal zur Qualitätskontrolle.</p>
             </div>
             <div class="wizard-toggle-switch"></div>
           </div>
-
-          <div id="wizardTranscriptPathSection" style="margin-top: var(--space-4);">
-            <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Speicherort</label>
-            <div class="wizard-path-input">
-              <input type="text" id="wizardTranscriptPath" readonly placeholder="Wird geladen...">
-              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBrowseTranscriptBtn">Ändern</button>
-            </div>
-            <p style="font-size: 0.8125rem; color: var(--text-tertiary); margin-top: var(--space-2);">
-              <strong>Mehrere Arbeitsplätze?</strong> Wählen Sie einen Netzwerkordner (z.B. \\server\dentdoc\transkripte)
-            </p>
-          </div>
-        </div>
-
-        <div class="wizard-info">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-          </svg>
-          <p><strong>Hinweis:</strong> Die fertige Dokumentation wird immer automatisch in die Zwischenablage kopiert. Transkripte und Audio werden im selben Ordner mit identischem Dateinamen gespeichert.</p>
         </div>
       </div>
 
-      <!-- Step 5: Voice Profiles -->
-      <div class="wizard-step" data-step="4">
+      <!-- Step 4: Where to save -->
+      <div class="wizard-step" data-step="4" id="wizardStepSavePath">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
           </div>
-          <div style="display: flex; align-items: center; gap: var(--space-2); justify-content: center;">
-            <h2 style="margin: 0;">Stimmprofile einrichten</h2>
-            <span style="background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 12px;">Empfohlen</span>
-          </div>
-          <p>Mit Stimmprofilen erkennt DentDoc automatisch verschiedene Sprecher (z.B. Arzt und ZFA) und ordnet deren Aussagen korrekt zu.</p>
-        </div>
-
-        <!-- Voice Profile Creation Section -->
-        <div class="wizard-card" style="margin-top: var(--space-4); border: 2px solid var(--primary-500); position: relative;">
-          <div style="position: absolute; top: -10px; right: 16px; background: var(--primary-500); color: white; font-size: 0.75rem; font-weight: 600; padding: 2px 10px; border-radius: 10px;">Jetzt einrichten</div>
-
-          <div class="wizard-card-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-            </svg>
-            <h3>Stimmprofil erstellen</h3>
-          </div>
-
-          <!-- Instructions -->
-          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-4);">
-            <p style="font-size: 0.875rem; color: var(--text-primary); margin: 0 0 var(--space-2) 0; font-weight: 500;">So geht's:</p>
-            <ol style="font-size: 0.8125rem; color: var(--text-secondary); margin: 0; padding-left: var(--space-4);">
-              <li style="margin-bottom: 4px;">Wählen Sie Ihre Rolle (Arzt oder ZFA) und geben Sie Ihren Namen ein</li>
-              <li style="margin-bottom: 4px;">Klicken Sie auf "Profil erstellen" – ein Overlay mit Beispieltext erscheint</li>
-              <li style="margin-bottom: 4px;">Klicken Sie im Overlay auf "Start" und lesen Sie den Text vor</li>
-              <li>Nach 30 Sekunden ist Ihr Stimmprofil erstellt</li>
-            </ol>
-          </div>
-
-          <!-- Existing Profiles Display -->
-          <div id="wizardExistingProfiles" style="margin-bottom: var(--space-4); display: none;">
-            <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Bereits erstellt:</label>
-            <div id="wizardProfilesList" style="display: flex; flex-wrap: wrap; gap: var(--space-2);"></div>
-          </div>
-
-          <div class="wizard-profile-form" id="wizardProfileForm">
-            <!-- Form fields with border -->
-            <div style="border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-4); background: var(--bg-secondary);">
-              <div style="display: flex; gap: var(--space-3);">
-                <div style="flex: 1;">
-                  <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Rolle</label>
-                  <select id="wizardProfileRole" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary);">
-                    <option value="">Bitte wählen...</option>
-                    <option value="Arzt">Arzt</option>
-                    <option value="ZFA">ZFA</option>
-                  </select>
-                </div>
-                <div style="flex: 1;">
-                  <label style="font-size: 0.875rem; color: var(--text-secondary); display: block; margin-bottom: var(--space-2);">Name</label>
-                  <input type="text" id="wizardProfileName" placeholder="z.B. Dr. Müller" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary);">
-                </div>
-              </div>
-            </div>
-
-            <!-- Recording Progress -->
-            <div id="wizardProfileProgress" style="display: none; margin-bottom: var(--space-3);">
-              <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2);">
-                <div style="width: 10px; height: 10px; border-radius: 50%; background: #ef4444; animation: pulse 1s infinite;"></div>
-                <span id="wizardProfileProgressText" style="font-size: 0.875rem; color: var(--text-secondary);">Aufnahme läuft... 0s / 30s</span>
-              </div>
-              <div style="height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
-                <div id="wizardProfileProgressBar" style="height: 100%; background: var(--primary-500); width: 0%; transition: width 0.3s;"></div>
-              </div>
-            </div>
-
-            <!-- Audio Level -->
-            <div id="wizardProfileAudioLevel" style="display: none; margin-bottom: var(--space-3);">
-              <label style="font-size: 0.75rem; color: var(--text-tertiary); display: block; margin-bottom: var(--space-1);">Mikrofon-Pegel:</label>
-              <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
-                <div id="wizardProfileLevelBar" style="height: 100%; background: #22c55e; width: 0%; transition: width 0.1s;"></div>
-              </div>
-            </div>
-
-            <!-- Status Message -->
-            <div id="wizardProfileStatus" style="margin-bottom: var(--space-3); font-size: 0.875rem;"></div>
-
-            <!-- Mic Error Card -->
-            <div id="wizardProfileMicError" class="profiles-mic-error-card" style="display: none;">
-              <div class="profiles-mic-error-icon">🎤</div>
-              <div class="profiles-mic-error-title">Mikrofon nicht verbunden</div>
-              <div class="profiles-mic-error-device" id="wizardProfileMicErrorDevice"></div>
-              <div class="profiles-mic-error-action">
-                <a href="#" id="wizardProfileMicErrorLink">Zurück zur Mikrofon-Auswahl</a>
-              </div>
-            </div>
-
-            <div style="display: flex; gap: var(--space-2);">
-              <button type="button" class="wizard-btn wizard-btn-primary" id="wizardProfileRecordBtn" style="flex: 1;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px; margin-right: 6px;">
-                  <circle cx="12" cy="12" r="10"/>
-                  <circle cx="12" cy="12" r="3" fill="currentColor"/>
-                </svg>
-                Profil erstellen
-              </button>
-              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardProfileCancelBtn" style="display: none;">
-                Abbrechen
-              </button>
-            </div>
-          </div>
+          <h2>Speicherort wählen</h2>
+          <p>Wo sollen Ihre Dateien gespeichert werden?</p>
         </div>
 
         <div class="wizard-info">
@@ -2339,12 +2213,84 @@ REIHENFOLGE
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 16v-4M12 8h.01"/>
           </svg>
-          <p><strong>Tipp:</strong> Sprechen Sie natürlich, so wie Sie es bei einer echten Dokumentation tun würden - nicht mit "Vorlesestimme". Weitere Profile können Sie jederzeit unter "Stimmprofile" hinzufügen.</p>
+          <div>
+            <p><strong>Tipp für Praxen mit mehreren Arbeitsplätzen:</strong></p>
+            <p style="margin-top: var(--space-2);">Wählen Sie einen Netzwerkordner auf Ihrem Praxisserver (z.B. \\server\dentdoc\).</p>
+            <ul style="margin-top: var(--space-2); padding-left: var(--space-4); color: var(--text-secondary);">
+              <li>Alle Arbeitsplätze greifen auf dieselben Dokumentationen zu</li>
+              <li>Zentrale Datensicherung durch Ihr bestehendes Server-Backup</li>
+              <li>Einmal dokumentiert, überall verfügbar</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="wizard-card">
+          <div id="wizardTranscriptPathSection">
+            <div class="wizard-path-input">
+              <input type="text" id="wizardTranscriptPath" readonly placeholder="Wird geladen...">
+              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBrowseTranscriptBtn">Ordner ändern</button>
+            </div>
+            <div style="text-align: center; margin-top: var(--space-3);">
+              <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardUseDefaultPathBtn" style="font-size: 0.8125rem;">Standard verwenden</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5: DSGVO -->
+      <div class="wizard-step" data-step="5">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="M9 12l2 2 4-4"/>
+            </svg>
+          </div>
+          <h2>Datenschutz (DSGVO)</h2>
+          <p>Kurzer Hinweis zur datenschutzkonformen Nutzung von DentDoc.</p>
+        </div>
+
+        <div class="wizard-info" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <p style="color: var(--text-primary);">Ergänzen Sie Ihre Praxis-Datenschutzerklärung um folgenden Hinweis und stellen Sie sicher, dass Patienten die aktualisierte Erklärung unterschrieben haben, bevor Sie aufnehmen.</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <path d="M14 2v6h6"/>
+              <path d="M16 13H8M16 17H8M10 9H8"/>
+            </svg>
+            <h3>Text für Ihre Datenschutzerklärung</h3>
+          </div>
+
+          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-3); font-size: 0.8125rem; line-height: 1.7; color: var(--text-secondary);">
+            <p style="margin-bottom: var(--space-3);"><strong style="color: var(--text-primary);">Sprachaufzeichnung / KI-Dokumentation (DentDoc)</strong></p>
+            <p style="margin-bottom: var(--space-3);">
+              Zur Unterstützung der Behandlungsdokumentation können über die DentDoc-Desktop-App Sprachaufzeichnungen erstellt und transkribiert werden. Die verschlüsselte Verarbeitung erfolgt über DentDoc (Auftragsverarbeiter); hierfür können Unterauftragnehmer zur Transkription eingesetzt werden. Audiodaten werden beim Transkriptionsdienst nur für die Verarbeitung vorgehalten und anschließend gelöscht; lokal in der Praxis gespeicherte Audio- und Transkriptionsdaten werden spätestens nach 30 Tagen gelöscht.
+            </p>
+            <p style="color: var(--text-tertiary); font-size: 0.75rem;">
+              Rechtsgrundlage: Art. 6 Abs. 1 lit. b, Art. 9 Abs. 2 lit. h DSGVO.
+            </p>
+          </div>
+          <div style="text-align: center; margin-top: var(--space-4);">
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardCopyDsgvoBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              Text kopieren
+            </button>
+            <span id="wizardDsgvoCopyStatus" style="display: none; margin-left: var(--space-2); color: #22c55e; font-size: 0.8125rem;">Kopiert!</span>
+          </div>
         </div>
       </div>
 
       <!-- Step 6: Dashboard & Tray Info -->
-      <div class="wizard-step" data-step="5">
+      <div class="wizard-step" data-step="6">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2355,6 +2301,21 @@ REIHENFOLGE
           </div>
           <h2>Das Dashboard</h2>
           <p>Das Dashboard ist Ihre Steuerzentrale - aber Sie müssen es nicht dauerhaft geöffnet haben.</p>
+        </div>
+
+        <div class="wizard-info" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <p style="color: var(--text-primary);"><strong>Automatischer Start:</strong> DentDoc startet automatisch mit Windows. Sie müssen sich nicht erneut einloggen — einfach Ihr Tastenkürzel drücken und los geht's!</p>
+        </div>
+
+        <div class="wizard-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <p><strong>Tipp:</strong> Ziehen Sie das DentDoc-Symbol aus dem „^"-Menü in die Taskleiste, damit es immer sichtbar ist.</p>
         </div>
 
         <div class="wizard-card">
@@ -2390,7 +2351,7 @@ REIHENFOLGE
                 </svg>
               </div>
               <div>
-                <strong style="color: var(--text-primary);">Linksklick</strong>
+                <strong style="color: var(--text-primary);">Linksklick auf das Tray-Icon</strong>
                 <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 4px;">
                   Öffnet das Dashboard, falls Sie Einstellungen ändern oder Ihre Aufnahmen ansehen möchten.
                 </p>
@@ -2406,7 +2367,7 @@ REIHENFOLGE
                 </svg>
               </div>
               <div>
-                <strong style="color: var(--text-primary);">Rechtsklick</strong>
+                <strong style="color: var(--text-primary);">Rechtsklick auf das Tray-Icon</strong>
                 <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 4px;">
                   Zeigt ein Schnellmenü mit häufig genutzten Funktionen.
                 </p>
@@ -2415,72 +2376,71 @@ REIHENFOLGE
           </div>
         </div>
 
-        <div class="wizard-info">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-          </svg>
-          <p><strong>Tipp:</strong> Ziehen Sie das DentDoc-Symbol aus dem „^"-Menü in die Taskleiste, damit es immer sichtbar ist.</p>
-        </div>
-
-        <div class="wizard-info" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3);">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          <p style="color: var(--text-primary);"><strong>Automatischer Start:</strong> DentDoc startet automatisch mit Windows. Sie müssen sich nicht erneut einloggen - einfach Ihr Tastenkürzel drücken und los geht's!</p>
-        </div>
-
       </div>
 
-      <!-- Step 7: DSGVO / Datenschutz für Ärzte -->
-      <div class="wizard-step" data-step="6">
+      <!-- Step 7: Trial Info (only shown for free_trial users) -->
+      <div class="wizard-step" data-step="7" id="wizardStepTrial">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              <path d="M9 12l2 2 4-4"/>
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
             </svg>
           </div>
-          <h2>Datenschutz (DSGVO)</h2>
-          <p>Kurzer Hinweis zur datenschutzkonformen Nutzung von DentDoc.</p>
+          <h2>Ihre kostenlose Testphase</h2>
+          <p>Sie können 60 Minuten Behandlung aufnehmen — kostenlos und unverbindlich.</p>
         </div>
 
         <div class="wizard-card">
-          <div class="wizard-card-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <path d="M14 2v6h6"/>
-              <path d="M16 13H8M16 17H8M10 9H8"/>
-            </svg>
-            <h3>Datenschutzerklärung ergänzen</h3>
-          </div>
-
-          <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: var(--space-3); line-height: 1.6;">
-            Ergänzen Sie Ihre Praxis-Datenschutzerklärung um einen Hinweis zur Sprachaufzeichnung. Diese wird von Patienten ohnehin unterschrieben.
-          </p>
-
-          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-4); font-size: 0.8125rem; line-height: 1.7; color: var(--text-secondary);">
-            <p style="margin-bottom: var(--space-3);"><strong style="color: var(--text-primary);">Sprachaufzeichnung / KI-Dokumentation (DentDoc)</strong></p>
-            <p style="margin-bottom: var(--space-3);">
-              Zur Unterstützung der Behandlungsdokumentation können über die DentDoc-Desktop-App Sprachaufzeichnungen erstellt und transkribiert werden. Die verschlüsselte Verarbeitung erfolgt über DentDoc (Auftragsverarbeiter); hierfür können Unterauftragnehmer zur Transkription eingesetzt werden. Audiodaten werden beim Transkriptionsdienst nur für die Verarbeitung vorgehalten und anschließend gelöscht; lokal in der Praxis gespeicherte Audio- und Transkriptionsdaten werden spätestens nach 30 Tagen gelöscht.
-            </p>
-            <p style="color: var(--text-tertiary); font-size: 0.75rem;">
-              Rechtsgrundlage: Art. 6 Abs. 1 lit. b, Art. 9 Abs. 2 lit. h DSGVO.
-            </p>
+          <div style="text-align: center; padding: var(--space-4) 0;">
+            <div style="font-size: 2.5rem; font-weight: 700; color: var(--text-primary);">60 Minuten</div>
+            <p style="color: var(--text-secondary); margin-top: var(--space-2);">Aufnahmezeit</p>
+            <div style="height: 8px; background: var(--bg-tertiary); border-radius: 4px; margin-top: var(--space-4); overflow: hidden;">
+              <div style="height: 100%; width: 100%; background: linear-gradient(90deg, var(--primary-500), var(--primary-400)); border-radius: 4px;"></div>
+            </div>
           </div>
         </div>
 
-        <div class="wizard-info" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3);">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
-            <polyline points="20 6 9 17 4 12"/>
+        <div class="wizard-card" style="margin-top: var(--space-3);">
+          <h4 style="color: var(--text-primary); margin-bottom: var(--space-3);">Nach der Testphase</h4>
+          <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: var(--space-3);">DentDoc Pro kostet <strong>55 Euro/Monat pro Lizenz</strong> (inkl. MwSt.). Wird monatlich automatisch abgebucht, jederzeit kündbar — keine Mindestlaufzeit.</p>
+
+          <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+            <div style="display: flex; align-items: flex-start; gap: var(--space-3);">
+              <div style="width: 28px; height: 28px; background: var(--bg-tertiary); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary); font-weight: 600; font-size: 0.8125rem;">1</div>
+              <div>
+                <strong style="color: var(--text-primary);">Was ist eine Lizenz?</strong>
+                <p style="color: var(--text-secondary); font-size: 0.8125rem; margin-top: 2px;">1 Lizenz = 1 gleichzeitige Aufnahme. Sie können DentDoc auf beliebig vielen Computern installieren.</p>
+              </div>
+            </div>
+            <div style="display: flex; align-items: flex-start; gap: var(--space-3);">
+              <div style="width: 28px; height: 28px; background: var(--bg-tertiary); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary); font-weight: 600; font-size: 0.8125rem;">2</div>
+              <div>
+                <strong style="color: var(--text-primary);">Wann brauche ich mehr?</strong>
+                <p style="color: var(--text-secondary); font-size: 0.8125rem; margin-top: 2px;">Nur wenn Sie in mehreren Zimmern gleichzeitig aufnehmen möchten. Beispiel: 2 Zimmer gleichzeitig = 2 Lizenzen.</p>
+              </div>
+            </div>
+            <div style="display: flex; align-items: flex-start; gap: var(--space-3);">
+              <div style="width: 28px; height: 28px; background: var(--bg-tertiary); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary); font-weight: 600; font-size: 0.8125rem;">3</div>
+              <div>
+                <strong style="color: var(--text-primary);">Was passiert nach der Testphase?</strong>
+                <p style="color: var(--text-secondary); font-size: 0.8125rem; margin-top: 2px;">Ohne Abo können keine neuen Aufnahmen gestartet werden. Ihre bisherigen Dokumentationen bleiben erhalten.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-info" style="margin-top: var(--space-3);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; width: 20px; height: 20px; margin-top: 2px;">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
           </svg>
-          <p style="color: var(--text-primary);">Das war's schon! Mit diesem Hinweis in Ihrer Datenschutzerklärung sind Sie DSGVO-konform.</p>
+          <p>Das Abo können Sie jederzeit auf <a href="#" id="wizardTrialUpgradeLink" style="color: var(--primary-500);">dentdoc.de</a> in Ihrem persönlichen Bereich unter "Abonnement" abschließen oder kündigen.</p>
         </div>
-
       </div>
 
       <!-- Step 8: Complete -->
-      <div class="wizard-step" data-step="7">
+      <div class="wizard-step" data-step="8">
         <div class="wizard-step-header">
           <div class="wizard-completion-animation">
             <div class="wizard-checkmark">
@@ -2492,57 +2452,40 @@ REIHENFOLGE
             </div>
           </div>
           <h2>Alles bereit!</h2>
-          <p>Ihre Einrichtung ist abgeschlossen. Hier eine Zusammenfassung Ihrer Einstellungen:</p>
+          <p>DentDoc ist eingerichtet.</p>
         </div>
 
         <div class="wizard-card">
-          <div class="wizard-summary">
-            <div class="wizard-summary-item">
-              <span class="wizard-summary-label">Mikrofon</span>
-              <span class="wizard-summary-value" id="summaryMic">Standard</span>
+          <h4 style="color: var(--text-primary); margin-bottom: var(--space-3);">Brauchen Sie Hilfe?</h4>
+          <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+            <div style="display: flex; align-items: center; gap: var(--space-3);">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--primary-500)" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              <div>
+                <strong style="color: var(--text-primary);">Live Chat</strong>
+                <p style="color: var(--text-secondary); font-size: 0.8125rem;">Direkt im Dashboard unten rechts</p>
+              </div>
             </div>
-            <div class="wizard-summary-item">
-              <span class="wizard-summary-label">Tastenkürzel</span>
-              <span class="wizard-summary-value" id="summaryShortcut">F9</span>
-            </div>
-            <div class="wizard-summary-item">
-              <span class="wizard-summary-label">Dokumentationen speichern</span>
-              <span class="wizard-summary-value" id="summaryTranscripts">Aktiviert</span>
-            </div>
-            <div class="wizard-summary-item">
-              <span class="wizard-summary-label">Audiodateien speichern</span>
-              <span class="wizard-summary-value" id="summaryAudio">Aktiviert</span>
+            <div style="display: flex; align-items: center; gap: var(--space-3);">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--primary-500)" stroke-width="2">
+                <polygon points="23 7 16 12 23 17 23 7"/>
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+              </svg>
+              <div>
+                <strong style="color: var(--text-primary);">Video-Anleitung</strong>
+                <p style="color: var(--text-secondary); font-size: 0.8125rem;">Schritt für Schritt erklärt — <a href="https://dentdoc.de/anleitung" target="_blank" rel="noopener" style="color: var(--primary-500);">dentdoc.de/anleitung</a></p>
+              </div>
             </div>
           </div>
-        </div>
-
-        <div class="wizard-info">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4M12 8h.01"/>
-          </svg>
-          <p><strong>Nächster Schritt:</strong> Drücken Sie <kbd id="wizardFinalShortcut" style="background: var(--glass-bg); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono);">F9</kbd>, um Ihre erste Aufnahme zu starten!</p>
         </div>
       </div>
     </div>
 
     <!-- Wizard Footer -->
     <div class="wizard-footer">
-      <div class="wizard-footer-left">
-        <div class="wizard-dots">
-          <div class="wizard-dot active"></div>
-          <div class="wizard-dot"></div>
-          <div class="wizard-dot"></div>
-          <div class="wizard-dot"></div>
-          <div class="wizard-dot"></div>
-          <div class="wizard-dot"></div>
-          <div class="wizard-dot"></div>
-          <div class="wizard-dot"></div>
-          <div class="wizard-dot"></div>
-        </div>
-      </div>
+      <div class="wizard-footer-left"></div>
       <div class="wizard-footer-right">
-        <button type="button" class="wizard-skip-btn" id="wizardSkipBtn" style="display: none;">Überspringen</button>
         <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardBackBtn" style="display: none;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M19 12H5M12 19l-7-7 7-7"/>
@@ -2550,7 +2493,7 @@ REIHENFOLGE
           Zurück
         </button>
         <button type="button" class="wizard-btn wizard-btn-primary" id="wizardStartBtn">
-          Einrichtung starten
+          Los geht's
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M5 12h14M12 5l7 7-7 7"/>
           </svg>
@@ -2565,7 +2508,7 @@ REIHENFOLGE
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          Los geht's!
+          DentDoc öffnen
         </button>
       </div>
     </div>

@@ -371,15 +371,30 @@ function calculateRMS(samples) {
 /**
  * Send audio level to status overlay (throttled)
  */
+let peakRmsSinceLastSend = 0;
+let autoGain = 15;  // Start conservative, auto-adjusts upward for quiet mics
 function sendAudioLevel(samples) {
+  // Track peak RMS across all batches (not just the one at send time)
+  const rms = calculateRMS(samples);
+  if (rms > peakRmsSinceLastSend) peakRmsSinceLastSend = rms;
+
   const now = Date.now();
   if (now - lastAudioLevelSend < AUDIO_LEVEL_INTERVAL_MS) {
     return; // Throttle - don't send too often
   }
   lastAudioLevelSend = now;
 
-  const rms = calculateRMS(samples);
-  const boosted = Math.min(1, rms * 5);  // Match F9 monitoring boost
+  // Auto-gain: if peak level is too low, increase gain gradually
+  // Target: speech should produce boosted values around 0.3-0.8
+  const peak = peakRmsSinceLastSend;
+  if (peak > 0.0005 && peak * autoGain < 0.15) {
+    autoGain = Math.min(200, autoGain * 1.5);
+  } else if (peak * autoGain > 1.5 && autoGain > 5) {
+    autoGain = Math.max(5, autoGain * 0.8);
+  }
+
+  const boosted = Math.min(1, peak * autoGain);
+  peakRmsSinceLastSend = 0;
   notifyRenderer('audio-level', boosted);
 }
 

@@ -273,7 +273,28 @@ let isEnrolling = false;
 let recordingStartCancelled = false;  // Flag to abort startRecording() if user cancels during startup
 let currentRecordingPath = null;
 let currentRecordingSlotId = null; // Backend recording slot ID for license enforcement
+let currentRecordingSlotToken = null; // Token used when claiming slot (survives logout for cleanup)
 let recordingSlotPending = false; // True while startRecording() is in progress (before isRecording=true)
+
+/**
+ * Release the current recording slot (with retry). Call from any stop/error/logout path.
+ */
+function releaseCurrentRecordingSlot() {
+  if (!currentRecordingSlotId) return;
+  const slotId = currentRecordingSlotId;
+  const token = currentRecordingSlotToken || store.get('authToken');
+  if (token) {
+    recordingSlot.releaseSlot(token, slotId).catch(e => {
+      console.warn('[RecordingSlot] Release failed, retrying:', e.message);
+      setTimeout(() => {
+        recordingSlot.releaseSlot(token, slotId).catch(() => {});
+      }, 2000);
+    });
+  }
+  recordingSlot.stopHeartbeat();
+  currentRecordingSlotId = null;
+  currentRecordingSlotToken = null;
+}
 let savedAudioPathInBackup = null; // Path to audio saved in "Fehlgeschlagen" folder (deleted after successful save)
 let currentEnrollmentPath = null;
 let currentEnrollmentName = null;
@@ -1996,7 +2017,16 @@ async function startRecording() {
         return;
       }
       currentRecordingSlotId = result.recordingId;
-      recordingSlot.startHeartbeat(token, currentRecordingSlotId);
+      currentRecordingSlotToken = token;
+      recordingSlot.startHeartbeat(token, currentRecordingSlotId, (reason) => {
+        if (reason === 'expired') {
+          showCustomNotification('Aufnahme-Lizenz verloren',
+            'Die Lizenz konnte nicht verlängert werden. Die Aufnahme läuft lokal weiter.', 'warning');
+        } else {
+          showCustomNotification('Verbindungsproblem',
+            'Aufnahme-Lizenz konnte nicht bestätigt werden.', 'warning');
+        }
+      });
       console.log('[RecordingSlot] Slot claimed:', currentRecordingSlotId);
     }).catch(err => {
       if (err.message && err.message.includes('MAX_RECORDINGS')) {
@@ -2236,18 +2266,23 @@ async function startRecordingWithIphone() {
                 global.lastAudioLevelUpdate = now;
 
                 // Convert Buffer to Int16Array and calculate RMS
-                const int16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
-                let sum = 0;
-                for (let i = 0; i < int16.length; i++) {
-                  sum += int16[i] * int16[i];
-                }
-                const rawRms = Math.sqrt(sum / int16.length) / 32768; // Normalize to 0-1
-                // Boost RMS for better visual feedback (iPhone is further from mouth, typically 0.01-0.05)
-                const rms = Math.min(1, rawRms * 40);
+                // Copy to aligned buffer - WebSocket chunks may have odd offset/length
+                const alignedLength = data.length & ~1; // ensure even byte count
+                if (alignedLength >= 2) {
+                  const aligned = Buffer.from(data.buffer, data.byteOffset, alignedLength);
+                  const int16 = new Int16Array(aligned.buffer, aligned.byteOffset, alignedLength / 2);
+                  let sum = 0;
+                  for (let i = 0; i < int16.length; i++) {
+                    sum += int16[i] * int16[i];
+                  }
+                  const rawRms = Math.sqrt(sum / int16.length) / 32768; // Normalize to 0-1
+                  // Boost RMS for better visual feedback (iPhone is further from mouth, typically 0.01-0.05)
+                  const rms = Math.min(1, rawRms * 40);
 
-                // Send to status overlay window (not mainWindow!)
-                if (statusOverlay && !statusOverlay.isDestroyed()) {
-                  statusOverlay.webContents.send('iphone-audio-level', rms);
+                  // Send to status overlay window (not mainWindow!)
+                  if (statusOverlay && !statusOverlay.isDestroyed()) {
+                    statusOverlay.webContents.send('iphone-audio-level', rms);
+                  }
                 }
               }
             } catch (e) {
@@ -2489,13 +2524,17 @@ function reconnectToRelay(deviceId, token, relayUrl, timeout, resolve) {
             const now = Date.now();
             if (!global.lastAudioLevelUpdate || now - global.lastAudioLevelUpdate > 100) {
               global.lastAudioLevelUpdate = now;
-              const int16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
-              let sum = 0;
-              for (let i = 0; i < int16.length; i++) sum += int16[i] * int16[i];
-              const rawRms = Math.sqrt(sum / int16.length) / 32768;
-              const rms = Math.min(1, rawRms * 40);
-              if (statusOverlay && !statusOverlay.isDestroyed()) {
-                statusOverlay.webContents.send('iphone-audio-level', rms);
+              const alignedLength = data.length & ~1;
+              if (alignedLength >= 2) {
+                const aligned = Buffer.from(data.buffer, data.byteOffset, alignedLength);
+                const int16 = new Int16Array(aligned.buffer, aligned.byteOffset, alignedLength / 2);
+                let sum = 0;
+                for (let i = 0; i < int16.length; i++) sum += int16[i] * int16[i];
+                const rawRms = Math.sqrt(sum / int16.length) / 32768;
+                const rms = Math.min(1, rawRms * 40);
+                if (statusOverlay && !statusOverlay.isDestroyed()) {
+                  statusOverlay.webContents.send('iphone-audio-level', rms);
+                }
               }
             }
           } catch (e) {
@@ -2595,15 +2634,7 @@ async function stopRecordingWithIphone() {
     trayModule.updateTrayMenu();
 
     // Release recording slot (license enforcement)
-    if (currentRecordingSlotId) {
-      const token = store.get('authToken');
-      if (token) {
-        recordingSlot.releaseSlot(token, currentRecordingSlotId).catch(e =>
-          console.warn('[RecordingSlot] Release failed:', e.message));
-      }
-      recordingSlot.stopHeartbeat();
-      currentRecordingSlotId = null;
-    }
+    releaseCurrentRecordingSlot();
 
     // Reset tray
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2646,15 +2677,7 @@ async function stopRecordingWithIphone() {
     trayModule.updateTrayMenu();
 
     // Release recording slot on error
-    if (currentRecordingSlotId) {
-      const slotToken = store.get('authToken');
-      if (slotToken) {
-        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
-          console.warn('[RecordingSlot] Release failed on iPhone error:', e.message));
-      }
-      recordingSlot.stopHeartbeat();
-      currentRecordingSlotId = null;
-    }
+    releaseCurrentRecordingSlot();
 
     throw error;
   }
@@ -2802,15 +2825,7 @@ async function stopRecordingWithVAD() {
     trayModule.updateTrayMenu();
 
     // Release recording slot (license enforcement)
-    if (currentRecordingSlotId) {
-      const token = store.get('authToken');
-      if (token) {
-        recordingSlot.releaseSlot(token, currentRecordingSlotId).catch(e =>
-          console.warn('[RecordingSlot] Release failed:', e.message));
-      }
-      recordingSlot.stopHeartbeat();
-      currentRecordingSlotId = null;
-    }
+    releaseCurrentRecordingSlot();
 
     // Safety timeout: auto-reset isProcessing after 10 minutes in case of unexpected hang
     // (Long recordings 50+ min can take 6+ minutes to process: VAD + Upload + Transcription + Documentation)
@@ -2873,15 +2888,7 @@ async function stopRecordingWithVAD() {
     trayModule.updateTrayMenu();
 
     // Release recording slot on error
-    if (currentRecordingSlotId) {
-      const slotToken = store.get('authToken');
-      if (slotToken) {
-        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
-          console.warn('[RecordingSlot] Release failed on VAD error:', e.message));
-      }
-      recordingSlot.stopHeartbeat();
-      currentRecordingSlotId = null;
-    }
+    releaseCurrentRecordingSlot();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2953,15 +2960,7 @@ async function stopRecording() {
     trayModule.updateTrayMenu();
 
     // Release recording slot (license enforcement)
-    if (currentRecordingSlotId) {
-      const slotToken = store.get('authToken');
-      if (slotToken) {
-        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
-          console.warn('[RecordingSlot] Release failed:', e.message));
-      }
-      recordingSlot.stopHeartbeat();
-      currentRecordingSlotId = null;
-    }
+    releaseCurrentRecordingSlot();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -2988,15 +2987,7 @@ async function stopRecording() {
     trayModule.updateTrayMenu();
 
     // Release recording slot on error
-    if (currentRecordingSlotId) {
-      const slotToken = store.get('authToken');
-      if (slotToken) {
-        recordingSlot.releaseSlot(slotToken, currentRecordingSlotId).catch(e =>
-          console.warn('[RecordingSlot] Release failed on error:', e.message));
-      }
-      recordingSlot.stopHeartbeat();
-      currentRecordingSlotId = null;
-    }
+    releaseCurrentRecordingSlot();
 
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -3516,15 +3507,7 @@ async function cancelCurrentRecording() {
   }
 
   // Release recording slot if active
-  if (currentRecordingSlotId) {
-    const token = store.get('authToken');
-    if (token) {
-      recordingSlot.releaseSlot(token, currentRecordingSlotId).catch(e =>
-        console.warn('[RecordingSlot] Release failed during cancel:', e.message));
-    }
-    recordingSlot.stopHeartbeat();
-    currentRecordingSlotId = null;
-  }
+  releaseCurrentRecordingSlot();
 
   isRecording = false;
   recordingSlotPending = false;
@@ -4355,6 +4338,8 @@ ipcMain.handle('login', async (event, email, password) => {
 // IPC Handler for logout
 ipcMain.handle('logout', async () => {
   const token = store.get('authToken');
+  // Release recording slot before token is deleted
+  releaseCurrentRecordingSlot();
   // Stop heartbeat
   session.stopHeartbeat();
   // Logout from server (free device slot)
@@ -6769,6 +6754,7 @@ app.whenReady().then(() => {
     updateStatusOverlay,
     logout: async () => {
       const token = store.get('authToken');
+      releaseCurrentRecordingSlot();
       session.stopHeartbeat();
       if (token) {
         await apiClient.logout(token, store);
@@ -6949,6 +6935,7 @@ app.whenReady().then(() => {
         || error.response?.data?.error === 'session_expired';
 
       if (isAuthError) {
+        releaseCurrentRecordingSlot();
         session.stopHeartbeat();
         store.delete('authToken');
         store.delete('user');
@@ -6995,18 +6982,7 @@ app.on('will-quit', async () => {
   }
 
   // Release recording slot if active (best-effort, server has 2-min timeout as fallback)
-  if (currentRecordingSlotId) {
-    const token = store.get('authToken');
-    if (token) {
-      try {
-        await recordingSlot.releaseSlot(token, currentRecordingSlotId);
-      } catch (e) {
-        console.warn('[Quit] Recording slot release failed:', e.message);
-      }
-    }
-    recordingSlot.stopHeartbeat();
-    currentRecordingSlotId = null;
-  }
+  releaseCurrentRecordingSlot();
 
   // Clean up mic test file
   cleanupMicTestFile();

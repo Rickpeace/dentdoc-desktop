@@ -9,6 +9,9 @@ const axios = require('axios');
 const os = require('os');
 
 let heartbeatInterval = null;
+let heartbeatPending = false;
+let heartbeatFailCount = 0;
+let onWarningCallback = null;
 let apiBaseUrl = null;
 
 /**
@@ -57,11 +60,16 @@ async function claimSlot(token, deviceId) {
  * Start heartbeat to keep recording slot alive (every 60s)
  * @param {string} token - Auth token
  * @param {number} recordingId - Recording slot ID from claimSlot()
+ * @param {function} [warningCallback] - Called with reason ('expired'|'error') after 2 consecutive failures
  */
-function startHeartbeat(token, recordingId) {
+function startHeartbeat(token, recordingId, warningCallback) {
   stopHeartbeat();
+  heartbeatFailCount = 0;
+  onWarningCallback = warningCallback || null;
 
   heartbeatInterval = setInterval(async () => {
+    if (heartbeatPending) return; // Skip if previous heartbeat still in flight
+    heartbeatPending = true;
     try {
       await axios.post(
         `${apiBaseUrl}api/recording/heartbeat`,
@@ -71,8 +79,16 @@ function startHeartbeat(token, recordingId) {
           timeout: 5000,
         }
       );
+      heartbeatFailCount = 0; // Reset on success
     } catch (err) {
+      heartbeatFailCount++;
       console.warn('[RecordingSlot] Heartbeat failed:', err.message);
+      if (heartbeatFailCount >= 2 && onWarningCallback) {
+        const reason = err.response?.status === 404 ? 'expired' : 'error';
+        onWarningCallback(reason);
+      }
+    } finally {
+      heartbeatPending = false;
     }
   }, 60 * 1000); // 60 seconds
 }
@@ -102,6 +118,9 @@ function stopHeartbeat() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
+  heartbeatPending = false;
+  heartbeatFailCount = 0;
+  onWarningCallback = null;
 }
 
 module.exports = {

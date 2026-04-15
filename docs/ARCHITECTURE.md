@@ -1,7 +1,7 @@
 # DentDoc Desktop - Architektur & Dokumentation
 
-> **Letzte Aktualisierung:** Februar 2026
-> **Version:** 1.7.0
+> **Letzte Aktualisierung:** April 2026
+> **Version:** 1.9.0
 
 ## Übersicht
 
@@ -65,6 +65,7 @@ dentdoc-desktop/
 │   ├── notifications.js         # Native + Custom Notifications [MODUL]
 │   ├── session.js               # Heartbeat, User-Refresh [MODUL]
 │   ├── tray.js                  # System Tray Management [MODUL]
+│   ├── recordingSlot.js         # Recording Slot Lizenzverwaltung [MODUL]
 │   │
 │   ├── apiClient.js             # Backend-Kommunikation
 │   ├── audioRecorderFFmpeg.js   # Mikrofon-Aufnahme mit FFmpeg
@@ -163,6 +164,7 @@ dentdoc-desktop/
 │  ├─ /api/transcriptions/[id]/generate-doc-agent-v2.1  - Doku    │
 │  ├─ /api/auth/*             - Login, Register, Session          │
 │  ├─ /api/voice-profiles/*   - Stimmprofile (CRUD)               │
+│  ├─ /api/recording/*        - Recording Slots (Lizenz)          │
 │  └─ /api/devices/*          - Geräteverwaltung                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -204,6 +206,7 @@ Aus main.js wurden folgende Module extrahiert:
 | Notifications | `src/notifications.js` | Native + Custom Popups |
 | Session | `src/session.js` | Heartbeat, User-Refresh |
 | Tray | `src/tray.js` | System Tray, Kontextmenü |
+| RecordingSlot | `src/recordingSlot.js` | Lizenz-Enforcement (Claim/Heartbeat/Release) |
 
 Details: [main-process.md](main-process.md)
 
@@ -276,6 +279,27 @@ VITE_API_URL=http://localhost:3000
 ---
 
 ## Changelog
+
+### Version 1.9.0 (April 2026)
+- **Settings Auto-Save:** Einstellungen speichern sofort bei Änderung, kein Speichern/Abbrechen-Dialog mehr
+- **KI-Modus entfernt:** Dokumentations-Modus Auswahl aus Einstellungen & Einrichtungsassistent entfernt (nur Agent V2.1)
+- **Recording Slot Lizenz-Enforcement:** Neues `src/recordingSlot.js` Modul — Claim/Heartbeat/Release für gleichzeitige Aufnahmen
+- **Setup-Wizard:** 8 Schritte (0-7), KI-Dokumentation Step entfernt
+- **Wizard Close-Button Fix:** `-webkit-app-region: no-drag` behebt Klick-Problem
+- **Release-Helper:** `releaseCurrentRecordingSlot()` dedupliziert Release-Logik (mit Retry)
+- **Heartbeat-Härtung:** Skip-if-pending, Failure-Counter mit User-Warnung, 404-Erkennung
+
+### Version 1.8.4 (April 2026)
+- **Auth-Token Schutz:** Token wird bei Netzwerkfehlern während Startup nicht gelöscht
+
+### Version 1.8.3 (April 2026)
+- **Auto-Update Dialog:** Zeigt nach manueller Prüfung korrekt an, auch nach vorheriger Ablehnung
+
+### Version 1.8.2 (April 2026)
+- **Docs Update:** Architektur-Dokumentation aktualisiert, Backend Agent-Verbesserungen
+
+### Version 1.8.1 (April 2026)
+- **Audio-Meter Fix:** Audio-Meter in Statusleiste funktioniert während VAD-Aufnahme
 
 ### Version 1.7.0 (Februar 2026)
 - **Auto-Update Fix:** `before-quit` Handler setzt `app.isQuitting` bei Windows Shutdown, damit `autoInstallOnAppQuit` greifen kann. Startup-Fallback (`pendingUpdateVersion`) für force-killed Szenarien
