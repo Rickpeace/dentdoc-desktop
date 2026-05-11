@@ -247,91 +247,116 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       onProgress({ phase: 'upload', percent: 0, message: 'Upload läuft...' });
     }
 
-    // Use native https for real upload progress tracking
+    // Use native https for real upload progress tracking (with retry for network errors)
     const fileSize = fileBuffer.length;
     const https = require('https');
     const url = require('url');
 
-    const upload_url = await new Promise((resolve, reject) => {
-      const proxyUrl = new url.URL(`${UPLOAD_PROXY_URL}/upload`);
+    const MAX_UPLOAD_ATTEMPTS = 3;
+    const RETRY_DELAYS = [5000, 15000];
+    const RETRYABLE_CODES = ['ECONNRESET', 'EPIPE', 'ECONNABORTED', 'ERR_NETWORK', 'ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT'];
 
-      const options = {
-        hostname: proxyUrl.hostname,
-        port: proxyUrl.port || 443,
-        path: proxyUrl.pathname,
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${UPLOAD_PROXY_TOKEN}`,
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': fileSize,
-        },
-      };
+    let upload_url;
+    for (let attempt = 0; attempt < MAX_UPLOAD_ATTEMPTS; attempt++) {
+      try {
+        upload_url = await new Promise((resolve, reject) => {
+          const proxyUrl = new url.URL(`${UPLOAD_PROXY_URL}/upload`);
 
-      const req = https.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              if (!json.upload_url) {
-                reject(new Error('Keine upload_url vom Proxy erhalten'));
+          const options = {
+            hostname: proxyUrl.hostname,
+            port: proxyUrl.port || 443,
+            path: proxyUrl.pathname,
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${UPLOAD_PROXY_TOKEN}`,
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': fileSize,
+            },
+          };
+
+          const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              try {
+                const json = JSON.parse(data);
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                  if (!json.upload_url) {
+                    reject(new Error('Keine upload_url vom Proxy erhalten'));
+                    return;
+                  }
+                  resolve(json.upload_url);
+                } else if (res.statusCode === 401) {
+                  reject(new Error('Upload-Proxy Authentifizierung fehlgeschlagen. Bitte Token prüfen.'));
+                } else {
+                  reject(new Error(json.error || json.message || `Upload failed with status ${res.statusCode}`));
+                }
+              } catch (e) {
+                reject(new Error(`Ungültige Antwort vom Upload-Proxy: ${data}`));
+              }
+            });
+          });
+
+          req.on('error', (err) => {
+            reject(err);
+          });
+
+          // Timeout handling
+          req.setTimeout(300000, () => {
+            req.destroy(new Error('Upload timeout'));
+          });
+
+          // Track progress using chunked writing for accurate progress reporting
+          const chunkSize = 5 * 1024 * 1024; // 5MB chunks (weniger Overhead)
+          let lastReportedPercent = 0;
+          let offset = 0;
+
+          const writeNextChunk = () => {
+            while (offset < fileSize) {
+              const end = Math.min(offset + chunkSize, fileSize);
+              const chunk = fileBuffer.slice(offset, end);
+              offset = end;
+
+              const percent = Math.round(offset * 100 / fileSize);
+              if (percent !== lastReportedPercent) {
+                lastReportedPercent = percent;
+                onProgress?.({ phase: 'upload', percent, message: `Upload ${percent}%` });
+              }
+
+              if (!req.write(chunk)) {
+                // Buffer full, wait for drain and continue
+                req.once('drain', writeNextChunk);
                 return;
               }
-              resolve(json.upload_url);
-            } else if (res.statusCode === 401) {
-              reject(new Error('Upload-Proxy Authentifizierung fehlgeschlagen. Bitte Token prüfen.'));
-            } else {
-              reject(new Error(json.error || json.message || `Upload failed with status ${res.statusCode}`));
             }
-          } catch (e) {
-            reject(new Error(`Ungültige Antwort vom Upload-Proxy: ${data}`));
-          }
+            // All chunks written
+            req.end();
+          };
+
+          writeNextChunk();
         });
-      });
-
-      req.on('error', (err) => {
-        if (err.code === 'ECONNREFUSED') {
-          reject(new Error('Upload-Proxy nicht erreichbar. Bitte später erneut versuchen.'));
-        } else {
-          reject(err);
+        // Upload succeeded — exit retry loop
+        if (attempt > 0) {
+          console.log(`  [Upload] Erfolgreich nach ${attempt + 1} Versuchen`);
         }
-      });
+        break;
+      } catch (uploadErr) {
+        const isRetryable = RETRYABLE_CODES.includes(uploadErr.code) ||
+          uploadErr.message.includes('socket hang up') ||
+          uploadErr.message.includes('Upload timeout') ||
+          uploadErr.message.includes('Network Error');
 
-      // Timeout handling
-      req.setTimeout(300000, () => {
-        req.destroy(new Error('Upload timeout'));
-      });
-
-      // Track progress using chunked writing for accurate progress reporting
-      const chunkSize = 5 * 1024 * 1024; // 5MB chunks (weniger Overhead)
-      let lastReportedPercent = 0;
-      let offset = 0;
-
-      const writeNextChunk = () => {
-        while (offset < fileSize) {
-          const end = Math.min(offset + chunkSize, fileSize);
-          const chunk = fileBuffer.slice(offset, end);
-          offset = end;
-
-          const percent = Math.round(offset * 100 / fileSize);
-          if (percent !== lastReportedPercent) {
-            lastReportedPercent = percent;
-            onProgress?.({ phase: 'upload', percent, message: `Upload ${percent}%` });
-          }
-
-          if (!req.write(chunk)) {
-            // Buffer full, wait for drain and continue
-            req.once('drain', writeNextChunk);
-            return;
-          }
+        if (!isRetryable || attempt === MAX_UPLOAD_ATTEMPTS - 1) {
+          throw uploadErr; // Not retryable or last attempt — let outer catch handle it
         }
-        // All chunks written
-        req.end();
-      };
 
-      writeNextChunk();
-    });
+        const delay = RETRY_DELAYS[attempt];
+        console.warn(`  [Upload] Versuch ${attempt + 1}/${MAX_UPLOAD_ATTEMPTS} fehlgeschlagen: ${uploadErr.message}. Retry in ${delay / 1000}s...`);
+        onProgress?.({ phase: 'upload', percent: 0, message: `Verbindung unterbrochen, erneuter Versuch (${attempt + 2}/${MAX_UPLOAD_ATTEMPTS})...` });
+        await new Promise(r => setTimeout(r, delay));
+        onProgress?.({ phase: 'upload', percent: 0, message: 'Upload läuft...' });
+      }
+    }
 
     if (!upload_url) {
       throw new Error('No upload_url received from upload proxy');
@@ -386,17 +411,17 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       throw new Error('Die Aufnahme war zu kurz oder leer. Bitte sprechen Sie mindestens 2-3 Sekunden.');
     }
 
-    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-      throw new Error('Upload-Timeout. Die Datei ist möglicherweise zu groß oder die Verbindung zu langsam. Bitte versuchen Sie es erneut.');
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout') || error.message.includes('Upload timeout')) {
+      throw new Error('Upload nach 3 Versuchen fehlgeschlagen (Timeout). Bitte prüfen Sie Ihre Internetverbindung.');
     }
 
-    // Network errors during upload
+    // Network errors during upload (all 3 retry attempts failed)
     if (error.code === 'ECONNRESET' || error.code === 'EPIPE' || error.message.includes('socket hang up')) {
-      throw new Error('Verbindung während des Uploads abgebrochen. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.');
+      throw new Error('Upload nach 3 Versuchen fehlgeschlagen. Bitte prüfen Sie Ihre Internetverbindung.');
     }
 
     if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
-      throw new Error('Netzwerkfehler beim Upload. Bitte prüfen Sie Ihre Internetverbindung.');
+      throw new Error('Upload nach 3 Versuchen fehlgeschlagen. Bitte prüfen Sie Ihre Internetverbindung.');
     }
 
     const serverError = error.response?.data?.error;
@@ -417,7 +442,7 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
     }
 
     if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      throw new Error('Server nicht erreichbar. Bitte prüfen Sie Ihre Internetverbindung.');
+      throw new Error('Upload nach 3 Versuchen fehlgeschlagen. Server nicht erreichbar.');
     }
 
     throw new Error('Audio-Upload fehlgeschlagen. Bitte versuchen Sie es erneut.');

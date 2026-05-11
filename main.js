@@ -2018,15 +2018,7 @@ async function startRecording() {
       }
       currentRecordingSlotId = result.recordingId;
       currentRecordingSlotToken = token;
-      recordingSlot.startHeartbeat(token, currentRecordingSlotId, (reason) => {
-        if (reason === 'expired') {
-          showCustomNotification('Aufnahme-Lizenz verloren',
-            'Die Lizenz konnte nicht verlängert werden. Die Aufnahme läuft lokal weiter.', 'warning');
-        } else {
-          showCustomNotification('Verbindungsproblem',
-            'Aufnahme-Lizenz konnte nicht bestätigt werden.', 'warning');
-        }
-      });
+      recordingSlot.startHeartbeat(token, currentRecordingSlotId);
       console.log('[RecordingSlot] Slot claimed:', currentRecordingSlotId);
     }).catch(err => {
       if (err.message && err.message.includes('MAX_RECORDINGS')) {
