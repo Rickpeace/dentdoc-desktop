@@ -143,11 +143,10 @@ FFmpeg wird als Child-Process gestartet und nimmt direkt vom Mikrofon auf:
 ```javascript
 const audioRecorder = require('./src/audioRecorderFFmpeg');
 
-// Aufnahme starten
+// Aufnahme starten — Audio wird IMMER nur temporär als opake .dat-Datei
+// im %TEMP%\dentdoc\ gehalten und nach Verarbeitung sofort gelöscht.
 await audioRecorder.startRecording({
-  deviceId: 'microphone-id',  // Optional
-  savePath: '/path/to/save',  // Wenn keepAudio=true
-  deleteAfter: false          // Audio behalten
+  deviceId: 'microphone-id'   // Optional
 });
 
 // Aufnahme stoppen
@@ -563,7 +562,7 @@ Bei optimierten Dateien erscheint im Log:
 Bei nicht-optimierten Dateien:
 ```
 [Upload] Konvertiere zu 16kHz mono...
-[Upload] Konvertiert: speech_only_assemblyai.wav
+[Upload] Konvertiert: a3f9c1e2-aai.dat (16kHz mono WAV, opaker Dateiname)
 ```
 
 ---
@@ -725,18 +724,31 @@ ipcMain.handle('stop-voice-enrollment', async () => {
 
 ```javascript
 const os = require('os');
-const tempDir = os.tmpdir();
+const tempDir = path.join(os.tmpdir(), 'dentdoc');
 
-// Aufnahmen: C:\Users\xxx\AppData\Local\Temp\dentdoc-recording-{timestamp}.webm
-// Optimiert: C:\Users\xxx\AppData\Local\Temp\dentdoc-optimized-{timestamp}.wav
+// Aufnahmen werden seit v1.10.0 als opake .dat-Dateien mit Random-Hex-Namen
+// angelegt — sie sehen für Außenstehende aus wie generische Cache-/DB-Temps,
+// nicht wie Audio-Dateien:
+// %TEMP%\dentdoc\a3f9c1e2.dat          (Hauptaufnahme)
+// %TEMP%\dentdoc\bba7d46f-s2.dat       (Pause/Resume-Segment 2)
+// %TEMP%\dentdoc\1df8e2db-p.dat        (nach VAD verarbeitet)
+// %TEMP%\dentdoc\pipeline\8a3c91e0-c.dat (konvertiert für Upload)
+//
+// FFmpeg schreibt darin weiterhin 16kHz mono PCM WAV (Format wird per
+// -f wav / pcm_s16le erzwungen), nur der Dateiname ist neutral.
 ```
 
-### Persistente Dateien (wenn keepAudio=true)
+### Persistente Dateien
 
-```javascript
-const audioSavePath = store.get('audioSavePath');
-// Default: C:\Users\xxx\Documents\DentDoc\Audio
-```
+**Keine**. Seit v1.10.0 werden Audiodaten unter keinen Umständen permanent
+gespeichert. Permanent abgelegt werden nur:
+- `.txt`-Dokumentationen (formatierte Behandlungs-Doku)
+- `.json`-Metadaten (Utterances, Sprecher-Mapping)
+
+unter `Documents\DentDoc\Transkripte\` (Pfad konfigurierbar). Audio-Files
+existieren ausschließlich als kurzlebige `%TEMP%\dentdoc\*.dat`-Puffer und
+werden nach Pipeline-Ende sofort secure-deleted (Überschreiben + Unlink),
+beim App-Start und beim App-Beenden zusätzlich ausnahmslos gewipt.
 
 ### Stimmprofile
 

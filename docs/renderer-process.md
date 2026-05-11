@@ -220,9 +220,9 @@ class SetupWizard {
       microphoneSource: 'desktop',
       shortcut: 'F9',
       autoExport: true,
-      transcriptPath: '',
-      keepAudio: true
+      transcriptPath: ''
     };
+    // Hinweis (v1.10.0+): keepAudio wurde entfernt. Audio wird nicht mehr persistent gespeichert.
   }
 
   // Navigation
@@ -580,15 +580,15 @@ module.exports = {
 
 ### Audio-Wiedergabe
 
-- **Utterance-Playback:** Klick auf Zeitstempel spielt nur den jeweiligen Utterance-Ausschnitt ab (stoppt bei `segmentEndMs`)
-- **Cross-Audio Stop:** Vor dem Abspielen wird `utterancePreviewAudio` (Profil-Modal) pausiert, falls aktiv
+- **Audio-Playback entfernt (v1.10.0+):** `setupAudioPlayer`, `playSegment`, `jumpToTime`, `updatePlayingUtterance` sind seit DSGVO-Härtung No-Op-Stubs. Audio existiert nach Pipeline-Ende nicht mehr, daher gibt's auch nichts mehr abzuspielen.
 
 ### IPC Aufrufe
 
 - `get-transcript-detail` — Transkript laden
-- `get-transcript-audio` — Audio als Base64 laden
 - `copy-to-clipboard` — JSON kopieren
 - `open-tooth-chart` — Zahnschema öffnen
+
+> `get-transcript-audio` wurde in v1.10.0 entfernt.
 
 ---
 
@@ -602,10 +602,10 @@ Modal zum Hinzufügen von Transkript-Utterances zu Stimmprofilen. Wird aus `tran
 
 - **Existierendes Profil**: Dropdown mit allen gespeicherten Profilen
 - **Neues Profil**: Name + Rolle (Zahnarzt/Assistenz) eingeben
-- **Audio-Vorschau**: Play-Button spielt den Utterance-Ausschnitt ab (stoppt bei `endMs`)
-- **Cross-Audio Stop**: Vor dem Abspielen wird `transcriptAudio` pausiert, falls aktiv
 - **Similarity-Warnung**: Warnung wenn Stimme dem Profil nicht ähnlich genug ist (mit Force-Option)
 - **Erfolgs-Overlay**: Animierte Bestätigung nach erfolgreichem Hinzufügen
+
+> **Audio-Vorschau entfernt (v1.10.0+)**: Der Play-Button für Utterance-Ausschnitte sowie `handlePlayClick` wurden im Zuge der DSGVO-Härtung entfernt.
 
 ### Exports
 
@@ -621,7 +621,6 @@ module.exports = {
 
 - `get-voice-profiles` — Profile für Dropdown laden
 - `add-utterance-to-profile` — Utterance zu Profil hinzufügen
-- `get-transcript-audio` — Audio-Vorschau laden
 
 ---
 

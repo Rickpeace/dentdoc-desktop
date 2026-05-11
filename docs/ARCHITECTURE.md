@@ -259,11 +259,11 @@ Details: [main-process.md](main-process.md)
 | `user` | object | User-Daten (planTier, minutesRemaining, etc.) |
 | `shortcut` | string | Aufnahme-Shortcut (default: "F9") |
 | `theme` | string | "dark" oder "light" |
-| `autoExport` | boolean | Auto-Export Transkripte |
-| `transcriptSavePath` | string | Export-Pfad |
-| `keepAudio` | boolean | Audio behalten nach Verarbeitung |
-| `audioSavePath` | string | Audio-Speicherpfad |
+| `autoExport` | boolean | Auto-Export Transkripte (Text-Doku) |
+| `transcriptPath` | string | Export-Pfad für Text-Dokumentationen |
 | `selectedMicrophone` | string | Mikrofon Device-ID |
+
+> **DSGVO**: Audio-Aufnahmen werden seit v1.10.0 niemals persistent gespeichert. Frühere Settings `keepAudio` und `audioSavePath` wurden entfernt. Audio existiert ausschließlich als kurzlebiger, opaker Verarbeitungspuffer (`*.dat` in `%TEMP%\dentdoc\`) während der unmittelbaren Verarbeitung.
 | `overlayPosition` | object | {x, y} Position des Overlays |
 
 ### Umgebungsvariablen

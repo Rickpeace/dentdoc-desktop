@@ -42,11 +42,11 @@ store.get('recordingMode', 'standard') // 'standard' | 'iphone' | 'vad'
 
 #### Export Settings
 ```javascript
-store.get('autoExport', false)        // Auto-Export aktiviert?
-store.get('transcriptSavePath')       // Transkript-Export-Pfad
-store.get('keepAudio', false)         // Audio behalten?
-store.get('audioSavePath')            // Audio-Speicherpfad
+store.get('autoExport', true)         // Auto-Export der Text-Dokumentation
+store.get('transcriptPath')           // Transkript-Export-Pfad (nur Text + JSON, nie Audio)
 ```
+
+> **DSGVO**: Setting `keepAudio` und `audioSavePath` wurden in v1.10.0 entfernt. Audio wird nie permanent gespeichert.
 
 #### UI Settings
 ```javascript
@@ -123,35 +123,38 @@ const appDataDir = app.getPath('userData');
 // Standard-Basisordner
 const dentdocBase = path.join(documentsDir, 'DentDoc');
 
-// Transkripte (wenn autoExport=true)
-const transcriptPath = store.get('transcriptSavePath') ||
+// Transkripte (wenn autoExport=true) — NUR Text + JSON, niemals Audio
+const transcriptPath = store.get('transcriptPath') ||
   path.join(dentdocBase, 'Transkripte');
-
-// Audio (wenn keepAudio=true)
-const audioPath = store.get('audioSavePath') ||
-  path.join(dentdocBase, 'Audio');
-
-// Fehlgeschlagene Aufnahmen (Backup)
-const failedPath = path.join(dentdocBase, 'Fehlgeschlagen');
 ```
+
+> **DSGVO (v1.10.0+)**: Es gibt keinen `Audio\`-Ordner und keinen `Fehlgeschlagen\`-Ordner mehr. Audiodateien werden niemals persistent gespeichert — auch nicht als Backup bei Fehlern.
 
 ### Ordnerstruktur
 
 ```
 C:\Users\{user}\Documents\DentDoc\
-├── Transkripte\
-│   ├── 2026-01-15_14-30-25_transkript.json
-│   ├── 2026-01-15_15-45-10_transkript.json
-│   └── ...
-│
-├── Audio\
-│   ├── 2026-01-15_14-30-25.webm
-│   ├── 2026-01-15_15-45-10.webm
-│   └── ...
-│
-└── Fehlgeschlagen\
-    └── 2026-01-14_09-15-30.webm  (Backup bei Fehler)
+└── Transkripte\
+    └── {Doctor-Name}\
+        ├── 2026-01-15_14-30-25_jobid.txt    (Behandlungs-Doku, formatiert)
+        ├── 2026-01-15_14-30-25_jobid.json   (Utterances + Sprecher-Mapping)
+        └── ...
 ```
+
+### Temporäre Audio-Puffer
+
+```
+C:\Users\{user}\AppData\Local\Temp\dentdoc\
+├── a3f9c1e2.dat              (Hauptaufnahme, opaker Name)
+├── bba7d46f-s2.dat           (Pause/Resume-Segment 2)
+├── 1df8e2db-p.dat            (VAD-verarbeitete Speech-Only)
+├── _session_cache.dat        (Speaker-Optimization-Cache, falls aktiv)
+└── pipeline\
+    ├── 8a3c91e0-c.dat        (Konvertiert für AssemblyAI)
+    └── d4b2f7a8-aai.dat      (AssemblyAI-optimiert)
+```
+
+Diese Dateien existieren nur während der aktiven Verarbeitung (Sekunden bis wenige Minuten), werden nach jeder Pipeline-Stufe secure-deleted (Überschreiben mit Random + Unlink), und beim App-Start sowie App-Beenden ausnahmslos komplett gewipt.
 
 ---
 
@@ -211,10 +214,10 @@ const filename = `${timestamp}_transkript.json`;
   // Befunde
   "detection": { "has01": true, "hasPA": false },
   "status01": { "teeth": [...] },
-  "statusPA": null,
+  "statusPA": null
 
-  // Audio-Pfad (wenn keepAudio=true)
-  "audioPath": "C:\\Users\\...\\Audio\\2026-01-15_14-30-25.webm"
+  // Hinweis (v1.10.0+): Es gibt kein audioPath-Feld mehr.
+  // Audio wird niemals persistiert, also gibt es auch nichts zu verlinken.
 }
 ```
 
@@ -310,49 +313,34 @@ async function saveTranscriptToFile(data) {
 
 ## Audio-Speicherung
 
-### Temporär (Standard)
+### Nur transient (v1.10.0+)
 
 ```javascript
-// Aufnahme wird in temp gespeichert
-const tempPath = path.join(os.tmpdir(), `dentdoc-recording-${Date.now()}.webm`);
+const audioEncryption = require('./src/audio-encryption');
 
-// Nach erfolgreicher Verarbeitung: Löschen
-fs.unlinkSync(tempPath);
+// Aufnahme wird mit opaken Random-Hex-Namen in app-privatem Temp angelegt
+const tempPath = audioEncryption.audioTempPath(
+  path.join(os.tmpdir(), 'dentdoc')
+);  // z.B. C:\Users\xxx\AppData\Local\Temp\dentdoc\a3f9c1e2.dat
+
+// Am Ende jeder Pipeline-Stufe (Erfolg ODER Fehler): secure-delete
+//   (überschreibt einmal mit Random-Bytes, dann unlink)
+await audioEncryption.secureDelete(tempPath);
 ```
 
-### Persistent (keepAudio=true)
+### Kein Persistent-Modus
 
-```javascript
-const keepAudio = store.get('keepAudio', false);
-if (keepAudio) {
-  const audioSavePath = store.get('audioSavePath');
-  const filename = `${getTimestamp()}.webm`;
-  const destPath = path.join(audioSavePath, filename);
+`keepAudio`/`audioSavePath` wurden entfernt. Es gibt keinen Code-Pfad, der eine Audio-Datei nach `Documents\` kopiert.
 
-  // Kopieren statt verschieben (temp bleibt für Verarbeitung)
-  fs.copyFileSync(tempPath, destPath);
-}
-```
+### Kein Backup bei Fehler
 
-### Backup bei Fehler
+Der frühere `Fehlgeschlagen\`-Ordner und die Funktion `saveAudioImmediately()` wurden vollständig entfernt. Audiodaten werden auch bei Verarbeitungsfehlern nicht aufgehoben.
 
-```javascript
-// Bei Verarbeitungsfehler: Audio sichern
-const failedPath = path.join(dentdocBase, 'Fehlgeschlagen');
-if (!fs.existsSync(failedPath)) {
-  fs.mkdirSync(failedPath, { recursive: true });
-}
+### Wipe-Mechanismen (Sicherheitsnetz)
 
-const backupPath = path.join(failedPath, `${getTimestamp()}.webm`);
-fs.copyFileSync(tempPath, backupPath);
-savedAudioPathInBackup = backupPath;
-
-// Bei späterem Erfolg: Backup löschen
-if (savedAudioPathInBackup && fs.existsSync(savedAudioPathInBackup)) {
-  fs.unlinkSync(savedAudioPathInBackup);
-  savedAudioPathInBackup = null;
-}
-```
+- **App-Start**: `wipeAllTempAudio()` löscht alle Dateien in `%TEMP%\dentdoc\` und Subdirs, kein Age-Threshold
+- **App-Beenden** (`will-quit`): nochmal `wipeAllTempAudio()`
+- **Crash mid-recording**: Datei bleibt liegen → nächster App-Start wipt sie
 
 ---
 
@@ -401,16 +389,7 @@ ipcMain.handle('get-transcript-detail', async (event, filepath) => {
 
 ### Audio laden
 
-```javascript
-ipcMain.handle('get-transcript-audio', async (event, audioPath) => {
-  if (!audioPath || !fs.existsSync(audioPath)) {
-    return null;
-  }
-
-  const buffer = fs.readFileSync(audioPath);
-  return buffer.toString('base64');
-});
-```
+> **Entfernt in v1.10.0**: Der IPC-Handler `get-transcript-audio` und alle Audio-Playback-UIs wurden entfernt. Audio existiert nicht mehr nach Pipeline-Ende, daher gibt's nichts zu laden.
 
 ---
 

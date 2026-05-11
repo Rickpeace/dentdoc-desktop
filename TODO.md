@@ -108,9 +108,11 @@ Wichtig für Audit: Du erklärst: „Audio/Transkript sind Komfort/Qualität –
 
 2) Speicherlogik: Retention + Auto-Delete (Pflichtbaustein)
 
+**STATUS (v1.10.0)**: Audio-Speicherung wurde komplett entfernt — Audio wird grundsätzlich nicht persistiert (DSGVO-Härtung). Siehe `docs/dsgvo-position.md`.
+
 In der App einstellbar pro Praxis:
 
-Audio speichern: AN/AUS
+~~Audio speichern: AN/AUS~~ — entfernt, ist immer AUS
 
 Transkript speichern: AN/AUS
 
