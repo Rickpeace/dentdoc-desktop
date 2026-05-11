@@ -5523,6 +5523,7 @@ ipcMain.handle('stop-voice-enrollment', async () => {
     }
 
     // Create voice profile from recording with role
+    const enrollmentPathForCleanup = currentEnrollmentPath;
     const profile = await speakerRecognition.enrollSpeaker(
       currentEnrollmentName,
       currentEnrollmentPath,
@@ -5533,6 +5534,16 @@ ipcMain.handle('stop-voice-enrollment', async () => {
     currentEnrollmentName = null;
     currentEnrollmentPath = null;
     currentEnrollmentRole = null;
+
+    // DSGVO: clean up enrollment audio after profile is saved (embedding is already in backend).
+    // Best-effort — also covered by the App-Start wipe.
+    try {
+      if (enrollmentPathForCleanup) {
+        await audioEncryption.secureDelete(enrollmentPathForCleanup);
+      }
+    } catch (cleanupErr) {
+      console.warn('[Enrollment] cleanup of enrollment WAV failed (non-fatal):', cleanupErr.message);
+    }
 
     return { success: true, profile };
   } catch (error) {
