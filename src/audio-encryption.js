@@ -1,5 +1,5 @@
 /**
- * Audio Encryption (AES-256-GCM)
+ * Audio Encryption (AES-256-GCM) + audio-temp filename helpers
  *
  * Encrypts/decrypts audio files at rest using a per-session runtime key
  * held only in RAM (never persisted). On app crash/restart the key is lost
@@ -7,11 +7,47 @@
  * startup wipe removes them anyway.
  *
  * .enc file format: [12-byte IV][16-byte authTag][ciphertext]
+ *
+ * Also exports audioTempPath() / isAudioTempName() to keep on-disk audio
+ * buffers from looking like recordings: random hex base + neutral .dat
+ * extension, so a casual observer sees files indistinguishable from
+ * cache/database artifacts in %TEMP%.
  */
 
 const crypto = require('crypto');
 const fs = require('fs');
 const fsp = fs.promises;
+const path = require('path');
+
+const AUDIO_TMP_EXT = '.dat';
+
+/**
+ * Generate a path for an internal audio temp file.
+ * Filename looks like 7f3a9b2c.dat (random hex + neutral extension) so it
+ * blends in with other generic temp/cache files.
+ *
+ * @param {string} dir - Target directory
+ * @param {string} [suffix] - Optional short suffix (e.g. 's2' for segment 2, 'p' for processed)
+ */
+function audioTempPath(dir, suffix = '') {
+  const id = crypto.randomBytes(4).toString('hex');
+  const sfx = suffix ? '-' + suffix : '';
+  return path.join(dir, id + sfx + AUDIO_TMP_EXT);
+}
+
+/**
+ * Returns true if a filename is one of our audio temps (current .dat,
+ * or legacy .tmp/.wav/.webm from older app versions still on disk).
+ * Used by cleanup routines so they pick up files from prior installs.
+ */
+function isAudioTempName(filename) {
+  if (!filename) return false;
+  const lower = filename.toLowerCase();
+  return lower.endsWith(AUDIO_TMP_EXT) ||
+    lower.endsWith('.tmp') ||
+    lower.endsWith('.wav') ||
+    lower.endsWith('.webm');
+}
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LEN = 12;
@@ -120,4 +156,7 @@ module.exports = {
   decryptToBuffer,
   createDecryptStream,
   secureDelete,
+  audioTempPath,
+  isAudioTempName,
+  AUDIO_TMP_EXT,
 };

@@ -1485,7 +1485,7 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       console.log(`///// SCHRITT 1: LIVE-VAD RENDER (${liveSegments.length} Segmente) /////`);
       const renderStart = Date.now();
       const pipeline = require('./src/pipeline');
-      const speechOnlyPath = path.join(os.tmpdir(), 'dentdoc', 'pipeline', `speech_only_${Date.now()}.wav`);
+      const speechOnlyPath = audioEncryption.audioTempPath(path.join(os.tmpdir(), 'dentdoc', 'pipeline'), 'p');
 
       // Ensure output directory exists
       const outputDir = path.dirname(speechOnlyPath);
@@ -2040,7 +2040,7 @@ async function startRecordingWithIphone() {
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
-    iphoneRecordingPath = path.join(tempDir, `iphone_${Date.now()}.wav`);
+    iphoneRecordingPath = audioEncryption.audioTempPath(tempDir);
 
     // Start FFmpeg - reads from stdin, writes WAV
     const ffmpegPath = audioRecorder.getFFmpegPath();
@@ -4593,7 +4593,7 @@ ipcMain.handle('iphone-audio-test', async (event) => {
   // Clean up old test files before creating new one
   cleanupIphoneTestFiles();
 
-  const testWavPath = path.join(tempDir, `iphone_test_${Date.now()}.wav`);
+  const testWavPath = audioEncryption.audioTempPath(tempDir, 't'); // 't' = test
 
   // Start FFmpeg
   const ffmpegPath = audioRecorder.getFFmpegPath();
@@ -5915,7 +5915,7 @@ ipcMain.handle('get-speaker-preview', async (event, speakerId) => {
     }
 
     // Create preview clip (max 15 seconds)
-    const previewPath = path.join(os.tmpdir(), `dentdoc-preview-${speakerId}.wav`);
+    const previewPath = audioEncryption.audioTempPath(os.tmpdir(), 'pv'); // 'pv' = preview
     await speakerRecognition.createPreviewClip(
       optimizationSession.audioFilePath,
       speaker.utterances,

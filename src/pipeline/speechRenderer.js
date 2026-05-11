@@ -14,6 +14,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { audioTempPath } = require('../audio-encryption');
 
 /**
  * Get FFmpeg path (same logic as audio-converter.js)
@@ -227,7 +228,7 @@ async function extractBatchFilterComplex(segments, fullRecordingPath, outputPath
     if (chunkEnd > segments.length) chunkEnd = segments.length;
 
     const chunkSegs = segments.slice(chunkStart, chunkEnd);
-    const chunkPath = path.join(tempDir, `batch_chunk_${Date.now()}_${chunkFiles.length}.wav`);
+    const chunkPath = audioTempPath(tempDir, `b${chunkFiles.length}`); // 'b' = batch chunk
     const chunkArgs = buildFilterArgs(chunkSegs, fullRecordingPath, chunkPath);
 
     console.log(`  [BATCH] Chunk ${chunkFiles.length + 1}: segments ${chunkStart}-${chunkEnd - 1}`);
@@ -258,7 +259,7 @@ async function extractSequential(segments, fullRecordingPath, outputPath, tempDi
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     const duration = seg.duration || (seg.endMs - seg.startMs);
-    const tempFile = path.join(tempDir, `extract_${Date.now()}_${i}.wav`);
+    const tempFile = audioTempPath(tempDir, `e${i}`); // 'e' = extract
 
     await extractSegment(fullRecordingPath, seg.startMs, duration, tempFile);
     tempFiles.push(tempFile);

@@ -17,7 +17,11 @@ let modelPath = null;
  */
 function is16kMonoPcmWav(filePath) {
   try {
-    if (!filePath?.toLowerCase().endsWith('.wav')) return false;
+    if (!filePath) return false;
+    // Accept legacy .wav and our internal audio-temp extensions (.dat / .tmp).
+    // Format validity is verified below via RIFF/WAVE magic regardless of extension.
+    const lower = filePath.toLowerCase();
+    if (!lower.endsWith('.wav') && !lower.endsWith('.dat') && !lower.endsWith('.tmp')) return false;
 
     const fd = fs.openSync(filePath, 'r');
     const header = Buffer.alloc(64);

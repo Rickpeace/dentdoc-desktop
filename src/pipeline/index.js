@@ -13,6 +13,7 @@ const fs = require('fs');
 const os = require('os');
 
 const speechRenderer = require('./speechRenderer');
+const { audioTempPath, AUDIO_TMP_EXT } = require('../audio-encryption');
 
 /**
  * Render speech-only WAV from VAD segments
@@ -27,7 +28,7 @@ async function renderSpeechOnlyFromSegments(segments, outputPath = null) {
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
-    outputPath = path.join(outputDir, `speech_only_${Date.now()}.wav`);
+    outputPath = audioTempPath(outputDir, 'p'); // 'p' = processed (speech-only)
   }
 
   const result = await speechRenderer.renderSpeechOnly(segments, outputPath);
@@ -78,14 +79,17 @@ async function processFileWithVAD(audioPath, options = {}) {
   console.log(`  Quelle: ${source}`);
   console.log(`  >>> Auto-Level: DEAKTIVIERT (Debug-Modus)`);
 
-  // Check if file needs conversion (not already WAV)
+  // Check if file needs conversion. Files we produce internally (.dat random-hex
+  // temps or legacy .wav/.tmp from older app versions) are already 16k WAV; only
+  // truly foreign formats need conversion.
   const ext = path.extname(audioPath).toLowerCase();
+  const isOurAudioTemp = ext === AUDIO_TMP_EXT || ext === '.wav' || ext === '.tmp';
   let processPath = audioPath;
 
-  if (ext !== '.wav') {
+  if (!isOurAudioTemp) {
     onProgress({ stage: 'convert', percent: 2, message: `Konvertiere ${ext.toUpperCase()}...` });
 
-    const wavPath = path.join(outputDir, `converted_${Date.now()}.wav`);
+    const wavPath = audioTempPath(outputDir, 'c'); // 'c' = converted
     processPath = await audioConverter.convertToWav16k(audioPath, wavPath);
 
     // Log temp file creation
@@ -119,7 +123,7 @@ async function processFileWithVAD(audioPath, options = {}) {
   // Render speech-only WAV
   onProgress({ stage: 'render', percent: 25, message: 'Audio wird vorbereitet...' });
 
-  const speechOnlyPath = path.join(outputDir, `speech_only_${Date.now()}.wav`);
+  const speechOnlyPath = audioTempPath(outputDir, 'p'); // 'p' = processed (speech-only)
 
   const { wavPath, speechMap } = await speechRenderer.renderSpeechOnly(segments, speechOnlyPath);
 

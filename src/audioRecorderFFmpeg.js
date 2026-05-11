@@ -18,6 +18,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { app, ipcMain } = require('electron');
+const { audioTempPath, isAudioTempName, AUDIO_TMP_EXT } = require('./audio-encryption');
 
 // Get ffmpeg path - prefer full build with WASAPI support, fallback to ffmpeg-static
 // Initialized lazily to avoid app.isPackaged being undefined during module load
@@ -194,7 +195,8 @@ function logWavHeader(wavPath) {
  * @returns {Promise<string>} - Path to 16kHz WAV file (same path, replaced)
  */
 async function downsampleTo16k(inputPath) {
-  const outputPath = inputPath.replace('.wav', '_16k.wav');
+  // DSGVO: fresh random-hex .dat filename so the file does not look like an audio recording.
+  const outputPath = audioTempPath(path.dirname(inputPath), '16k');
 
   return new Promise((resolve, reject) => {
     const args = [
@@ -446,7 +448,9 @@ function cleanupOldRecordings(tempDir) {
   try {
     const files = fs.readdirSync(tempDir);
     for (const file of files) {
-      if (file.startsWith('recording-') && (file.endsWith('.webm') || file.endsWith('.wav'))) {
+      // Match both legacy recording-* names and the new random-hex audio temps.
+      if ((file.startsWith('recording-') && (file.endsWith('.webm') || file.endsWith('.wav') || file.endsWith('.tmp')))
+          || isAudioTempName(file)) {
         const filePath = path.join(tempDir, file);
         try {
           fs.unlinkSync(filePath);
@@ -520,8 +524,9 @@ function startRecording(deleteAudio = false, deviceName = null, customOutputPath
           fs.mkdirSync(parentDir, { recursive: true });
         }
       } else {
-        const timestamp = Date.now();
-        currentFilePath = path.join(tempDir, `recording-${timestamp}.wav`);
+        // DSGVO: random-hex .dat filename so the file does not look like an audio recording.
+        // FFmpeg still writes WAV format (forced via -f wav / pcm_s16le flags below).
+        currentFilePath = audioTempPath(tempDir);
       }
 
       // Set transitional state to detect if forceStop is called during async startup
@@ -761,7 +766,7 @@ function stopRecording() {
       if (recordingSegments.length > 0) {
         try {
           const tempDir = path.join(app.getPath('temp'), 'dentdoc');
-          const finalPath = path.join(tempDir, `recording-${Date.now()}-final.wav`);
+          const finalPath = audioTempPath(tempDir, 'x'); // 'x' = concat result (internal hint, opaque to observer)
           const result = await concatenateSegments(recordingSegments, finalPath);
           recordingSegments = [];
           resolve(result);
@@ -802,7 +807,7 @@ function stopRecording() {
       if (recordingSegments.length > 1) {
         try {
           const tempDir = path.join(app.getPath('temp'), 'dentdoc');
-          const finalPath = path.join(tempDir, `recording-${Date.now()}-final.wav`);
+          const finalPath = audioTempPath(tempDir, 'x'); // 'x' = concat result (internal hint, opaque to observer)
           const result = await concatenateSegments(recordingSegments, finalPath);
           recordingSegments = [];
           recordingState = 'idle';
@@ -1100,11 +1105,10 @@ async function resumeRecording() {
 
   console.log('[Recorder] Resuming recording...');
 
-  // Generate new segment filename
+  // Generate new segment filename — random hex with internal segment number suffix.
   segmentCounter++;
   const tempDir = path.join(app.getPath('temp'), 'dentdoc');
-  const timestamp = Date.now();
-  currentFilePath = path.join(tempDir, `recording-${timestamp}-seg${segmentCounter}.wav`);
+  currentFilePath = audioTempPath(tempDir, `s${segmentCounter}`);
 
   // Start new FFmpeg process using the stored device name
   recordingState = 'starting';

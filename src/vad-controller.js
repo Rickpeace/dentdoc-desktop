@@ -22,6 +22,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { app } = require('electron');
 const audioRecorder = require('./audioRecorderFFmpeg');
+const { audioTempPath } = require('./audio-encryption');
 
 // VAD Worker Thread
 let vadWorker = null;
@@ -98,8 +99,8 @@ function getTempDir() {
 }
 
 function getFullRecordingPath() {
-  const timestamp = Date.now();
-  return path.join(getTempDir(), `full_recording_${timestamp}.wav`);
+  // DSGVO: random-hex .dat name — indistinguishable from generic cache/DB temps.
+  return audioTempPath(getTempDir());
 }
 
 /**
@@ -621,7 +622,7 @@ async function renderSpeechOnly(segments, outputPath) {
   // Extract each segment to temp file
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
-    const tempFile = path.join(tempDir, `temp_seg_${i}.wav`);
+    const tempFile = audioTempPath(tempDir, `e${i}`); // 'e' = extract
     await extractSegment(fullRecordingPath, seg.startMs, seg.endMs - seg.startMs, tempFile);
     tempFiles.push(tempFile);
   }
