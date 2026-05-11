@@ -1430,6 +1430,18 @@ async function processAudioFile(audioFilePath, options = {}) {
     }
 
     updateStatusOverlay(errorTitle, errorMessage, 'error');
+  } finally {
+    // DSGVO: clean up the standard-flow audio temp file after processing.
+    try {
+      if (audioFilePath && fs.existsSync(audioFilePath)) {
+        await audioEncryption.secureDelete(audioFilePath);
+      }
+    } catch (cleanupErr) {
+      console.warn('[processAudioFile] cleanup failed for', audioFilePath, '-', cleanupErr.message);
+    }
+    if (currentRecordingPath === audioFilePath) {
+      currentRecordingPath = null;
+    }
   }
 }
 
@@ -1464,9 +1476,10 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
   updateStatusOverlay('Verarbeitung...', 'Audio wird analysiert...', 'processing', { step: 0 });
 
-  try {
-    let wavPath;
+  // Declared outside try so the finally-cleanup can see it.
+  let wavPath = null;
 
+  try {
     if (skipVAD && liveSegments && liveSegments.length > 0) {
       // Live VAD collected markers during recording → just render speech-only from markers
       console.log(`///// SCHRITT 1: LIVE-VAD RENDER (${liveSegments.length} Segmente) /////`);
@@ -1797,6 +1810,24 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
   } finally {
     isProcessing = false;
     trayModule.updateTrayMenu();
+
+    // DSGVO: aggressively clean up audio temp files after processing (success or fail).
+    // The original recording WAV + the VAD-rendered speech_only WAV are no longer needed.
+    const filesToWipe = new Set();
+    if (audioFilePath) filesToWipe.add(audioFilePath);
+    if (wavPath && wavPath !== audioFilePath) filesToWipe.add(wavPath);
+    for (const f of filesToWipe) {
+      try {
+        if (fs.existsSync(f)) {
+          await audioEncryption.secureDelete(f);
+        }
+      } catch (cleanupErr) {
+        console.warn('[processFileWithVAD] cleanup failed for', f, '-', cleanupErr.message);
+      }
+    }
+    if (currentRecordingPath === audioFilePath) {
+      currentRecordingPath = null;
+    }
   }
 }
 
@@ -2719,6 +2750,16 @@ async function stopRecordingWithVAD() {
     tray.setImage(iconPath);
     tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
 
+    // DSGVO: clean up the recording WAV if processing was aborted before reaching processFileWithVAD.
+    try {
+      if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
+        await audioEncryption.secureDelete(currentRecordingPath);
+      }
+    } catch (cleanupErr) {
+      console.warn('[stopRecordingWithVAD] cleanup failed:', cleanupErr.message);
+    }
+    currentRecordingPath = null;
+
     updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht verarbeitet werden', 'error');
   }
 }
@@ -2740,13 +2781,22 @@ async function stopRecording() {
   if (isIphoneSession) {
     console.log('[Recording] iPhone mode active - stopping iPhone session');
     console.log('[Recording] >>> Processing with source: iphone (will use loudnorm always)');
+    let iphoneRecordingPath = null;
     try {
-      const recordingPath = await stopRecordingWithIphone();
+      iphoneRecordingPath = await stopRecordingWithIphone();
       // Process the recorded audio - source='iphone' for correct Auto-Level (always loudnorm)
-      await processAudioFile(recordingPath, { source: 'iphone' });
+      await processAudioFile(iphoneRecordingPath, { source: 'iphone' });
     } catch (error) {
       console.error('[iPhone] Stop error:', error);
       autoUploadDebugLogs('stopRecordingWithIphone-error');
+      // DSGVO: clean up iPhone recording WAV if processing was aborted.
+      try {
+        if (iphoneRecordingPath && fs.existsSync(iphoneRecordingPath)) {
+          await audioEncryption.secureDelete(iphoneRecordingPath);
+        }
+      } catch (cleanupErr) {
+        console.warn('[iPhone] cleanup failed:', cleanupErr.message);
+      }
       updateStatusOverlay('Smartphone Fehler', error.message, 'error');
     }
     return;
@@ -2812,6 +2862,16 @@ async function stopRecording() {
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(iconPath);
     tray.setToolTip('DentDoc - Bereit zum Aufnehmen');
+
+    // DSGVO: clean up the recording WAV if processing was aborted before reaching processAudioFile.
+    try {
+      if (currentRecordingPath && fs.existsSync(currentRecordingPath)) {
+        await audioEncryption.secureDelete(currentRecordingPath);
+      }
+    } catch (cleanupErr) {
+      console.warn('[stopRecording] cleanup failed:', cleanupErr.message);
+    }
+    currentRecordingPath = null;
 
     updateStatusOverlay('Fehler', error.message || 'Aufnahme konnte nicht gestoppt werden', 'error');
   }
