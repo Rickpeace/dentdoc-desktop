@@ -3536,35 +3536,7 @@ ipcMain.handle('get-transcript-detail', async (event, filePath) => {
 });
 
 // Get audio file as base64 for playback in renderer
-ipcMain.handle('get-transcript-audio', async (event, audioPath) => {
-  try {
-    if (!audioPath || !fs.existsSync(audioPath)) {
-      return { success: false, error: 'Audio-Datei nicht gefunden' };
-    }
-
-    const audioBuffer = fs.readFileSync(audioPath);
-    const base64 = audioBuffer.toString('base64');
-
-    // Determine MIME type from extension
-    const ext = path.extname(audioPath).toLowerCase();
-    const mimeTypes = {
-      '.wav': 'audio/wav',
-      '.webm': 'audio/webm',
-      '.mp3': 'audio/mpeg',
-      '.m4a': 'audio/mp4',
-      '.ogg': 'audio/ogg'
-    };
-    const mimeType = mimeTypes[ext] || 'audio/wav';
-
-    console.log('[get-transcript-audio] Loading:', audioPath, 'MIME:', mimeType);
-
-    return { success: true, data: base64, mimeType };
-  } catch (error) {
-    console.error('get-transcript-audio error:', error);
-    autoUploadDebugLogs('get-transcript-audio-error');
-    return { success: false, error: error.message };
-  }
-});
+// DSGVO: get-transcript-audio IPC handler removed — audio is no longer persisted, so there's nothing to play back.
 
 ipcMain.handle('increment-recording-count', () => {
   const todayStart = new Date();

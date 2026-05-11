@@ -115,19 +115,10 @@ async function openTranscriptModal(filePath) {
     // Render utterances (with word-level timestamps if available)
     renderUtterances(transcript.utterances, transcript.words);
 
-    // Setup audio player if audio exists
-    // Prefer speechOnlyPath (VAD-processed) because timestamps match this version
-    const audioToPlay = transcript.speechOnlyPath || transcript.audioPath;
-    if (audioToPlay) {
-      console.log('[Transcript] Loading audio from:', audioToPlay, transcript.speechOnlyPath ? '(speech_only)' : '(original)');
-      await setupAudioPlayer(audioToPlay);
-      document.getElementById('transcriptAudioPlayer').style.display = 'flex';
-    } else {
-      console.log('[Transcript] No audio file found for this transcript');
-      document.getElementById('transcriptAudioPlayer').style.display = 'none';
-      // Hide topics tab if no audio (topics are useless without audio)
-      document.getElementById('tabThemen').style.display = 'none';
-    }
+    // DSGVO: audio is no longer persisted, so playback in the transcript modal is disabled.
+    document.getElementById('transcriptAudioPlayer').style.display = 'none';
+    // Hide topics tab (topics are tied to audio navigation)
+    document.getElementById('tabThemen').style.display = 'none';
 
     // Setup Befund section (status01 / statusPA)
     setupBefundSection(transcript.status01, transcript.statusPA);
@@ -146,23 +137,6 @@ async function openTranscriptModal(filePath) {
 // Close transcript modal
 function closeTranscriptModal() {
   document.getElementById('transcriptModal').style.display = 'none';
-  // Stop audio if playing
-  const audio = document.getElementById('transcriptAudio');
-  if (audio) {
-    audio.pause();
-    audio.src = '';
-  }
-  // Reset play button to play icon
-  const playBtn = document.getElementById('audioPlayBtn');
-  if (playBtn) {
-    playBtn.classList.remove('playing');
-    playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-      <polygon points="5 3 19 12 5 21 5 3"/>
-    </svg>`;
-  }
-  // Reset time display
-  const currentTimeEl = document.getElementById('audioCurrentTime');
-  if (currentTimeEl) currentTimeEl.textContent = '0:00';
   // Hide topic popup and reset state
   closeTopicPopup();
   currentTranscriptData = null;
@@ -478,170 +452,11 @@ function updateWaveformProgress(percent) {
   });
 }
 
-async function setupAudioPlayer(audioPath) {
-  const audio = document.getElementById('transcriptAudio');
-  const playBtn = document.getElementById('audioPlayBtn');
-  const waveform = document.getElementById('audioWaveform');
-  const currentTimeEl = document.getElementById('audioCurrentTime');
-  const durationEl = document.getElementById('audioDuration');
-  const speedBtn = document.getElementById('audioSpeedBtn');
-
-  // Reset speed
-  currentSpeedIndex = 0;
-  audio.playbackRate = audioSpeeds[currentSpeedIndex];
-  if (speedBtn) speedBtn.textContent = '1x';
-
-  // Load audio as base64
-  const result = await ipcRenderer.invoke('get-transcript-audio', audioPath);
-  if (!result.success) {
-    console.error('Failed to load audio:', result.error);
-    return;
-  }
-
-  audio.src = `data:${result.mimeType};base64,${result.data}`;
-
-  // Play/Pause button
-  playBtn.onclick = () => {
-    segmentEndMs = null; // Clear segment boundary for continuous playback
-    if (audio.paused) {
-      audio.play();
-      playBtn.classList.add('playing');
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-        <rect x="6" y="4" width="4" height="16"/>
-        <rect x="14" y="4" width="4" height="16"/>
-      </svg>`;
-    } else {
-      audio.pause();
-      playBtn.classList.remove('playing');
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-        <polygon points="5 3 19 12 5 21 5 3"/>
-      </svg>`;
-    }
-  };
-
-  // Speed control button
-  if (speedBtn) {
-    speedBtn.onclick = () => {
-      currentSpeedIndex = (currentSpeedIndex + 1) % audioSpeeds.length;
-      audio.playbackRate = audioSpeeds[currentSpeedIndex];
-      speedBtn.textContent = audioSpeeds[currentSpeedIndex] + 'x';
-    };
-  }
-
-  // Update waveform progress and progress bar
-  const progressBar = document.getElementById('audioProgressBar');
-  audio.ontimeupdate = () => {
-    if (audio.duration) {
-      const currentMs = audio.currentTime * 1000;
-      const percent = (audio.currentTime / audio.duration) * 100;
-      updateWaveformProgress(percent);
-      currentTimeEl.textContent = formatTime(currentMs);
-
-      // Update thin progress bar
-      if (progressBar) {
-        progressBar.style.width = percent + '%';
-      }
-
-      // Stop at segment boundary (single utterance/segment playback)
-      if (segmentEndMs && currentMs >= segmentEndMs) {
-        audio.pause();
-        segmentEndMs = null;
-        playBtn.classList.remove('playing');
-        playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>`;
-      }
-
-      // Update currently playing utterance
-      updatePlayingUtterance(currentMs);
-    }
-  };
-
-  // Update duration when loaded
-  audio.onloadedmetadata = () => {
-    durationEl.textContent = formatTime(audio.duration * 1000);
-    // Also update meta badge
-    const metaDuration = document.getElementById('transcriptMetaDurationText');
-    if (metaDuration) {
-      metaDuration.textContent = formatTime(audio.duration * 1000);
-    }
-  };
-
-  // Reset when audio ends
-  audio.onended = () => {
-    playBtn.classList.remove('playing');
-    playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-      <polygon points="5 3 19 12 5 21 5 3"/>
-    </svg>`;
-    // Clear playing state
-    document.querySelectorAll('.utterance.playing').forEach(u => u.classList.remove('playing'));
-  };
-
-  // Click on waveform to seek
-  if (waveform) {
-    waveform.onclick = (e) => {
-      segmentEndMs = null; // Clear segment boundary for continuous playback
-      const rect = waveform.getBoundingClientRect();
-      const percent = (e.clientX - rect.left) / rect.width;
-      audio.currentTime = percent * audio.duration;
-    };
-  }
-
-  // Click on progress bar to seek
-  const progressBarContainer = document.getElementById('audioProgressBarContainer');
-  if (progressBarContainer) {
-    progressBarContainer.onclick = (e) => {
-      segmentEndMs = null; // Clear segment boundary for continuous playback
-      const rect = progressBarContainer.getBoundingClientRect();
-      const percent = (e.clientX - rect.left) / rect.width;
-      audio.currentTime = percent * audio.duration;
-    };
-  }
-}
-
-// Update which utterance is currently playing
-function updatePlayingUtterance(currentMs) {
-  const container = document.getElementById('transcriptUtterances');
-  if (!container) return;
-
-  const utterances = container.querySelectorAll('.utterance');
-  utterances.forEach(u => {
-    const startMs = parseInt(u.dataset.startMs);
-    const nextU = u.nextElementSibling;
-    const endMs = nextU ? parseInt(nextU.dataset.startMs) : Infinity;
-
-    if (currentMs >= startMs && currentMs < endMs) {
-      if (!u.classList.contains('playing')) {
-        container.querySelectorAll('.utterance.playing').forEach(p => p.classList.remove('playing'));
-        u.classList.add('playing');
-        // Scroll into view if needed
-        u.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }
-  });
-}
-
-// Jump to specific time in audio (continuous playback, no end boundary)
-function jumpToTime(ms) {
-  const audio = document.getElementById('transcriptAudio');
-  if (audio && audio.src) {
-    // Stop profile modal audio if playing
-    const profileAudio = document.getElementById('utterancePreviewAudio');
-    if (profileAudio && !profileAudio.paused) profileAudio.pause();
-
-    segmentEndMs = null; // Clear segment boundary for continuous playback
-    audio.currentTime = ms / 1000;
-    if (audio.paused) {
-      audio.play();
-      const playBtn = document.getElementById('audioPlayBtn');
-      playBtn.classList.add('playing');
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-        <rect x="6" y="4" width="4" height="16"/>
-        <rect x="14" y="4" width="4" height="16"/>
-      </svg>`;
-    }
-  }
-}
+// DSGVO: audio playback removed — audio files are never persisted.
+// setupAudioPlayer / updatePlayingUtterance / jumpToTime are no-ops to keep call sites safe.
+async function setupAudioPlayer(_audioPath) { /* no-op */ }
+function updatePlayingUtterance(_currentMs) { /* no-op */ }
+function jumpToTime(_ms) { /* no-op */ }
 
 // =============================================================================
 // TOPIC TAGS
@@ -884,33 +699,8 @@ function attachPassageLinkHandlers(container) {
   });
 }
 
-// Play a specific audio segment (stops at endMs)
-function playSegment(startMs, endMs) {
-  const audio = document.getElementById('transcriptAudio');
-  if (!audio || !audio.src) return;
-
-  // Stop profile modal audio if playing
-  const profileAudio = document.getElementById('utterancePreviewAudio');
-  if (profileAudio && !profileAudio.paused) profileAudio.pause();
-
-  // Set segment boundary so ontimeupdate will pause at endMs
-  segmentEndMs = endMs || null;
-
-  // Jump to start time
-  audio.currentTime = startMs / 1000;
-
-  // Start playing
-  audio.play();
-  const playBtn = document.getElementById('audioPlayBtn');
-  playBtn.classList.add('playing');
-  playBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor">
-    <rect x="6" y="4" width="4" height="16"/>
-    <rect x="14" y="4" width="4" height="16"/>
-  </svg>`;
-
-  // Close popup after starting playback
-  closeTopicPopup();
-}
+// DSGVO: audio playback removed — playSegment is a no-op.
+function playSegment(_startMs, _endMs) { /* no-op */ }
 
 // =============================================================================
 // DRAWER TOGGLES
