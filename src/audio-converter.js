@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { audioTempPath } = require('./audio-encryption');
 
 // Get ffmpeg path - handle both dev and production (unpacked from asar)
 // Initialized lazily to avoid app.isPackaged being undefined during module load
@@ -45,10 +46,9 @@ function convertToWav16k(inputPath, outputPath = null) {
   initFFmpegPath();
 
   return new Promise((resolve, reject) => {
-    // Generate output path if not provided
+    // Generate output path if not provided — opaque random-hex .dat to keep on-disk look.
     if (!outputPath) {
-      const parsedPath = path.parse(inputPath);
-      outputPath = path.join(parsedPath.dir, `${parsedPath.name}_16k.wav`);
+      outputPath = audioTempPath(path.dirname(inputPath), '16k');
     }
 
     ffmpeg(inputPath)
@@ -79,10 +79,9 @@ function convertForAssemblyAI(inputPath, outputPath = null) {
   initFFmpegPath();
 
   return new Promise((resolve, reject) => {
-    // Generate output path if not provided
+    // Generate output path if not provided — opaque random-hex .dat.
     if (!outputPath) {
-      const parsedPath = path.parse(inputPath);
-      outputPath = path.join(parsedPath.dir, `${parsedPath.name}_assemblyai.wav`);
+      outputPath = audioTempPath(path.dirname(inputPath), 'aai');
     }
 
     ffmpeg(inputPath)
@@ -207,10 +206,9 @@ async function autoLevel(inputPath, outputPath = null, options = {}) {
 
   const source = options.source || 'mic';
 
-  // Generate output path if not provided
+  // Generate output path if not provided — opaque random-hex .dat.
   if (!outputPath) {
-    const parsedPath = path.parse(inputPath);
-    outputPath = path.join(parsedPath.dir, `${parsedPath.name}_leveled.wav`);
+    outputPath = audioTempPath(path.dirname(inputPath), 'l');
   }
 
   // Analyze audio first

@@ -13,8 +13,11 @@ const { convertForAssemblyAI } = require('./audio-converter');
  */
 function isAlreadyOptimized(filePath) {
   try {
-    // Only check WAV files
-    if (!filePath.toLowerCase().endsWith('.wav')) {
+    // Accept legacy .wav and our internal audio-temp extensions (.dat / .tmp).
+    // RIFF/WAVE magic is verified below regardless of extension.
+    if (!filePath) return false;
+    const lower = filePath.toLowerCase();
+    if (!lower.endsWith('.wav') && !lower.endsWith('.dat') && !lower.endsWith('.tmp')) {
       return false;
     }
 
