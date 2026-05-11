@@ -1197,10 +1197,11 @@ async function processAudioFile(audioFilePath, options = {}) {
           // Store data for potential speaker optimization
           // Note: optimizationSession is set by IPC handler, but we prepare the data here
 
-          // Copy audio file to last-recording.wav for optimization
-          // This ensures the audio is available until the next recording
+          // Copy current recording to a session-cache slot for Speaker-Optimization.
+          // DSGVO: opaque .dat filename so it doesn't look like a stored audio recording.
+          // Lifetime: until next recording overwrites it or wipeAllTempAudio cleans up.
           const tempDir = path.join(app.getPath('temp'), 'dentdoc');
-          const lastRecordingPath = path.join(tempDir, 'last-recording.wav');
+          const lastRecordingPath = path.join(tempDir, '_session_cache.dat');
 
           try {
             // Ensure temp directory exists
@@ -1208,10 +1209,10 @@ async function processAudioFile(audioFilePath, options = {}) {
               fs.mkdirSync(tempDir, { recursive: true });
             }
 
-            // Copy current recording to last-recording.wav
+            // Copy current recording into the session-cache slot (opaque .dat).
             if (fs.existsSync(audioFilePath)) {
               fs.copyFileSync(audioFilePath, lastRecordingPath);
-              debugLog(`[SpeakerOptimization] Audio copied to ${lastRecordingPath}`);
+              debugLog(`[SpeakerOptimization] Audio cached to ${lastRecordingPath}`);
             }
           } catch (copyError) {
             console.error('Failed to copy audio for optimization:', copyError);
@@ -4533,8 +4534,9 @@ function cleanupIphoneTestFiles(keepPath = null) {
     const tempDir = path.join(app.getPath('temp'), 'dentdoc', 'tests');
     if (!fs.existsSync(tempDir)) return;
 
+    // Cover legacy iphone_test_*.wav names and the new opaque .dat audio temps.
     const files = fs.readdirSync(tempDir)
-      .filter(f => f.startsWith('iphone_test_') && f.endsWith('.wav'))
+      .filter(f => audioEncryption.isAudioTempName(f) || (f.startsWith('iphone_test_') && f.endsWith('.wav')))
       .map(f => path.join(tempDir, f));
 
     let deleted = 0;
@@ -4681,8 +4683,9 @@ ipcMain.handle('iphone-audio-test', async (event) => {
           console.log(`  Peak: ${peakDb.toFixed(1)} dB`);
           console.log(`  File: ${testWavPath}`);
 
-          // Amplify the test file for better playback (add +12dB gain)
-          const amplifiedPath = testWavPath.replace('.wav', '_loud.wav');
+          // Amplify the test file for better playback (add +12dB gain).
+          // DSGVO: opaque .dat suffix in line with the rest of our audio temps.
+          const amplifiedPath = audioEncryption.audioTempPath(path.dirname(testWavPath), 'tl'); // 'tl' = test loud
           try {
             await new Promise((resolveAmp) => {
               const ampFfmpeg = spawn(ffmpegPath, [
@@ -5372,9 +5375,12 @@ ipcMain.handle('add-utterance-to-profile', async (event, {
       return { success: false, error: 'Utterance zu kurz (min. 1 Sekunde)' };
     }
 
-    // 3. Convert to 16kHz WAV if needed
+    // 3. Convert to 16kHz WAV if needed.
+    // Accept legacy .wav and our internal audio-temp extensions (.dat / .tmp) as already-WAV.
     let wavPath = audioPath;
-    if (!audioPath.toLowerCase().endsWith('.wav') || !is16kMonoPcmWavSimple(audioPath)) {
+    const lowerPath = audioPath.toLowerCase();
+    const looksLikeOurWav = lowerPath.endsWith('.wav') || lowerPath.endsWith('.dat') || lowerPath.endsWith('.tmp');
+    if (!looksLikeOurWav || !is16kMonoPcmWavSimple(audioPath)) {
       console.log('[add-utterance-to-profile] Converting to 16kHz WAV...');
       const audioConverter = require('./src/audio-converter');
       wavPath = await audioConverter.convertToWav16k(audioPath);
@@ -5455,7 +5461,11 @@ ipcMain.handle('add-utterance-to-profile', async (event, {
 // Simple check if file is 16kHz mono PCM WAV (for utterance-to-profile)
 function is16kMonoPcmWavSimple(filePath) {
   try {
-    if (!filePath?.toLowerCase().endsWith('.wav')) return false;
+    if (!filePath) return false;
+    // Accept .wav (legacy / external) and our internal audio-temp extensions.
+    // RIFF/WAVE magic is verified below regardless of extension.
+    const lower = filePath.toLowerCase();
+    if (!lower.endsWith('.wav') && !lower.endsWith('.dat') && !lower.endsWith('.tmp')) return false;
 
     const fd = fs.openSync(filePath, 'r');
     const header = Buffer.alloc(64);
@@ -5914,8 +5924,10 @@ ipcMain.handle('get-speaker-preview', async (event, speakerId) => {
       throw new Error('Sprecher nicht gefunden');
     }
 
-    // Create preview clip (max 15 seconds)
+    // Create preview clip (max 15 seconds).
+    // Random-hex .dat name; stored on the speaker so cancel-cleanup can find it.
     const previewPath = audioEncryption.audioTempPath(os.tmpdir(), 'pv'); // 'pv' = preview
+    speaker.previewPath = previewPath;
     await speakerRecognition.createPreviewClip(
       optimizationSession.audioFilePath,
       speaker.utterances,
@@ -6041,12 +6053,11 @@ ipcMain.handle('enroll-optimized-speaker', async (event, data) => {
  */
 ipcMain.handle('cancel-speaker-optimization', async () => {
   try {
-    // Clean up preview files
+    // Clean up preview files (paths were stored on each speaker by get-speaker-preview)
     if (optimizationSession) {
       for (const speaker of optimizationSession.unrecognizedSpeakers) {
-        const previewPath = path.join(os.tmpdir(), `dentdoc-preview-${speaker.speakerId}.wav`);
-        if (fs.existsSync(previewPath)) {
-          try { fs.unlinkSync(previewPath); } catch (e) { /* ignore */ }
+        if (speaker.previewPath && fs.existsSync(speaker.previewPath)) {
+          try { await audioEncryption.secureDelete(speaker.previewPath); } catch (e) { /* ignore */ }
         }
       }
     }

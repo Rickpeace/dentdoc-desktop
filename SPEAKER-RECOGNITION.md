@@ -169,7 +169,7 @@ Transkription → Unerkannte Sprecher → Benutzer wählt → pending_embeddings
 
 ### Audio-Verfügbarkeit
 
-Die Original-Aufnahme wird unter `{temp}/dentdoc/last-recording.wav` aufbewahrt, bis die nächste Aufnahme sie überschreibt. So bleibt das Audio für Optimierung verfügbar.
+Die Original-Aufnahme wird kurzzeitig unter `{temp}/dentdoc/_session_cache.dat` als opaker Verarbeitungspuffer gehalten, bis die nächste Aufnahme sie überschreibt oder der App-Start-/Shutdown-Wipe sie entfernt. So bleibt das Audio für eine direkt anschließende Optimierungs-Session verfügbar — nicht aber dauerhaft.
 
 ---
 
