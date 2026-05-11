@@ -2813,15 +2813,6 @@ function createSettingsTour() {
         }
       },
       {
-        element: '#settings-section-recordings',
-        popover: {
-          title: 'Aufnahmen speichern',
-          description: 'Optional können Sie die Audio-Aufnahmen dauerhaft speichern für Qualitätskontrolle oder spätere Referenz.',
-          side: 'bottom',
-          align: 'start'
-        }
-      },
-      {
         element: '#settings-section-appearance',
         popover: {
           title: 'Erscheinungsbild',
