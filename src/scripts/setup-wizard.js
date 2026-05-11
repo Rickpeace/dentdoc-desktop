@@ -21,8 +21,7 @@ class SetupWizard {
       microphoneSource: 'desktop', // 'desktop' or 'iphone'
       shortcut: 'F9',
       autoExport: true,
-      transcriptPath: '',
-      keepAudio: true // Enabled by default for full functionality
+      transcriptPath: ''
     };
 
     // Audio test state - uses shared MicTester from audio-utils
@@ -63,7 +62,6 @@ class SetupWizard {
       this.settings.transcriptPath = settings.transcriptPath || '';
       this.settings.microphoneId = settings.microphoneId || null; // Windows device name
       this.settings.autoExport = settings.autoExport !== false;
-      this.settings.keepAudio = settings.keepAudio !== false; // Default true
 
       // Check if user is on free trial (for Trial info step)
       try {
@@ -207,12 +205,6 @@ class SetupWizard {
       this.settings.autoExport = toggle.classList.contains('active');
       document.getElementById('wizardTranscriptPathSection').style.display =
         this.settings.autoExport ? 'block' : 'none';
-    });
-
-    document.getElementById('wizardAudioToggle')?.addEventListener('click', () => {
-      const toggle = document.getElementById('wizardAudioToggle');
-      toggle.classList.toggle('active');
-      this.settings.keepAudio = toggle.classList.contains('active');
     });
 
     // Path buttons
@@ -1706,8 +1698,7 @@ class SetupWizard {
     const items = {
       'summaryMic': this.getMicrophoneName(),
       'summaryShortcut': this.settings.shortcut,
-      'summaryTranscripts': this.settings.autoExport ? 'Aktiviert' : 'Deaktiviert',
-      'summaryAudio': this.settings.keepAudio ? 'Aktiviert' : 'Deaktiviert'
+      'summaryTranscripts': this.settings.autoExport ? 'Aktiviert' : 'Deaktiviert'
     };
 
     Object.entries(items).forEach(([id, value]) => {
@@ -1735,8 +1726,8 @@ class SetupWizard {
   }
 
   shouldSkipStep(step) {
-    // Skip "Where to save" (step 4) if both storage options are off
-    if (step === 4 && !this.settings.autoExport && !this.settings.keepAudio) {
+    // Skip "Where to save" (step 4) if transcript saving is off
+    if (step === 4 && !this.settings.autoExport) {
       return true;
     }
     // Skip Trial step (step 7) if user is not on free trial
@@ -1833,8 +1824,7 @@ class SetupWizard {
         microphoneSource: this.settings.microphoneSource,  // 'desktop' | 'iphone' | 'none'
         shortcut: this.settings.shortcut,
         autoExport: this.settings.autoExport,
-        transcriptPath: this.settings.transcriptPath,
-        keepAudio: this.settings.keepAudio
+        transcriptPath: this.settings.transcriptPath
       });
 
       // Mark wizard as completed
@@ -1878,8 +1868,7 @@ async function restartSetupWizard() {
         microphoneId: null,
         shortcut: 'F9',
         autoExport: true,
-        transcriptPath: '',
-        keepAudio: true
+        transcriptPath: ''
       };
 
       // Load current settings
@@ -1888,7 +1877,6 @@ async function restartSetupWizard() {
       window.setupWizard.settings.transcriptPath = settings.transcriptPath || '';
       window.setupWizard.settings.microphoneId = settings.microphoneId || null;
       window.setupWizard.settings.autoExport = settings.autoExport !== false;
-      window.setupWizard.settings.keepAudio = settings.keepAudio !== false;
 
       // Check trial status
       try {
@@ -1909,12 +1897,8 @@ async function restartSetupWizard() {
 
       // Reset toggles
       const transcriptToggle = document.getElementById('wizardTranscriptToggle');
-      const audioToggle = document.getElementById('wizardAudioToggle');
       if (transcriptToggle) {
         transcriptToggle.classList.toggle('active', window.setupWizard.settings.autoExport);
-      }
-      if (audioToggle) {
-        audioToggle.classList.toggle('active', window.setupWizard.settings.keepAudio);
       }
 
       // Show wizard at step 0

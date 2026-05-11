@@ -753,16 +753,16 @@ async function checkTranscriptFolderBeforeRecording() {
  * @param {string} transcript - Full transcript text
  * @param {Object} speakerMapping - Speaker mapping object
  * @param {Object} options - Save options
- * @param {string} options.tempAudioPath - Path to temporary audio file (speech_only after VAD)
- * @param {string} options.originalAudioPath - Path to original audio file (before VAD, optional)
+ * @param {string} options.tempAudioPath - Path to temporary audio file (only used to derive job ID)
  * @param {boolean} options.saveTranscript - Whether to save transcript
- * @param {boolean} options.saveAudio - Whether to save audio
+ *
+ * DSGVO: audio is NEVER saved permanently. Only transcript text + JSON metadata are persisted.
  */
 function saveRecordingFiles(baseFolderPath, summary, transcript, speakerMapping = null, options = {}) {
-  const { tempAudioPath = null, originalAudioPath = null, saveTranscript = true, saveAudio = false, utterances = null, words = null, topicSegments = null, passages = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, zDocumentation = null } = options;
+  const { tempAudioPath = null, saveTranscript = true, utterances = null, words = null, topicSegments = null, passages = null, reconstructedTranscript = null, transcriptWithSpeakers = null, recognizedSpeakers = [], status01 = null, statusPA = null, zDocumentation = null } = options;
 
   // Nothing to save
-  if (!saveTranscript && !saveAudio) {
+  if (!saveTranscript) {
     return;
   }
 
@@ -931,31 +931,12 @@ ${finalTranscriptText}
       }
     }
 
-    // Save audio if enabled and source exists
-    if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) {
-      // Save speech_only (after VAD) with suffix
-      const audioExt = path.extname(tempAudioPath) || '.wav';
-      const speechOnlyPath = path.join(folderPath, `${baseFilename}_speech_only${audioExt}`);
-      fs.copyFileSync(tempAudioPath, speechOnlyPath);
-
-      // Save original audio (before VAD) as main file - this is the unmodified recording
-      if (originalAudioPath && fs.existsSync(originalAudioPath)) {
-        const originalExt = path.extname(originalAudioPath) || '.wav';
-        const originalPath = path.join(folderPath, `${baseFilename}${originalExt}`);
-        fs.copyFileSync(originalAudioPath, originalPath);
-      }
-    }
+    // DSGVO: audio is intentionally never persisted to disk.
   });
 
   // Nice formatted log for saved files
   const savedItems = [];
   if (saveTranscript) savedItems.push('Transkript');
-  if (saveAudio && tempAudioPath && fs.existsSync(tempAudioPath)) {
-    savedItems.push('Audio (original)');
-    if (originalAudioPath && fs.existsSync(originalAudioPath)) {
-      savedItems.push('Audio (speech_only)');
-    }
-  }
   if (savedItems.length > 0) {
     const folderName = path.basename(targetFolders[0]);
     console.log('');
@@ -1060,7 +1041,6 @@ async function selectAndTranscribeAudioFile() {
   console.log('Selected audio file:', audioFilePath);
   debugLog(`Selected audio file: ${audioFilePath}`);
 
-  // Set currentRecordingPath so audio can be saved if keepAudio is enabled
   currentRecordingPath = audioFilePath;
 
   // Process the selected audio file
@@ -1308,8 +1288,7 @@ async function processAudioFile(audioFilePath, options = {}) {
     // User already has their documentation in clipboard at this point
 
     const autoExport = store.get('autoExport', true);
-    const keepAudio = store.get('keepAudio', true);
-    console.log('Save settings - autoExport:', autoExport, 'keepAudio:', keepAudio);
+    console.log('Save settings - autoExport:', autoExport);
     console.log('currentRecordingPath:', currentRecordingPath);
 
     // Run background tasks without blocking
@@ -1346,12 +1325,11 @@ async function processAudioFile(audioFilePath, options = {}) {
       // Save files with all data (including background results)
       const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
       const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
-      if ((autoExport || keepAudio) && finalTranscript) {
+      if (autoExport && finalTranscript) {
         try {
           saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
             tempAudioPath: currentRecordingPath,
             saveTranscript: autoExport,
-            saveAudio: keepAudio,
             utterances: utterances,
             words: words,
             topicSegments: topicSegments,
@@ -1735,7 +1713,6 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
 
     // === BACKGROUND TASKS (run async, don't block success) ===
     const autoExport = store.get('autoExport', true);
-    const keepAudio = store.get('keepAudio', true);
 
     (async () => {
       let topicSegments = null;
@@ -1769,14 +1746,12 @@ async function processFileWithVAD(audioFilePath, token, options = {}) {
       const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
       const transcriptPath = store.get('transcriptPath') || defaultTranscriptPath;
 
-      if ((autoExport || keepAudio) && finalTranscript) {
+      if (autoExport && finalTranscript) {
         console.log('  [Background] Speichere Dateien...');
         try {
           saveRecordingFiles(transcriptPath, documentation, finalTranscript, currentSpeakerMapping, {
             tempAudioPath: wavPath,
-            originalAudioPath: audioFilePath,
             saveTranscript: autoExport,
-            saveAudio: keepAudio,
             utterances: utterances,
             words: words,
             topicSegments: topicSegments,
@@ -1902,9 +1877,8 @@ async function startRecording() {
 
   // Check if transcript folder is accessible (only if we're saving something)
   const shouldSaveTranscript = store.get('autoExport', true);
-  const shouldSaveAudio = store.get('keepAudio', true);
 
-  if (shouldSaveTranscript || shouldSaveAudio) {
+  if (shouldSaveTranscript) {
     const folderOk = await checkTranscriptFolderBeforeRecording();
     if (!folderOk) {
       console.log('[Recording] User cancelled due to folder access issue');
@@ -1943,13 +1917,9 @@ async function startRecording() {
     return;
   }
 
-  // Get keepAudio setting - cleanup is handled by audioRecorder
-  // keepAudio: false (default) = delete recordings, true = keep them
-  const keepAudio = store.get('keepAudio', true);
-  const deleteAudio = !keepAudio;
+  // DSGVO: temp audio is always cleaned up (encrypted, never persisted permanently)
+  const deleteAudio = true;
   const microphoneName = store.get('microphoneName') || null;
-  console.log('keepAudio setting:', keepAudio, '-> deleteAudio:', deleteAudio);
-  debugLog(`keepAudio setting: ${keepAudio} -> deleteAudio: ${deleteAudio}`);
 
   try {
     // Check if recorder is busy (e.g., mic test running)
@@ -4242,7 +4212,6 @@ ipcMain.handle('get-settings', async () => {
     transcriptPath: storedTranscriptPath !== undefined && storedTranscriptPath !== '' ? storedTranscriptPath : defaultTranscriptPath,
     autoClose: store.get('autoCloseOverlay', false),
     autoExport: store.get('autoExport', true),
-    keepAudio: store.get('keepAudio', true),
     theme: store.get('theme', 'dark'),
     vadEnabled: store.get('vadEnabled', true)  // VAD enabled by default
   };
@@ -4277,11 +4246,6 @@ ipcMain.handle('save-settings', async (event, settings) => {
   // Save auto-export setting
   if (settings.autoExport !== undefined) {
     store.set('autoExport', settings.autoExport);
-  }
-
-  // Save keep audio setting
-  if (settings.keepAudio !== undefined) {
-    store.set('keepAudio', settings.keepAudio);
   }
 
   // Save theme

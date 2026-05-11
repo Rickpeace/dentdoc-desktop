@@ -1125,7 +1125,6 @@ async function loadSettingsView() {
   document.getElementById('settingsTranscriptPath').value = settings.transcriptPath || '';
   document.getElementById('settingsAutoCloseCheckbox').checked = settings.autoClose || false;
   document.getElementById('settingsAutoExportCheckbox').checked = settings.autoExport || false;
-  document.getElementById('settingsKeepAudioCheckbox').checked = settings.keepAudio || false;
   document.getElementById('settingsVadEnabled').checked = true; // VAD always enabled
 
   // iPhone microphone settings
@@ -2068,9 +2067,6 @@ document.getElementById('settingsOpenTranscriptFolderBtn').addEventListener('cli
 // Settings change tracking
 document.getElementById('settingsAutoExportCheckbox').addEventListener('change', (e) => {
   autoSaveSetting({ autoExport: e.target.checked });
-});
-document.getElementById('settingsKeepAudioCheckbox').addEventListener('change', (e) => {
-  autoSaveSetting({ keepAudio: e.target.checked });
 });
 document.getElementById('settingsAutoCloseCheckbox').addEventListener('change', (e) => {
   autoSaveSetting({ autoClose: e.target.checked });
