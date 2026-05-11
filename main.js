@@ -38,6 +38,7 @@ process.on('unhandledRejection', (reason, promise) => {
 const Store = require('electron-store');
 const audioRecorder = require('./src/audioRecorderFFmpeg');
 const apiClient = require('./src/apiClient');
+const audioEncryption = require('./src/audio-encryption');
 const vadController = require('./src/vad-controller');
 const { showNotification, showCustomNotification, initNotificationIPC } = require('./src/notifications');
 const session = require('./src/session');
@@ -149,12 +150,11 @@ debugLog(`Is packaged: ${app && typeof app.isPackaged !== 'undefined' ? app.isPa
 debugLog(`Temp dir: ${os.tmpdir()}`);
 debugLog(`Debug log path: ${DEBUG_LOG}`);
 
-// Cleanup old temp files on startup (files older than 2 hours)
-function cleanupOldTempFiles() {
-  const MAX_AGE_HOURS = 2;
-  const MAX_AGE_MS = MAX_AGE_HOURS * 60 * 60 * 1000;
-  const now = Date.now();
-
+// DSGVO: Wipe ALL audio temp files (no age threshold). Run on startup and shutdown.
+// Combined with in-RAM encryption key (lost on restart), any leftover .enc files
+// from crashes are already undecryptable; this also removes plain temps from
+// active processing windows that didn't get cleaned up.
+function wipeAllTempAudio() {
   const tempDirs = [
     path.join(os.tmpdir(), 'dentdoc'),
     path.join(os.tmpdir(), 'dentdoc', 'vad-recording'),
@@ -167,82 +167,47 @@ function cleanupOldTempFiles() {
   let totalErrors = 0;
 
   for (const tempDir of tempDirs) {
-    if (!fs.existsSync(tempDir)) {
-      continue;
-    }
-
+    if (!fs.existsSync(tempDir)) continue;
     try {
-      const files = fs.readdirSync(tempDir);
-
-      for (const file of files) {
+      for (const file of fs.readdirSync(tempDir)) {
         const filePath = path.join(tempDir, file);
-
         try {
           const stats = fs.statSync(filePath);
-
-          // Skip directories (we handle them separately)
-          if (stats.isDirectory()) {
-            continue;
-          }
-
-          const fileAge = now - stats.mtimeMs;
-
-          // Only delete files older than MAX_AGE_HOURS
-          if (fileAge > MAX_AGE_MS) {
-            fs.unlinkSync(filePath);
-            totalDeleted++;
-            debugLog(`[Cleanup] Deleted old temp file: ${filePath} (age: ${Math.round(fileAge / 1000 / 60)} min)`);
-          }
+          if (stats.isDirectory()) continue;
+          fs.unlinkSync(filePath);
+          totalDeleted++;
         } catch (fileError) {
-          // File might be in use or already deleted
           totalErrors++;
-          debugLog(`[Cleanup] Could not delete ${filePath}: ${fileError.message}`);
+          debugLog(`[Wipe] Could not delete ${filePath}: ${fileError.message}`);
         }
       }
     } catch (dirError) {
-      debugLog(`[Cleanup] Error reading ${tempDir}: ${dirError.message}`);
+      debugLog(`[Wipe] Error reading ${tempDir}: ${dirError.message}`);
     }
   }
 
-  // Also clean up dentdoc-preview-*.wav files in temp root
+  // Also wipe dentdoc-* files in temp root (preview, etc.)
   try {
     const tempRoot = os.tmpdir();
-    const rootFiles = fs.readdirSync(tempRoot);
-
-    for (const file of rootFiles) {
-      // Only clean up dentdoc-related files
-      if (!file.startsWith('dentdoc-preview-') && !file.startsWith('dentdoc-')) {
-        continue;
-      }
-
+    for (const file of fs.readdirSync(tempRoot)) {
+      if (!file.startsWith('dentdoc-preview-') && !file.startsWith('dentdoc-')) continue;
       const filePath = path.join(tempRoot, file);
-
       try {
         const stats = fs.statSync(filePath);
-
-        if (stats.isDirectory()) {
-          continue; // Skip the dentdoc folder itself
-        }
-
-        const fileAge = now - stats.mtimeMs;
-
-        if (fileAge > MAX_AGE_MS) {
-          fs.unlinkSync(filePath);
-          totalDeleted++;
-          debugLog(`[Cleanup] Deleted old temp file: ${filePath} (age: ${Math.round(fileAge / 1000 / 60)} min)`);
-        }
+        if (stats.isDirectory()) continue;
+        fs.unlinkSync(filePath);
+        totalDeleted++;
       } catch (fileError) {
         totalErrors++;
-        debugLog(`[Cleanup] Could not delete ${filePath}: ${fileError.message}`);
       }
     }
   } catch (rootError) {
-    debugLog(`[Cleanup] Error reading temp root: ${rootError.message}`);
+    debugLog(`[Wipe] Error reading temp root: ${rootError.message}`);
   }
 
   if (totalDeleted > 0 || totalErrors > 0) {
-    console.log(`[Cleanup] Startup cleanup: ${totalDeleted} old temp files deleted, ${totalErrors} errors`);
-    debugLog(`[Cleanup] Startup cleanup complete: ${totalDeleted} deleted, ${totalErrors} errors`);
+    console.log(`[Wipe] ${totalDeleted} audio temp files deleted, ${totalErrors} errors`);
+    debugLog(`[Wipe] complete: ${totalDeleted} deleted, ${totalErrors} errors`);
   }
 }
 
@@ -295,7 +260,6 @@ function releaseCurrentRecordingSlot() {
   currentRecordingSlotId = null;
   currentRecordingSlotToken = null;
 }
-let savedAudioPathInBackup = null; // Path to audio saved in "Fehlgeschlagen" folder (deleted after successful save)
 let currentEnrollmentPath = null;
 let currentEnrollmentName = null;
 let currentEnrollmentRole = null;
@@ -781,80 +745,6 @@ async function checkTranscriptFolderBeforeRecording() {
 }
 
 /**
- * Saves audio file immediately after recording stops (before transcription).
- * This ensures audio is preserved even if transcription fails.
- * @param {string} tempAudioPath - Path to temporary audio file
- * @returns {string|null} Path where audio was saved, or null if not saved
- */
-function saveAudioImmediately(tempAudioPath) {
-  // Always save backup to "Fehlgeschlagen" folder, regardless of settings
-  // This ensures audio is preserved if transcription fails
-  const saveStartTime = Date.now();
-  console.log('[TIMING] saveAudioImmediately START - tempAudioPath:', tempAudioPath);
-
-  if (!tempAudioPath) {
-    console.log('Audio save skipped - tempAudioPath is null/undefined');
-    return null;
-  }
-
-  if (!fs.existsSync(tempAudioPath)) {
-    console.log('Audio save skipped - file does not exist:', tempAudioPath);
-    return null;
-  }
-
-  const defaultTranscriptPath = path.join(app.getPath('documents'), 'DentDoc', 'Transkripte');
-  const baseFolderPath = store.get('transcriptPath') || defaultTranscriptPath;
-  console.log('Audio will be saved to base folder:', baseFolderPath);
-
-  // Extract unique job ID from temp audio filename (e.g., "recording-1705312345678.webm" -> "1705312345678")
-  const tempFilename = path.basename(tempAudioPath, path.extname(tempAudioPath));
-  const jobId = tempFilename.replace('recording-', '');
-
-  // Create filename with date and time + job ID for uniqueness
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-
-  // Save to "Fehlgeschlagen" folder (backup in case transcription fails)
-  // This entire block is wrapped in try/catch so folder issues don't crash the flow
-  try {
-    const tempFolder = path.join(baseFolderPath, 'Fehlgeschlagen');
-    if (!fs.existsSync(tempFolder)) {
-      fs.mkdirSync(tempFolder, { recursive: true });
-      console.log('Created folder:', tempFolder);
-    }
-
-    // Get file extension from source
-    const ext = path.extname(tempAudioPath) || '.webm';
-    const baseFilename = `${year}-${month}-${day}_${hours}-${minutes}_${jobId}`;
-    const audioPath = path.join(tempFolder, `${baseFilename}${ext}`);
-
-    // Get file size before copy
-    const fileSize = fs.statSync(tempAudioPath).size;
-    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
-    console.log(`[TIMING] File copy starting - size: ${fileSizeMB} MB`);
-
-    fs.copyFileSync(tempAudioPath, audioPath);
-
-    const copyDuration = ((Date.now() - saveStartTime) / 1000).toFixed(2);
-    console.log(`[TIMING] saveAudioImmediately DONE in ${copyDuration}s - saved to: ${audioPath}`);
-    savedAudioPathInBackup = audioPath; // Store for later deletion
-    return audioPath;
-  } catch (error) {
-    const copyDuration = ((Date.now() - saveStartTime) / 1000).toFixed(2);
-    console.warn(`[Backup] Audio backup skipped - folder not accessible: ${error.message}`);
-    console.log(`[TIMING] saveAudioImmediately skipped after ${copyDuration}s (folder issue)`);
-    debugLog(`[Backup] Audio backup failed: ${baseFolderPath} - ${error.code}: ${error.message}`);
-    // Don't crash - just skip the backup. The recording will still be processed.
-    // Note: autoUploadDebugLogs is called from checkTranscriptFolderBeforeRecording if user continued
-    return null;
-  }
-}
-
-/**
  * Saves transcript and/or audio to the user's configured folder.
  * Files are organized by doctor name (from speaker recognition) in subfolders.
  * Both files share the same base filename for easy association.
@@ -1078,15 +968,6 @@ ${finalTranscriptText}
     console.log('');
   }
 
-  // Delete backup audio from "Fehlgeschlagen" folder after successful transcription
-  if (savedAudioPathInBackup && fs.existsSync(savedAudioPathInBackup)) {
-    try {
-      fs.unlinkSync(savedAudioPathInBackup);
-      savedAudioPathInBackup = null;
-    } catch (err) {
-      // Ignore cleanup errors
-    }
-  }
 }
 
 function createLoginWindow() {
@@ -1521,23 +1402,6 @@ async function processAudioFile(audioFilePath, options = {}) {
   } catch (error) {
     console.error('Audio file processing error:', error);
     debugLog('Audio file processing error: ' + error.message);
-
-    // Only delete temporary audio for "no speech detected" error
-    // For other errors, keep the audio as backup in "Fehlgeschlagen" folder
-    if (error.message && error.message.includes('Keine Sprache erkannt')) {
-      if (savedAudioPathInBackup && fs.existsSync(savedAudioPathInBackup)) {
-        try {
-          fs.unlinkSync(savedAudioPathInBackup);
-          console.log('Deleted backup audio from Fehlgeschlagen folder (no speech detected):', savedAudioPathInBackup);
-          savedAudioPathInBackup = null;
-        } catch (err) {
-          console.error('Failed to delete temporary audio:', err);
-        }
-      }
-    } else if (savedAudioPathInBackup) {
-      console.log('Keeping backup audio in Fehlgeschlagen folder:', savedAudioPathInBackup);
-      savedAudioPathInBackup = null; // Reset variable but keep file
-    }
 
     isProcessing = false;
     trayModule.updateTrayMenu();
@@ -2837,9 +2701,7 @@ async function stopRecordingWithVAD() {
     tray.setToolTip('DentDoc - Verarbeitung läuft...');
     // Recording is now 16kHz directly - no downsample needed
 
-    // Save audio immediately (before VAD processing) - this can block on network drives!
-    updateStatusOverlay('Verarbeitung läuft', 'Audio wird gespeichert...', 'processing');
-    saveAudioImmediately(currentRecordingPath);
+    updateStatusOverlay('Verarbeitung läuft', 'Wird verarbeitet...', 'processing');
 
     // Get live VAD markers (collected during recording via sample-based timeline)
     const liveSegments = vadController.stopMarkerCollection(currentRecordingPath);
@@ -2910,8 +2772,6 @@ async function stopRecording() {
     console.log('[Recording] >>> Processing with source: iphone (will use loudnorm always)');
     try {
       const recordingPath = await stopRecordingWithIphone();
-      // Save audio immediately
-      saveAudioImmediately(recordingPath);
       // Process the recorded audio - source='iphone' for correct Auto-Level (always loudnorm)
       await processAudioFile(recordingPath, { source: 'iphone' });
     } catch (error) {
@@ -2957,9 +2817,6 @@ async function stopRecording() {
     // Reset tray icon
     const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
     tray.setImage(iconPath);
-
-    // Save audio immediately (before transcription) so it's preserved if something fails
-    saveAudioImmediately(currentRecordingPath);
 
     // Process the recorded audio file (same as manual file upload)
     await processAudioFile(currentRecordingPath);
@@ -6725,8 +6582,12 @@ ipcMain.handle('get-app-version', () => {
 });
 
 app.whenReady().then(() => {
-  // Cleanup old temp files from previous sessions
-  cleanupOldTempFiles();
+  // DSGVO: Generate per-session in-RAM encryption key for audio temp files.
+  // Never persisted; lost on crash/restart → leftover .enc files become undecryptable.
+  audioEncryption.initKey();
+
+  // Wipe all audio temp files from prior sessions (no age threshold).
+  wipeAllTempAudio();
 
   // TODO: Remove this line after testing tray balloon
   store.delete('hasSeenTrayHint');
@@ -6978,6 +6839,9 @@ app.on('will-quit', async () => {
 
   // Clean up mic test file
   cleanupMicTestFile();
+
+  // DSGVO: wipe all audio temp files on shutdown
+  wipeAllTempAudio();
 });
 
 // Handle second instance - open dashboard window when user clicks shortcut while app is running
