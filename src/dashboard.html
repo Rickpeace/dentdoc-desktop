@@ -2225,8 +2225,79 @@ REIHENFOLGE
         </div>
       </div>
 
-      <!-- Step 5: DSGVO -->
+      <!-- Step 5: Patient-Info (Anamnese-Hinweis) -->
       <div class="wizard-step" data-step="5">
+        <div class="wizard-step-header">
+          <div class="wizard-step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <h2>Patienten informieren</h2>
+          <p>Bevor Sie DentDoc einsetzen, müssen Patienten über die Nutzung informiert sein.</p>
+        </div>
+
+        <div class="wizard-info" style="background: rgba(251, 146, 60, 0.1); border-color: rgba(251, 146, 60, 0.3);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <p style="color: var(--text-primary);"><strong>Wichtig:</strong> Ohne diese Information darf DentDoc nicht eingesetzt werden. Wählen Sie eine der beiden Optionen:</p>
+        </div>
+
+        <div class="wizard-card">
+          <div class="wizard-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <path d="M14 2v6h6"/>
+            </svg>
+            <h3>Option A: Schriftlich im Anamneseformular</h3>
+          </div>
+
+          <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: var(--space-2);">Fügen Sie diesen Hinweis in Ihr Anamneseformular ein:</p>
+
+          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-3); font-size: 0.875rem; line-height: 1.6; color: var(--text-primary);">
+            Wir nutzen eine KI-gestützte Dokumentationsassistenz. Das Behandlungsgespräch wird in Text umgewandelt; Audio wird nicht dauerhaft gespeichert. Sie können dem jederzeit widersprechen.
+          </div>
+
+          <div style="text-align: center; margin-top: var(--space-4);">
+            <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardCopyAnamneseBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              Text kopieren
+            </button>
+            <span id="wizardAnamneseCopyStatus" style="display: none; margin-left: var(--space-2); color: #22c55e; font-size: 0.8125rem;">Kopiert!</span>
+          </div>
+        </div>
+
+        <div class="wizard-card" style="margin-top: var(--space-3);">
+          <div class="wizard-card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <h3>Option B: Mündliche Information</h3>
+          </div>
+
+          <p style="color: var(--text-secondary); font-size: 0.875rem; margin-top: var(--space-2);">Alternativ: Informieren Sie den Patienten vor jeder Behandlung mündlich, z. B.:</p>
+
+          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-3); font-size: 0.875rem; line-height: 1.6; color: var(--text-secondary); font-style: italic;">
+            „Wir dokumentieren das Behandlungsgespräch mit einer KI-Assistenz; Audio wird nicht aufgenommen. Sind Sie damit einverstanden?"
+          </div>
+        </div>
+
+        <p style="color: var(--text-tertiary); font-size: 0.8125rem; margin-top: var(--space-4); text-align: center;">
+          Bei Widerspruch des Patienten: einfach kein F9 drücken — die Dokumentation erfolgt manuell.
+        </p>
+      </div>
+
+      <!-- Step 6: DSGVO-DSE (Datenschutzerklärung-Einfügung) -->
+      <div class="wizard-step" data-step="6">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2234,15 +2305,15 @@ REIHENFOLGE
               <path d="M9 12l2 2 4-4"/>
             </svg>
           </div>
-          <h2>Datenschutz (DSGVO)</h2>
-          <p>Kurzer Hinweis zur datenschutzkonformen Nutzung von DentDoc.</p>
+          <h2>Datenschutzerklärung</h2>
+          <p>Folgenden Abschnitt fügen Sie in Ihre bestehende Praxis-Datenschutzerklärung ein.</p>
         </div>
 
         <div class="wizard-info" style="background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3);">
           <svg viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          <p style="color: var(--text-primary);">Ergänzen Sie Ihre Praxis-Datenschutzerklärung um folgenden Hinweis und stellen Sie sicher, dass Patienten die aktualisierte Erklärung unterschrieben haben, bevor Sie aufnehmen.</p>
+          <p style="color: var(--text-primary);">Fügen Sie diesen Abschnitt in den Datenschutz-Reiter Ihrer Praxis-Webseite oder Patienten-DSE ein — idealerweise unter „Verarbeitung im Rahmen der Behandlung".</p>
         </div>
 
         <div class="wizard-card">
@@ -2255,30 +2326,51 @@ REIHENFOLGE
             <h3>Text für Ihre Datenschutzerklärung</h3>
           </div>
 
-          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-3); font-size: 0.8125rem; line-height: 1.7; color: var(--text-secondary);">
-            <p style="margin-bottom: var(--space-3);"><strong style="color: var(--text-primary);">KI-gestützte Behandlungsdokumentation (DentDoc)</strong></p>
-            <p style="margin-bottom: var(--space-3);">
-              Zur Erstellung der gesetzlich vorgeschriebenen Behandlungsdokumentation (§ 630f BGB) analysiert die DentDoc-Desktop-App das Behandlungsgespräch unmittelbar zur Texterstellung. <strong>Es findet keine Speicherung von Sprachaufnahmen statt</strong> — die Sprache wird transient verarbeitet und nicht aufgehoben. Die Verarbeitung erfolgt über DentDoc (Auftragsverarbeiter); für die Spracherkennung wird ein Unterauftragnehmer eingesetzt, der die Audiodaten ausschließlich zur unmittelbaren Transkription verarbeitet und anschließend löscht. Lokal verbleiben nur die erstellten Text-Dokumentationen, die nach den allgemeinen Aufbewahrungsfristen für Behandlungsunterlagen behandelt werden.
-            </p>
-            <p style="color: var(--text-tertiary); font-size: 0.75rem;">
-              Rechtsgrundlage: Art. 9 Abs. 2 lit. h DSGVO i.V.m. § 22 BDSG (Verarbeitung von Gesundheitsdaten durch ärztliches Personal); § 630f BGB (Pflicht zur Behandlungsdokumentation).
-            </p>
+          <div style="background: var(--bg-tertiary); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-3); font-size: 0.8125rem; line-height: 1.6; color: var(--text-secondary); max-height: 280px; overflow-y: auto;">
+            <p style="margin-bottom: var(--space-2);"><strong style="color: var(--text-primary);">KI-gestützte Behandlungsdokumentation mit DentDoc</strong></p>
+
+            <p style="margin-top: var(--space-3); margin-bottom: var(--space-1);"><strong style="color: var(--text-primary); font-size: 0.875rem;">Was passiert?</strong></p>
+            <p style="margin-bottom: var(--space-2);">Zur Unterstützung der Behandlungsdokumentation setzen wir die Software DentDoc ein. Dabei kann das Behandlungsgespräch technisch erfasst, transkribiert und in einen vorläufigen schriftlichen Dokumentationsvorschlag umgewandelt werden.</p>
+            <p style="margin-bottom: var(--space-2);">Der erzeugte Text wird anschließend vom behandelnden Arzt geprüft, ggf. korrigiert und in die Patientenakte übernommen. Die ärztliche Verantwortung für die Behandlungsdokumentation verbleibt jederzeit bei der Praxis. Es findet keine automatisierte Entscheidungsfindung im Sinne des Art. 22 DSGVO statt.</p>
+
+            <p style="margin-top: var(--space-3); margin-bottom: var(--space-1);"><strong style="color: var(--text-primary); font-size: 0.875rem;">Was wird gespeichert — und was nicht?</strong></p>
+            <p style="margin-bottom: var(--space-2);">Audioaufnahmen werden nicht dauerhaft gespeichert. Während der Verarbeitung können kurzzeitig technische Zwischendaten entstehen, die ausschließlich zur Erstellung der Dokumentation verwendet werden.</p>
+            <p style="margin-bottom: var(--space-2);">Die übermittelten Inhalte werden ausschließlich für die unmittelbare Erstellung der Dokumentation verarbeitet. Nach Abschluss der Verarbeitung werden die hierfür verwendeten Audio-, Transkript- und Zwischendaten nicht über die für die Erstellung erforderliche Zeit hinaus aufbewahrt; die Löschung wird automatisch veranlasst, soweit keine gesetzliche Pflicht zur weiteren Speicherung besteht.</p>
+            <p style="margin-bottom: var(--space-2);">Die erzeugte schriftliche Dokumentation verbleibt in der Praxis und wird in Ihre Behandlungsakte übernommen — wie jede andere Behandlungsdokumentation auch.</p>
+
+            <p style="margin-top: var(--space-3); margin-bottom: var(--space-1);"><strong style="color: var(--text-primary); font-size: 0.875rem;">Rechtsgrundlagen</strong></p>
+            <p style="margin-bottom: var(--space-2);">Die Verarbeitung erfolgt zur Durchführung der Behandlung, zur ordnungsgemäßen Behandlungsdokumentation und zur Erfüllung gesetzlicher Dokumentationspflichten. Rechtsgrundlagen sind insbesondere Art. 9 Abs. 2 lit. h DSGVO i. V. m. § 22 BDSG sowie § 630f BGB i. V. m. Art. 6 Abs. 1 lit. c DSGVO. Eine darüber hinausgehende Einwilligung ist hierfür nicht erforderlich.</p>
+
+            <p style="margin-top: var(--space-3); margin-bottom: var(--space-1);"><strong style="color: var(--text-primary); font-size: 0.875rem;">Wer ist beteiligt?</strong></p>
+            <p style="margin-bottom: var(--space-1);">DentDoc — Richard Petrasch (Einzelunternehmer), Railway, AssemblyAI (ausschließlich EU-Endpunkt; Löschung nach Verarbeitung über Schnittstelle veranlasst), OpenAI Ireland Ltd. (kein Modelltraining), Supabase (keine Patientendaten).</p>
+            <p style="margin-bottom: var(--space-2);">Soweit personenbezogene Daten außerhalb des EWR verarbeitet werden, erfolgt dies auf Grundlage geeigneter Garantien gemäß Art. 46 DSGVO (EU-Standardvertragsklauseln). Mit den eingesetzten Dienstleistern bestehen — soweit datenschutzrechtlich erforderlich — Verträge zur Auftragsverarbeitung nach Art. 28 DSGVO.</p>
+
+            <p style="margin-top: var(--space-3); margin-bottom: var(--space-1);"><strong style="color: var(--text-primary); font-size: 0.875rem;">Speicherdauer</strong></p>
+            <p style="margin-bottom: var(--space-2);">Audio-, Transkript- und Zwischendaten bei DentDoc und den eingesetzten Dienstleistern werden nicht über die für die Erstellung der Dokumentation erforderliche Zeit hinaus aufbewahrt. Die schriftliche Behandlungsdokumentation in der Patientenakte unterliegt den gesetzlichen Aufbewahrungspflichten (i. d. R. 10 Jahre, § 630f Abs. 3 BGB).</p>
+
+            <p style="margin-top: var(--space-3); margin-bottom: var(--space-1);"><strong style="color: var(--text-primary); font-size: 0.875rem;">Manuelle Dokumentation auf Wunsch</strong></p>
+            <p style="margin-bottom: 0;">Wenn Sie nicht möchten, dass DentDoc verwendet wird, sprechen Sie uns bitte an. Die Dokumentation erfolgt dann manuell. Hierdurch entstehen Ihnen keine Nachteile. Ihre weiteren Datenschutzrechte finden Sie im allgemeinen Teil dieser Datenschutzerklärung.</p>
           </div>
+
           <div style="text-align: center; margin-top: var(--space-4);">
             <button type="button" class="wizard-btn wizard-btn-secondary" id="wizardCopyDsgvoBtn">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
               </svg>
-              Text kopieren
+              Kompletten Text kopieren
             </button>
             <span id="wizardDsgvoCopyStatus" style="display: none; margin-left: var(--space-2); color: #22c55e; font-size: 0.8125rem;">Kopiert!</span>
           </div>
         </div>
+
+        <p style="color: var(--text-tertiary); font-size: 0.8125rem; margin-top: var(--space-4); text-align: center;">
+          Bei Unsicherheit: Datenschutzbeauftragten oder Fachanwalt für Medizinrecht konsultieren.
+        </p>
       </div>
 
-      <!-- Step 6: Dashboard & Tray Info -->
-      <div class="wizard-step" data-step="6">
+      <!-- Step 7: Dashboard & Tray Info -->
+      <div class="wizard-step" data-step="7">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2366,8 +2458,8 @@ REIHENFOLGE
 
       </div>
 
-      <!-- Step 7: Trial Info (only shown for free_trial users) -->
-      <div class="wizard-step" data-step="7" id="wizardStepTrial">
+      <!-- Step 8: Trial Info (only shown for free_trial users) -->
+      <div class="wizard-step" data-step="8" id="wizardStepTrial">
         <div class="wizard-step-header">
           <div class="wizard-step-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2427,8 +2519,8 @@ REIHENFOLGE
         </div>
       </div>
 
-      <!-- Step 8: Complete -->
-      <div class="wizard-step" data-step="8">
+      <!-- Step 9: Complete -->
+      <div class="wizard-step" data-step="9">
         <div class="wizard-step-header">
           <div class="wizard-completion-animation">
             <div class="wizard-checkmark">

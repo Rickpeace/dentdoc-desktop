@@ -14,7 +14,7 @@ const wizardAudioUtils = require('./scripts/audio-utils');
 class SetupWizard {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 9; // 0-8 (Welcome, Mic, Shortcut, Storage, Path, DSGVO, Dashboard, Trial, Done)
+    this.totalSteps = 10; // 0-9 (Welcome, Mic, Shortcut, Storage, Path, Patient-Info, DSGVO-DSE, Dashboard, Trial, Done)
     this.isTrialUser = false;
     this.settings = {
       microphoneId: null, // Windows device name for FFmpeg
@@ -139,9 +139,63 @@ class SetupWizard {
       ipcRenderer.invoke('open-external-url', baseUrl + '/dashboard/subscription');
     });
 
-    // DSGVO copy button
+    // Anamnese-Hinweis copy button (Step 5)
+    document.getElementById('wizardCopyAnamneseBtn')?.addEventListener('click', () => {
+      const text = 'Wir nutzen eine KI-gestützte Dokumentationsassistenz. Das Behandlungsgespräch wird in Text umgewandelt; Audio wird nicht dauerhaft gespeichert. Sie können dem jederzeit widersprechen.';
+      navigator.clipboard.writeText(text);
+      const status = document.getElementById('wizardAnamneseCopyStatus');
+      if (status) {
+        status.style.display = 'inline';
+        setTimeout(() => { status.style.display = 'none'; }, 2000);
+      }
+    });
+
+    // DSGVO-Einfügung copy button (Step 6) — finaler DSE-Volltext
     document.getElementById('wizardCopyDsgvoBtn')?.addEventListener('click', () => {
-      const text = 'Sprachaufzeichnung / KI-Dokumentation (DentDoc)\n\nZur Unterstützung der Behandlungsdokumentation können über die DentDoc-Desktop-App Sprachaufzeichnungen erstellt und transkribiert werden. Die verschlüsselte Verarbeitung erfolgt über DentDoc (Auftragsverarbeiter); hierfür können Unterauftragnehmer zur Transkription eingesetzt werden. Audiodaten werden beim Transkriptionsdienst nur für die Verarbeitung vorgehalten und anschließend gelöscht; lokal in der Praxis gespeicherte Audio- und Transkriptionsdaten werden spätestens nach 30 Tagen gelöscht.\n\nRechtsgrundlage: Art. 6 Abs. 1 lit. b, Art. 9 Abs. 2 lit. h DSGVO.';
+      const text = [
+        'KI-gestützte Behandlungsdokumentation mit DentDoc',
+        '',
+        'Was passiert?',
+        'Zur Unterstützung der Behandlungsdokumentation setzen wir die Software DentDoc ein. Dabei kann das Behandlungsgespräch technisch erfasst, transkribiert und in einen vorläufigen schriftlichen Dokumentationsvorschlag umgewandelt werden.',
+        '',
+        'Der erzeugte Text wird anschließend vom behandelnden Arzt geprüft, ggf. korrigiert und in die Patientenakte übernommen. Die ärztliche Verantwortung für die Behandlungsdokumentation verbleibt jederzeit bei der Praxis. Es findet keine automatisierte Entscheidungsfindung im Sinne des Art. 22 DSGVO statt.',
+        '',
+        'Was wird gespeichert — und was nicht?',
+        'Audioaufnahmen werden nicht dauerhaft gespeichert. Während der Verarbeitung können kurzzeitig technische Zwischendaten entstehen, die ausschließlich zur Erstellung der Dokumentation verwendet werden.',
+        '',
+        'Die übermittelten Inhalte werden ausschließlich für die unmittelbare Erstellung der Dokumentation verarbeitet. Nach Abschluss der Verarbeitung werden die hierfür verwendeten Audio-, Transkript- und Zwischendaten nicht über die für die Erstellung erforderliche Zeit hinaus aufbewahrt; die Löschung wird automatisch veranlasst, soweit keine gesetzliche Pflicht zur weiteren Speicherung besteht.',
+        '',
+        'Die erzeugte schriftliche Dokumentation verbleibt in der Praxis und wird in Ihre Behandlungsakte übernommen — wie jede andere Behandlungsdokumentation auch.',
+        '',
+        'Rechtsgrundlagen',
+        'Die Verarbeitung erfolgt zur Durchführung der Behandlung, zur ordnungsgemäßen Behandlungsdokumentation und zur Erfüllung gesetzlicher Dokumentationspflichten.',
+        '',
+        'Rechtsgrundlagen sind insbesondere:',
+        '- Art. 9 Abs. 2 lit. h DSGVO i. V. m. § 22 BDSG — Verarbeitung von Gesundheitsdaten im Rahmen der medizinischen Behandlung,',
+        '- § 630f BGB i. V. m. Art. 6 Abs. 1 lit. c DSGVO — gesetzliche Behandlungsdokumentation.',
+        '',
+        'Eine darüber hinausgehende Einwilligung ist hierfür nicht erforderlich.',
+        '',
+        'Wer ist beteiligt?',
+        'Für die technische Verarbeitung können folgende Auftragsverarbeiter bzw. Unterauftragsverarbeiter eingesetzt werden:',
+        '',
+        '- DentDoc — Richard Petrasch (Einzelunternehmer) — Bereitstellung der Software und technische Verarbeitung zur Erstellung der Behandlungsdokumentation.',
+        '- Railway — Technische Infrastruktur / Übertragungsproxy für die Weiterleitung der Daten zur Transkription.',
+        '- AssemblyAI — Spracherkennung und Transkription. Es wird ausschließlich der EU-Endpunkt verwendet; Audio- und Transkriptionsdaten verbleiben dadurch innerhalb der EU. Nach Abschluss der Verarbeitung wird die Löschung der Transkription einschließlich der übermittelten Audiodaten über die Schnittstelle veranlasst.',
+        '- OpenAI Ireland Ltd. — KI-gestützte Texterstellung und Strukturierung der Dokumentation auf Grundlage eines Auftragsverarbeitungsvertrags. Die übermittelten Daten werden vertraglich nicht zum Training oder zur Verbesserung der Modelle genutzt.',
+        '- Supabase — Verwaltung von Praxis-Konten, Abrechnungsdaten und Stimmprofilen der Praxis-Mitarbeiter (keine Patientendaten).',
+        '',
+        'Soweit personenbezogene Daten außerhalb des EWR verarbeitet werden oder ein Zugriff aus Drittländern nicht ausgeschlossen werden kann, erfolgt dies auf Grundlage geeigneter Garantien gemäß Art. 46 DSGVO, insbesondere EU-Standardvertragsklauseln. Mit den eingesetzten Dienstleistern bestehen — soweit datenschutzrechtlich erforderlich — Verträge zur Auftragsverarbeitung nach Art. 28 DSGVO.',
+        '',
+        'Speicherdauer',
+        '- Audio-, Transkript- und Zwischendaten bei DentDoc und den eingesetzten technischen Dienstleistern: keine Aufbewahrung über die für die Erstellung der Dokumentation erforderliche Zeit hinaus; die Löschung wird automatisch veranlasst.',
+        '- Schriftliche Behandlungsdokumentation in der Patientenakte: gemäß gesetzlichen Aufbewahrungspflichten. Behandlungsakten sind grundsätzlich für zehn Jahre nach Abschluss der Behandlung aufzubewahren (§ 630f Abs. 3 BGB), soweit keine längeren gesetzlichen Fristen gelten.',
+        '',
+        'Manuelle Dokumentation auf Wunsch',
+        'Wenn Sie nicht möchten, dass DentDoc zur Unterstützung der Dokumentation Ihres Termins verwendet wird, sprechen Sie uns bitte an. Die Dokumentation erfolgt dann manuell. Hierdurch entstehen Ihnen keine Nachteile.',
+        '',
+        'Ihre weiteren Datenschutzrechte — insbesondere Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung sowie Beschwerde bei einer Datenschutzaufsichtsbehörde — finden Sie im allgemeinen Teil dieser Datenschutzerklärung.'
+      ].join('\n');
       navigator.clipboard.writeText(text);
       const status = document.getElementById('wizardDsgvoCopyStatus');
       if (status) {
@@ -1730,8 +1784,8 @@ class SetupWizard {
     if (step === 4 && !this.settings.autoExport) {
       return true;
     }
-    // Skip Trial step (step 7) if user is not on free trial
-    if (step === 7 && !this.isTrialUser) {
+    // Skip Trial step (step 8) if user is not on free trial
+    if (step === 8 && !this.isTrialUser) {
       return true;
     }
     return false;
