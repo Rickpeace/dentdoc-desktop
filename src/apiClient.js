@@ -295,7 +295,11 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
                   reject(new Error(json.error || json.message || `Upload failed with status ${res.statusCode}`));
                 }
               } catch (e) {
-                reject(new Error(`Ungültige Antwort vom Upload-Proxy: ${data}`));
+                // Kein JSON — typischerweise die HTML-Fehlerseite der Plattform,
+                // wenn der Upload-Proxy gestoppt ist oder abgestürzt ist.
+                // Body kürzen, sonst landet eine ganze HTML-Seite im Fehlertext.
+                const body = String(data).replace(/\s+/g, ' ').trim().slice(0, 200);
+                reject(new Error(`Upload-Proxy antwortete mit HTTP ${res.statusCode} (kein JSON): ${body}`));
               }
             });
           });
@@ -448,7 +452,12 @@ async function uploadAudio(audioFilePath, token, onProgress = null) {
       throw new Error('Upload nach 3 Versuchen fehlgeschlagen. Server nicht erreichbar.');
     }
 
-    throw new Error('Audio-Upload fehlgeschlagen. Bitte versuchen Sie es erneut.');
+    // Letzter Fallback: die echte Meldung mitgeben, statt sie zu verschlucken.
+    // Ohne sie war ein gestoppter Upload-Proxy vom Client aus nicht von einem
+    // Token-, Größen- oder Kontingentproblem zu unterscheiden — alle vier Fälle
+    // sahen im Log identisch aus ("Audio-Upload fehlgeschlagen").
+    console.error('  [Upload] Unbehandelter Fehler:', error.code || '(kein Code)', '-', error.message);
+    throw new Error(`Audio-Upload fehlgeschlagen: ${error.message}`);
   }
 }
 
