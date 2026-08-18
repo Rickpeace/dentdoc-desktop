@@ -45,7 +45,12 @@
     "files": [
       "**/*",
       "models/**/*",
-      "!.env.local"
+      "!.env.local",
+      "!.env.example",
+      "!docs/**",
+      "!railway-audio-relay/**",
+      "!railway-upload-proxy/**",
+      "!.github/**"
     ],
     "asarUnpack": [
       "models/**/*",

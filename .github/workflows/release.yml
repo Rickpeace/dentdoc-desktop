@@ -1,0 +1,89 @@
+name: Release
+
+# Baut den Windows-Installer auf einem echten Windows-Runner und laedt ihn
+# samt latest.yml als ENTWURF-Release zu GitHub hoch.
+#
+# Ausloesen:  npm version patch  &&  git push --follow-tags
+# Danach:     Release auf GitHub oeffnen und "Publish release" klicken.
+#             Erst dann sehen die Praxen das Update (electron-updater
+#             ignoriert Entwuerfe). Die Freigabe bleibt damit bewusst
+#             eine menschliche Entscheidung.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Schuetzt vor genau dem Fehler, der v1.9.1 vier Monate lang
+      # eingefroren hat: Tag erhoeht, package.json vergessen. Dann steht in
+      # latest.yml die alte Version und kein Client aktualisiert je.
+      - name: Tag und package.json abgleichen
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($pkg -ne $tag) {
+            Write-Error "package.json ist $pkg, der Tag ist $tag. Bitte 'npm version' statt manuellem Tag benutzen."
+            exit 1
+          }
+          Write-Host "Version stimmt ueberein: $pkg"
+
+      # Ohne diese Datei liest apiClient.js einen leeren UPLOAD_PROXY_TOKEN
+      # und jeder Upload scheitert mit "Token nicht konfiguriert".
+      # .env ist gitignored, existiert also nur lokal — im CI muss sie aus
+      # Secrets entstehen.
+      - name: .env aus Secrets erzeugen
+        shell: pwsh
+        run: |
+          if (-not "${{ secrets.UPLOAD_PROXY_TOKEN }}") {
+            Write-Error "Secret UPLOAD_PROXY_TOKEN fehlt. Ohne ihn waere der Installer beim Upload funktionsunfaehig."
+            exit 1
+          }
+          $lines = @(
+            "API_URL=${{ secrets.API_URL }}",
+            "UPLOAD_PROXY_URL=${{ secrets.UPLOAD_PROXY_URL }}",
+            "UPLOAD_PROXY_TOKEN=${{ secrets.UPLOAD_PROXY_TOKEN }}",
+            "AUDIO_RELAY_URL=${{ secrets.AUDIO_RELAY_URL }}"
+          )
+          # Leere Secrets weglassen — der Code hat dafuer Defaults,
+          # eine leere Zuweisung wuerde diese Defaults ueberschreiben.
+          $lines | Where-Object { $_ -notmatch '=$' } | Set-Content .env -Encoding utf8
+          Write-Host "Geschriebene Schluessel:"
+          (Get-Content .env) | ForEach-Object { ($_ -split '=')[0] }
+
+      # Kein package-lock.json im Repo (per .gitignore), daher npm install.
+      - name: Abhaengigkeiten installieren
+        run: npm install --no-audit --no-fund
+
+      - name: Installer bauen und als Entwurf hochladen
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Zweitkopie zum Selbsttesten, falls der Entwurf noch nicht freigegeben ist.
+      - name: Installer als Artefakt sichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: DentDoc-Setup
+          path: |
+            dist/DentDoc-Setup.exe
+            dist/latest.yml
+          retention-days: 14
